@@ -1,5 +1,5 @@
 // Chess Complex — app shell: menus, loadout, armory, sessions, in-game HUD, progression.
-import { PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS } from './data.js';
+import { PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS } from './data.js';
 import { legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM } from './engine.js';
 import { Renderer } from './render.js';
 import { pieceIcon, drawPiece } from './pieces.js';
@@ -22,7 +22,7 @@ function defaultProfile() {
     name: 'Pawn' + Math.floor(100 + Math.random() * 900),
     build: { preset: 'bruiser', pts: { ...p.pts }, passive: p.passive, equips: { pawn: 'sprint', knight: 'trample', bishop: 'sanctuary', rook: 'rampart', queen: 'execute' } },
     skin: 'ivory', owned: [...DEFAULT_SKINS], marks: 100, played: [], wins: 0, games: 0, kills: 0,
-    board: 'hall', ownedBoards: [...DEFAULT_BOARDS], finisher: 'shatter', ownedFinishers: [...DEFAULT_FINISHERS], xp: 0, level: 1,
+    board: 'hall', ownedBoards: [...DEFAULT_BOARDS], finisher: 'shatter', ownedFinishers: [...DEFAULT_FINISHERS], xp: 0, level: 1, botLevel: 'normal', quests: null, bestAttune: 0, crowns: 0,
   };
 }
 let profile = defaultProfile();
@@ -30,10 +30,46 @@ try { const raw = localStorage.getItem(PKEY); if (raw) { const d = defaultProfil
 const save = () => { try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch {} };
 const ptsUsed = () => Object.values(profile.build.pts).reduce((a, b) => a + b, 0);
 
+// ---------- daily quests ----------
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+function dailyQuests() {
+  const t = today();
+  if (!profile.quests || profile.quests.date !== t) {
+    let h = 0; for (const c of t) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const keys = Object.keys(QUESTS); const pick = [];
+    while (pick.length < 3) { h = (h * 1103515245 + 12345) >>> 0; const k = keys[h % keys.length]; if (!pick.includes(k)) pick.push(k); }
+    profile.quests = { date: t, list: pick.map((id) => ({ id, prog: 0, done: false })) };
+    save();
+  }
+  return profile.quests.list;
+}
+function applyQuests(ms) {
+  const done = [];
+  for (const q of dailyQuests()) {
+    if (q.done) continue;
+    const Q = QUESTS[q.id];
+    const val = { win: ms.win ? 1 : 0, kills: ms.kills, rook: ms.rook ? 1 : 0, queen: ms.queen ? 1 : 0, crown: ms.crown ? 1 : 0, shards: ms.shards, top3: ms.place <= 3 ? 1 : 0, damage: ms.dmg, ults: ms.ults, hollows: ms.hollows, attune: Math.floor(ms.shards / 5) }[q.id] || 0;
+    q.prog = Q.best ? Math.max(q.prog, val) : q.prog + val;
+    if (q.prog >= Q.goal) { q.prog = Q.goal; q.done = true; profile.marks += Q.reward; done.push(Q); }
+  }
+  save();
+  return done;
+}
+function renderQuests() {
+  renderProfile();
+  const list = dailyQuests();
+  $('#quest-list').innerHTML = list.map((q) => { const Q = QUESTS[q.id]; return `<div class="quest ${q.done ? 'done' : ''}"><b>${Q.text}</b><div class="rw"><i class="mark-ico"></i>${Q.reward}</div><div class="qbar"><i style="width:${(q.prog / Q.goal) * 100}%"></i></div><span class="qp">${q.prog} / ${Q.goal}</span></div>`; }).join('');
+  const now = new Date(), mid = new Date(now); mid.setHours(24, 0, 0, 0);
+  const hrs = Math.floor((mid - now) / 3600000), mins = Math.floor(((mid - now) % 3600000) / 60000);
+  $('#q-reset').textContent = `New quests in ${hrs}h ${mins}m`;
+  $('#career').innerHTML = `<div><b>${profile.games}</b><span>Games</span></div><div><b>${profile.wins}</b><span>Wins</span></div><div><b>${profile.kills}</b><span>KOs</span></div><div><b>${profile.crowns || 0}</b><span>Crowns</span></div>`;
+}
+
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
 function uiFlash() { const f = $('#ui-flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
 function renderProfile() {
-  $('#marks-title').textContent = profile.marks; $('#marks-armory').textContent = profile.marks;
+  $('#marks-title').textContent = profile.marks; $('#marks-armory').textContent = profile.marks; $('#marks-quests').textContent = profile.marks;
+  $('#q-badge').textContent = dailyQuests().filter((q) => !q.done).length || '';
   $('#t-lvl').textContent = profile.level; $('#t-title').textContent = titleFor(profile.level);
   $('#t-xp').style.width = Math.min(100, (profile.xp / xpForLevel(profile.level)) * 100) + '%';
 }
@@ -100,6 +136,7 @@ function go(name) {
   if (name === 'solo') renderSoloMini();
   if (name === 'host') startHostLobby();
   if (name === 'title') renderProfile();
+  if (name === 'quests') renderQuests();
   if (name !== 'game') music.set(0, 'menu');
   armoryPreviews.active = name === 'armory';
 }
@@ -233,6 +270,7 @@ function onArmoryClick(e) {
 
 function renderSoloMini() {
   const b = profile.build;
+  $$('#seg-diff button').forEach((x) => x.classList.toggle('on', x.dataset.diff === profile.botLevel));
   $('#solo-loadout').innerHTML = `<img src="${pieceIcon('pawn', profile.skin, '#d6b05c', 64)}" alt=""><div class="lm-t"><b>${esc(profile.name)}</b><span>${b.preset ? PRESETS[b.preset].name : 'Custom'} build - ${PASSIVES[b.passive].name} - ${SKINS[profile.skin].name} - ${FINISHERS[profile.finisher].name}</span></div>`;
 }
 
@@ -243,7 +281,7 @@ function botPlayer(i, used) {
   const keys = Object.keys(PRESETS), p = PRESETS[keys[Math.floor(Math.random() * keys.length)]];
   const equips = {}; for (const pc of PIECE_ORDER) { const list = PIECES[pc].equips; equips[pc] = list[Math.floor(Math.random() * list.length)]; }
   const skins = Object.keys(SKINS), fins = Object.keys(FINISHERS);
-  return { pid: 'bot' + i + Math.random().toString(36).slice(2, 6), name, isBot: true, skin: skins[Math.floor(Math.random() * skins.length)], finisher: fins[Math.floor(Math.random() * fins.length)], build: { pts: { ...p.pts }, passive: p.passive, equips } };
+  return { pid: 'bot' + i + Math.random().toString(36).slice(2, 6), name, isBot: true, botLevel: profile.botLevel || 'normal', skin: skins[Math.floor(Math.random() * skins.length)], finisher: fins[Math.floor(Math.random() * fins.length)], build: { pts: { ...p.pts }, passive: p.passive, equips } };
 }
 const me = () => ({ pid: 'me', name: profile.name || 'Player', skin: profile.skin, finisher: profile.finisher, build: { pts: { ...profile.build.pts }, passive: profile.build.passive, equips: { ...profile.build.equips } } });
 
@@ -423,9 +461,11 @@ const game = {
       session.send({ type: 'promote', to: b.dataset.to }); $('#m-promote').classList.add('hidden');
     });
     $('#emote-menu').innerHTML = Object.entries(EMOTES).map(([k, t]) => `<button data-emote="${k}">${t}</button>`).join('');
+    $('#ult-btn').addEventListener('click', () => this.onAction('ult'));
     $('#emote-menu').addEventListener('click', (e) => { const b = e.target.closest('[data-emote]'); if (!b || !session || !session.emote) return; session.emote(b.dataset.emote); $('#emote-menu').classList.add('hidden'); sfx.tap(); });
   },
   enter() {
+    this.ms = { kills: 0, hollows: 0, ults: 0, crown: false, rook: false, queen: false };
     this.s = null; this.mode = 'move'; this.preview = null; this.lastTurnNo = -1; this.resultsShown = false; this.lastHp = null; this.lastAlive = 99;
     this.r.reset(); this.r.setTheme(profile.board); this.r.shakeOn = settings.shake; this.r.resize();
     $$('#s-game .modal').forEach((m) => m.classList.add('hidden'));
@@ -480,16 +520,23 @@ const game = {
       if (e.e === 'turn' && e.id === myId) setTimeout(() => { this.banner('Your Turn', '', ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
       if (e.e === 'storm') setTimeout(() => e.phase === 'crack' ? this.banner('The Storm Gathers', 'The outer ring collapses next round', 'red') : this.banner('Collapse', s.storm.ring >= STORM.maxRing ? 'Sudden death - everyone burns' : 'Stay inside the ring', 'red'), 200);
       if (e.e === 'crownSpawn') this.banner('The Crown', 'Has appeared at the centre', '');
+      if (e.e === 'world' && !(e.kind === 'meteor' && e.phase === 'strike')) { const W = WORLD_EVENTS[e.kind]; setTimeout(() => this.banner(W.name, W.desc, e.kind === 'meteor' || e.kind === 'bloodMoon' ? 'red' : 'cyan'), 300); }
+      if (e.e === 'ability' && e.id === myId && e.slot === 'ult') this.ms.ults++;
+      if (e.e === 'crowned' && e.id === myId) this.ms.crown = true;
+      if (e.e === 'promote' && e.id === myId && e.piece === 'rook') this.ms.rook = true;
+      if (e.e === 'promote' && e.id === myId && e.piece === 'queen') this.ms.queen = true;
+      if (e.e === 'attune' && e.id === myId) { const p = $('#h-attune'); p.classList.remove('bump'); void p.offsetWidth; p.classList.add('bump'); }
+      if (e.e === 'death' && e.by === myId) { const v = unitById(s, e.id); if (v && v.kind === 'hollow') this.ms.hollows++; else if (v) this.ms.kills++; }
       if (e.e === 'crowned') { const u = unitById(s, e.id); this.banner(u.id === myId ? 'You Are King' : 'A New King', u.id === myId ? 'Everyone is coming for you' : `${u.name} wears the Crown`, ''); }
       if (e.e === 'promote' && e.id === myId) setTimeout(() => this.banner(e.type === 'evolve' ? PIECES[e.piece].name : 'Honed', e.type === 'evolve' ? 'Evolution complete' : `${PIECES[e.piece].name} level ${e.hone}`, 'cyan'), 300);
       if (e.e === 'death') {
         const v = unitById(s, e.id); if (!v || v.kind !== 'player') continue;
         const k = e.by ? unitById(s, e.by) : null;
         const ico = (u) => `<img src="${pieceIcon(u.piece, u.skin, null, 18)}" alt="">`;
-        setTimeout(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">fell to the storm</span>`), 400);
+        setTimeout(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : 'fell to the storm'}</span>`), 400);
         if (e.id === myId && !s.over) { this.killedBy = k; setTimeout(() => this.showDead(), 1700); }
       }
-      if (e.e === 'over') setTimeout(() => this.showResults(), 2600);
+      if (e.e === 'over') setTimeout(() => this.showResults(), 4800);
     }
   },
   onStreak(e) {
@@ -574,6 +621,17 @@ const game = {
     if (shEl.textContent !== String(u.shards)) { const prev = +shEl.textContent || 0; if (u.shards > prev) setTimeout(() => countUp(shEl, prev, u.shards, 500), 500); else shEl.textContent = u.shards; }
     $('#h-shardprog').style.width = (minCost ? Math.min(1, u.shards / minCost) * 100 : 100) + '%';
     const nextEvo = popts.find((p) => p.type === 'evolve');
+    $('#h-attune').textContent = `ATT ${u.attune || 0}`;
+    const ub = $('#ult-btn'), up = Math.min(100, Math.round(u.ult || 0));
+    $('#ult-fg').style.strokeDashoffset = 176 * (1 - up / 100);
+    $('#ult-pct').textContent = up >= 100 ? ABILITIES[slotAbility(u, 'ult')].name.split(' ')[0] : up + '%';
+    ub.classList.toggle('ready', up >= 100 && u.alive);
+    ub.classList.toggle('on', this.myTurn() && this.mode === 'ult');
+    ub.classList.toggle('hidden-ult', !u.alive);
+    const chip = $('#event-chip');
+    if (s.meteors && s.meteors.length) { chip.textContent = 'Meteors incoming'; chip.className = 'event-chip red'; }
+    else if (s.bloodMoon) { chip.textContent = 'Blood Moon - damage +30%'; chip.className = 'event-chip red'; }
+    else chip.className = 'event-chip hidden';
     $('#h-next').textContent = u.piece === 'king' ? 'Crowned' : nextEvo ? `${popts.filter((p) => p.type === 'evolve').map((p) => PIECES[p.to].name).join(' / ')} ${nextEvo.cost}` : popts.length ? `Hone ${minCost}` : 'Max';
     const my = this.myTurn();
     $('#h-actions').classList.toggle('wait', !my);
@@ -668,7 +726,7 @@ const game = {
     clearTimeout(this.inspT);
     if (!v) { box.classList.add('hidden'); return; }
     const st = stats(v);
-    const extra = v.kind === 'hollow' ? 'Guards a shard cache. Drops 2 shards.' : `${PASSIVES[v.passive].name} - ${v.shards} shard${v.shards === 1 ? '' : 's'} - ${v.kills} KO`;
+    const extra = v.kind === 'hollow' ? 'Guards a shard cache. Drops 2 shards.' : `${PASSIVES[v.passive].name} - ${v.shards} shard${v.shards === 1 ? '' : 's'} - Attune ${v.attune || 0} - Ult ${Math.round(v.ult || 0)}% - ${v.kills} KO`;
     box.innerHTML = `<img src="${pieceIcon(v.piece, v.skin, v.color, 46)}" alt=""><div><b style="color:${v.kind === 'player' ? v.color : '#bbb'}">${esc(v.name)}${v.piece === 'king' ? ' - King' : v.kind === 'player' ? ' - ' + PIECES[v.piece].name : ''}</b><span>HP ${v.hp}/${st.maxHp} - ATK ${st.atk} - DEF ${st.def} - SPD ${st.spd}</span><span>${extra}</span></div>`;
     box.classList.remove('hidden'); sfx.tap();
     this.inspT = setTimeout(() => box.classList.add('hidden'), 3200);
@@ -688,7 +746,7 @@ const game = {
   showDead() {
     const u = this.me; if (!u || this.resultsShown) return;
     $('#dead-place').textContent = '#' + u.place;
-    $('#dead-by').textContent = this.killedBy ? `Taken by ${this.killedBy.name}` : 'The storm took you';
+    $('#dead-by').textContent = this.killedBy ? `Taken by ${this.killedBy.name}` : 'The board claimed you';
     $('#m-dead').classList.remove('hidden');
     sfx.lose();
   },
@@ -710,7 +768,10 @@ const game = {
     if (!profile.played.includes(matchKey)) {
       earned = 20 + u.kills * 15 + Math.max(0, total - place) * 8 + (win ? 60 : 0);
       xpGain = 40 + u.kills * 30 + Math.max(0, total - place) * 15 + Math.round((u.dmgDealt || 0) / 6) + (win ? 100 : 0);
-      profile.marks += earned; profile.games++; profile.kills += u.kills; if (win) profile.wins++;
+      profile.marks += earned; profile.games++; profile.kills += u.kills; if (win) profile.wins++; if (this.ms.crown) profile.crowns = (profile.crowns || 0) + 1;
+      profile.bestAttune = Math.max(profile.bestAttune || 0, u.attune || 0);
+      const qd = applyQuests({ ...this.ms, kills: this.ms.kills, shards: u.attune || 0, dmg: u.dmgDealt || 0, place, win });
+      this.questsDone = qd; earned += qd.reduce((a, q) => a + q.reward, 0);
       profile.xp += xpGain;
       while (profile.xp >= xpForLevel(profile.level)) { profile.xp -= xpForLevel(profile.level); profile.level++; levels++; profile.marks += 50; earned += 50; }
       profile.played = [...profile.played.slice(-30), matchKey]; save();
@@ -726,6 +787,11 @@ const game = {
         setTimeout(() => { bar.style.transition = 'none'; bar.style.width = '0%'; $('#r-lvl').textContent = profile.level; void bar.offsetWidth; bar.style.transition = ''; bar.style.width = (profile.xp / xpForLevel(profile.level)) * 100 + '%'; $('#r-levelup').textContent = `Level ${profile.level} - ${titleFor(profile.level)}`; $('#r-levelup').classList.remove('hidden'); sfx.levelup(); uiFlash(); haptic([30, 50, 30, 50, 90]); }, 1250);
       } else bar.style.width = (profile.xp / xpForLevel(profile.level)) * 100 + '%';
     }, 700);
+    $('#r-quests').innerHTML = (this.questsDone || []).map((q, i) => `<div style="animation-delay:${1 + i * 0.15}s"><span>Quest complete: ${q.text}</span><b>+${q.reward}</b></div>`).join('');
+    if (this.questsDone && this.questsDone.length) setTimeout(() => sfx.quest(), 1100);
+    this.questsDone = [];
+    const winner = s.units.find((v) => v.id === s.winner);
+    if (winner && !win) $('#r-place').innerHTML = `Placed ${place} of ${total} <div class="r-winner"><img src="${pieceIcon(winner.piece, winner.skin, winner.color, 54)}" alt=""><div><span>WINNER</span><b style="color:${winner.color}">${esc(winner.name)}</b></div></div>`;
     $('#r-marks').innerHTML = earned ? `<i class="mark-ico"></i>+<span id="rm">0</span> Marks` : '';
     if (earned) setTimeout(() => countUp($('#rm'), 0, earned, 1000, true), 900);
     const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 0 : a.place) - (b.alive ? 0 : b.place));
@@ -862,6 +928,8 @@ $('#in-code').addEventListener('input', (e) => { e.target.value = e.target.value
 $('#in-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinGame(); });
 document.addEventListener('pointerover', (e) => { if (e.pointerType === 'mouse' && e.target.closest && e.target.closest('.btn:not(:disabled), .tab, .preset, .choice')) { const el = e.target.closest('.btn, .tab, .preset, .choice'); if (el !== document.__lastHover) { document.__lastHover = el; sfx.hover(); } } });
 
+$('#seg-diff').addEventListener('click', (e) => { const b = e.target.closest('[data-diff]'); if (!b) return; profile.botLevel = b.dataset.diff; save(); sfx.select(); renderSoloMini(); });
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 addEventListener('pagehide', () => endSession());
 bgInit();
 game.init();

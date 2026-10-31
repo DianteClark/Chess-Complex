@@ -107,7 +107,8 @@ export function drawPiece(ctx, piece, skinId, opts = {}) {
     ctx.restore();
   } else {
     const g = ctx.createLinearGradient(-0.35, -1.1, 0.35, 0);
-    g.addColorStop(0, sk.body[0]); g.addColorStop(1, sk.body[1]);
+    if (sk.fx === 'aurora') { const h = (t * 50) % 360; g.addColorStop(0, `hsl(${h},90%,88%)`); g.addColorStop(0.5, `hsl(${(h + 60) % 360},75%,62%)`); g.addColorStop(1, `hsl(${(h + 140) % 360},70%,30%)`); }
+    else { g.addColorStop(0, sk.body[0]); g.addColorStop(1, sk.body[1]); }
     ctx.fillStyle = g; ctx.fill(path);
     ctx.save(); ctx.clip(path);
     const r = ctx.createRadialGradient(-0.14, -0.85, 0.02, -0.14, -0.85, 0.6);
@@ -117,7 +118,7 @@ export function drawPiece(ctx, piece, skinId, opts = {}) {
     const rg = ctx.createLinearGradient(0.1, 0, 0.4, 0);
     rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(1, sk.glow + '55');
     ctx.fillStyle = rg; ctx.fillRect(0, -1.4, 0.5, 1.4);
-    if (sk.fx === 'star') {
+    if (sk.fx === 'star' || sk.fx === 'aurora') {
       ctx.fillStyle = '#ffffff';
       for (let i = 0; i < 9; i++) {
         const sx = Math.sin(i * 12.9898) * 0.3, sy = -0.15 - ((i * 0.137 + t * 0.03) % 1) * 1.05;

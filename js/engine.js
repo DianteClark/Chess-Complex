@@ -1,7 +1,7 @@
 // Chess Complex — authoritative rules engine. Pure data in, events out.
 import {
   SIZE, PIECES, ABILITIES, EVOLVE, EVOLVE_COST, MAX_HONE, honeCost, STAT_GAIN,
-  PLAYER_COLORS, HOLLOW_STATS,
+  PLAYER_COLORS, HOLLOW_STATS, ATTUNE,
 } from './data.js';
 
 const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -29,15 +29,14 @@ export const isVoid = (s, x, y) => ringOf(x, y) < s.storm.ring;
 export const isCracked = (s, x, y) => s.storm.crack && ringOf(x, y) === s.storm.ring;
 export const unitAt = (s, x, y) => s.units.find((u) => u.alive && u.x === x && u.y === y) || null;
 export const unitById = (s, id) => s.units.find((u) => u.id === id) || null;
-const SOLID = { wall: 1, rubble: 1, crate: 1 };
+const SOLID = { wall: 1, rubble: 1, crate: 1, chest: 1 };
 export const isSolid = (s, x, y) => { const t = tileAt(s, x, y); return !t || !!SOLID[t.t]; };
 export const canStand = (s, x, y) => inB(x, y) && !isSolid(s, x, y) && !unitAt(s, x, y);
 const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 export const alivePlayers = (s) => s.units.filter((u) => u.alive && u.kind === 'player');
 const sgn = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
 
-export function stats(u) {
-  if (u.kind === 'hollow') return { maxHp: HOLLOW_STATS.hp, atk: HOLLOW_STATS.atk, def: HOLLOW_STATS.def, spd: HOLLOW_STATS.spd + buffSum(u, 'spd') };
+export function baseStats(u) {
   let b;
   if (u.piece === 'king') b = u.kingStats;
   else {
@@ -50,7 +49,16 @@ export function stats(u) {
       spd: p.spd + u.pts.spd * STAT_GAIN.spd,
     };
   }
-  return { maxHp: b.hp, atk: b.atk, def: b.def, spd: b.spd + (u.momentum || 0) * 2 + buffSum(u, 'spd') };
+  return b;
+}
+export const attuneSpd = (u) => Math.floor((u.attune || 0) / ATTUNE.spdEvery);
+export function stats(u) {
+  if (u.kind === 'hollow') return { maxHp: HOLLOW_STATS.hp, atk: HOLLOW_STATS.atk, def: HOLLOW_STATS.def, spd: HOLLOW_STATS.spd + buffSum(u, 'spd') };
+  const b = baseStats(u), a = u.attune || 0;
+  return {
+    maxHp: Math.round(b.hp * (1 + ATTUNE.hp * a)), atk: Math.round(b.atk * (1 + ATTUNE.atk * a)), def: Math.round(b.def * (1 + ATTUNE.def * a)),
+    spd: b.spd + attuneSpd(u) + (u.momentum || 0) * 2 + buffSum(u, 'spd'),
+  };
 }
 function buffSum(u, k) { return u.buffs.reduce((a, b) => a + (b.k === k ? b.v : 0), 0); }
 function defMul(u) { return u.buffs.reduce((a, b) => (b.k === 'def' ? a * b.v : a), 1); }
@@ -64,7 +72,7 @@ const SPAWNS = [[1, 1], [14, 14], [14, 1], [1, 14], [7, 1], [8, 14], [1, 8], [14
 export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0) {
   const s = {
     seed, v: 0, round: 1, roundTurns: 0, turnNo: 0, over: false, winner: null,
-    tiles: [], units: [], items: [], storm: { ring: 0, crack: false },
+    tiles: [], units: [], items: [], storm: { ring: 0, crack: false }, event: null, meteors: [], bloodMoon: 0, lastEvent: null,
     active: null, turn: null, crownSpawned: false, log: [], nextId: 1, firstBlood: false,
   };
   for (let i = 0; i < SIZE * SIZE; i++) s.tiles.push({ t: 'floor' });
@@ -106,7 +114,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0) {
       color: PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter',
       piece: 'pawn', hone: {}, pts: { ...p.build.pts }, passive: p.build.passive, equips: { ...p.build.equips },
       x, y, hp: 1, gauge: rand(s) * 40, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [],
-      alive: true, kills: 0, momentum: 0, mark: null, place: 0, dmgDealt: 0, pref: rand(s) < 0.5 ? 'knight' : 'bishop',
+      alive: true, kills: 0, momentum: 0, mark: null, place: 0, dmgDealt: 0, attune: 0, ult: 0, ults: 0, botLevel: p.botLevel || 'normal', pref: rand(s) < 0.5 ? 'knight' : 'bishop',
     };
     u.hp = stats(u).maxHp;
     s.units.push(u);
@@ -159,6 +167,7 @@ export function canAct(s, u) { return s.turn && s.active === u.id && !s.turn.act
 export function canUse(s, u, slot) {
   if (!s.turn || s.active !== u.id) return false;
   const id = slotAbility(u, slot); if (!id) return false;
+  if (slot === 'ult') return (u.ult || 0) >= 100 && !s.turn.acted;
   if (slot !== 'atk' && u.cd[slot] > 0) return false;
   return ABILITIES[id].free ? true : !s.turn.acted;
 }
@@ -169,6 +178,7 @@ export function slotAbility(u, slot) {
   if (slot === 'atk') return PIECES[u.piece].attack;
   if (slot === 'sig') return PIECES[u.piece].sig;
   if (slot === 'eq') return u.piece === 'king' ? null : u.equips[u.piece] || PIECES[u.piece].equips[0];
+  if (slot === 'ult') return PIECES[u.piece].ult;
   return null;
 }
 export function abilityCd(u, id) {
@@ -288,6 +298,30 @@ export function abilityOptions(s, u, slot) {
       const tl = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if ((dx || dy) && inB(u.x + dx, u.y + dy)) tl.push(pt(u.x + dx, u.y + dy));
       opt(self, tl, 0.3, { kind: 'dominion' }); break;
     }
+    case 'enPassant':
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const x = u.x + dx, y = u.y + dy;
+        if ((dx || dy) && canStand(s, x, y)) { const tl = around8(x, y).filter((t) => !(t.x === u.x && t.y === u.y)); o.push({ anchor: pt(x, y), tiles: tl, mult: 1.3, hits: tl.map((t) => unitAt(s, t.x, t.y)).filter((v) => v && v !== u).map((v) => v.id), kind: 'leap', data: { x, y } }); }
+      } break;
+    case 'fork':
+      for (const [dx, dy] of KNIGHT) {
+        const x = u.x + dx, y = u.y + dy;
+        if (!canStand(s, x, y)) continue;
+        const tl = KNIGHT.map(([a, b]) => pt(x + a, y + b)).filter((t) => inB(t.x, t.y) && !(t.x === u.x && t.y === u.y));
+        o.push({ anchor: pt(x, y), tiles: tl, mult: 1.7, hits: tl.map((t) => unitAt(s, t.x, t.y)).filter((v) => v && v !== u).map((v) => v.id), kind: 'leap', data: { x, y } });
+      } break;
+    case 'excommunicate': { const tl = []; for (const [dx, dy] of DIAG) tl.push(...lineTiles(s, u, dx, dy, 15)); opt(self, tl, 1.4); break; }
+    case 'nova': { const tl = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if ((dx || dy) && inB(u.x + dx, u.y + dy)) tl.push(pt(u.x + dx, u.y + dy)); opt(self, tl, 1.6); break; }
+    case 'divineRight': opt(self, around8(u.x, u.y), 1.2, { util: (1 - u.hp / stats(u).maxHp) * 50 }); break;
+    case 'castling':
+      for (const [dx, dy] of ORTH) {
+        for (let i = 1; i <= 8; i++) {
+          const x = u.x + dx * i, y = u.y + dy * i;
+          if (!inB(x, y) || isSolid(s, x, y)) break;
+          const v = unitAt(s, x, y);
+          if (v) { const tl = around8(x, y).filter((t) => !(t.x === u.x && t.y === u.y)); o.push({ anchor: pt(x, y), tiles: tl, mult: 1.4, hits: tl.map((t) => unitAt(s, t.x, t.y)).filter((w) => w && w !== u && w !== v).map((w) => w.id).concat([]), kind: 'swap', data: { id: v.id } }); break; }
+        }
+      } break;
     case 'execute':
       for (const v of s.units) if (v.alive && v !== u && cheb(u, v) <= 2) opt(pt(v.x, v.y), [pt(v.x, v.y)], v.hp / stats(v).maxHp < 0.3 ? 2.5 : 1.0); break;
   }
@@ -302,9 +336,11 @@ function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
   if (src.passive === 'first' && tgt.hp >= d.maxHp) m *= 1.5;
   const crit = rand(s) < 0.1;
   if (crit) m *= 1.5;
+  if (s.bloodMoon) m *= 1.3;
   const dmg = Math.max(1, Math.round(a.atk * m * 30 / (30 + d.def * defMul(tgt))));
   tgt.hp -= dmg;
-  if (src.kind === 'player') src.dmgDealt = (src.dmgDealt || 0) + dmg;
+  if (src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + dmg; chargeUlt(src, dmg * 1.1, ev); }
+  if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
   ev.push({ e: 'dmg', id: tgt.id, src: src.id, n: dmg, crit });
   if (reflect && tgt.passive === 'thorns' && src !== tgt && cheb(src, tgt) <= 1 && src.alive) {
     const r = Math.max(1, Math.round(dmg * 0.2));
@@ -313,6 +349,18 @@ function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
   }
   if (tgt.hp <= 0) kill(s, tgt, src, ev);
   return dmg;
+}
+function chargeUlt(u, n, ev) {
+  if (u.kind !== 'player' || !u.alive) return;
+  const was = u.ult || 0; u.ult = Math.min(100, was + n);
+  if (was < 100 && u.ult >= 100) ev.push({ e: 'ultReady', id: u.id });
+}
+function dealFixed(s, tgt, n, ev, tag) {
+  if (!tgt.alive) return;
+  const dmg = Math.max(1, Math.round(n * (s.bloodMoon ? 1.3 : 1)));
+  tgt.hp -= dmg; ev.push({ e: 'dmg', id: tgt.id, n: dmg, [tag]: true });
+  if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
+  if (tgt.hp <= 0) kill(s, tgt, null, ev, tag);
 }
 function heal(s, u, n, ev) {
   const mx = stats(u).maxHp; const h = Math.min(mx - u.hp, Math.round(n));
@@ -329,6 +377,14 @@ function hitTile(s, src, x, y, ev) {
     else {
       s.items.push({ x, y, k: r < 0.82 ? 'potion' : 'haste', n: 1 });
       if (extra) dropNear(s, x, y, { k: 'shard', n: 1 });
+    }
+  } else if (t.t === 'chest') {
+    t.hp -= 1; ev.push({ e: 'chest', x, y, broke: t.hp <= 0 });
+    if (t.hp <= 0) {
+      s.tiles[y * SIZE + x] = { t: 'floor' };
+      s.items.push({ x, y, k: 'shard', n: 3 });
+      dropNear(s, x, y, { k: 'potion', n: 1 });
+      dropNear(s, x, y, { k: 'haste', n: 1 });
     }
   } else if (t.t === 'rubble') {
     t.hp -= 1; ev.push({ e: 'rubble', x, y, broke: t.hp <= 0 });
@@ -351,17 +407,18 @@ function aoe(s, u, tiles, mult, ev, onHit) {
   }
 }
 
-function kill(s, v, killer, ev) {
+function kill(s, v, killer, ev, cause = null) {
   if (!v.alive) return;
   v.alive = false; v.hp = 0;
-  ev.push({ e: 'death', id: v.id, by: killer ? killer.id : null, x: v.x, y: v.y });
+  ev.push({ e: 'death', id: v.id, by: killer ? killer.id : null, x: v.x, y: v.y, cause });
+  if (killer && killer !== v) chargeUlt(killer, 20, ev);
   const loot = (v.shards || 0);
   if (loot > 0) dropNear(s, v.x, v.y, { k: 'shard', n: loot });
   v.shards = 0;
   if (v.piece === 'king') { dropNear(s, v.x, v.y, { k: 'crown', n: 1 }); ev.push({ e: 'msg', text: 'The Crown has fallen', tone: 'gold' }); }
   if (v.kind === 'player') {
     v.place = alivePlayers(s).length + 1;
-    s.log.push(`${killer && killer !== v ? killer.name : 'The storm'} eliminated ${v.name}`);
+    s.log.push(`${killer && killer !== v ? killer.name : cause === 'meteor' ? 'A meteor' : 'The storm'} eliminated ${v.name}`);
     if (killer && killer !== v && killer.kind === 'player') {
       killer.kills++;
       if (killer.passive === 'momentum') killer.momentum = Math.min(4, killer.momentum + 1);
@@ -377,6 +434,19 @@ function kill(s, v, killer, ev) {
   }
 }
 
+// ---------- shards / attunement ----------
+function gainShards(s, u, n, ev) {
+  u.shards += n;
+  const before = u.attune || 0, after = Math.min(ATTUNE.max, before + n);
+  if (after > before) {
+    const mx0 = stats(u).maxHp;
+    u.attune = after;
+    u.hp += stats(u).maxHp - mx0;
+    const milestone = Math.floor(after / 5) > Math.floor(before / 5);
+    ev.push({ e: 'attune', id: u.id, lv: after, milestone, tier: Math.floor(after / 5) });
+  }
+}
+
 // ---------- landing / pickups ----------
 function land(s, u, ev) {
   const t = tileAt(s, u.x, u.y);
@@ -385,7 +455,7 @@ function land(s, u, ev) {
     const it = s.items[i];
     if (it.x !== u.x || it.y !== u.y) continue;
     s.items.splice(i, 1);
-    if (it.k === 'shard') { u.shards += it.n; ev.push({ e: 'pickup', id: u.id, k: 'shard', n: it.n }); }
+    if (it.k === 'shard') { ev.push({ e: 'pickup', id: u.id, k: 'shard', n: it.n }); gainShards(s, u, it.n, ev); }
     else if (it.k === 'potion') { ev.push({ e: 'pickup', id: u.id, k: 'potion' }); heal(s, u, stats(u).maxHp * 0.35, ev); }
     else if (it.k === 'haste') { ev.push({ e: 'pickup', id: u.id, k: 'haste' }); u.gauge += 45; }
     else if (it.k === 'crown') crown(s, u, ev);
@@ -397,8 +467,9 @@ function land(s, u, ev) {
   if (t && t.t === 'bramble') { u.gauge -= 25; ev.push({ e: 'bramble', id: u.id }); }
 }
 function crown(s, u, ev) {
-  const st = stats(u);
-  const before = st.maxHp;
+  const st = baseStats(u);
+  const before = stats(u).maxHp;
+  st.maxHp = st.hp;
   u.kingFrom = u.piece;
   u.kingStats = { hp: Math.round(st.maxHp * 1.1) + 10, atk: st.atk + 2, def: st.def + 1, spd: Math.max(6, PIECES[u.piece].spd + u.pts.spd - 3) };
   u.piece = 'king'; u.cd = { sig: 0, eq: 0 }; u.mark = null;
@@ -447,7 +518,7 @@ export function useAbility(s, u, slot, anchor, ev) {
     case 'pickpocket': {
       const v = unitAt(s, o.anchor.x, o.anchor.y);
       dealDamage(s, u, v, 0.8, ev);
-      if (v.shards > 0) { v.shards--; u.shards++; ev.push({ e: 'pickup', id: u.id, k: 'shard', n: 1, steal: v.id }); }
+      if (v.shards > 0) { v.shards--; ev.push({ e: 'pickup', id: u.id, k: 'shard', n: 1, steal: v.id }); gainShards(s, u, 1, ev); }
       break;
     }
     case 'vault': case 'sprint': s.turn.extraMoves++; ev.push({ e: 'buff', id: u.id, k: 'move' }); break;
@@ -503,10 +574,27 @@ export function useAbility(s, u, slot, anchor, ev) {
     case 'dominion':
       aoe(s, u, o.tiles, 0.3, ev, (v) => { v.gauge -= 30; v.buffs.push({ k: 'spd', v: -3, t: 2 }); });
       break;
+    case 'enPassant': case 'fork':
+      moveUnit(s, u, o.data.x, o.data.y, ev, 'jump');
+      if (u.alive) aoe(s, u, o.tiles, o.mult, ev);
+      break;
+    case 'nova': aoe(s, u, o.tiles, o.mult, ev, (v) => { v.gauge -= 30; ev.push({ e: 'stagger', id: v.id }); }); break;
+    case 'divineRight': heal(s, u, stats(u).maxHp * 0.25, ev); aoe(s, u, o.tiles, o.mult, ev); break;
+    case 'castling': {
+      const v = unitById(s, o.data.id);
+      const a = pt(u.x, u.y), b = pt(v.x, v.y);
+      u.x = b.x; u.y = b.y; v.x = a.x; v.y = a.y;
+      ev.push({ e: 'move', id: u.id, from: a, to: b, how: 'swap' }, { e: 'move', id: v.id, from: b, to: a, how: 'swap' });
+      land(s, u, ev); land(s, v, ev);
+      u.buffs.push({ k: 'def', v: 1.5, t: 1 });
+      if (u.alive) aoe(s, u, around8(u.x, u.y), o.mult, ev);
+      break;
+    }
     default:
       aoe(s, u, o.tiles, o.mult, ev);
   }
-  if (slot !== 'atk') u.cd[slot] = cdOverride ?? abilityCd(u, id);
+  if (slot === 'ult') { u.ult = 0; u.ults = (u.ults || 0) + 1; }
+  else if (slot !== 'atk') u.cd[slot] = cdOverride ?? abilityCd(u, id);
   if (!ABILITIES[id].free) s.turn.acted = true;
   return true;
 }
@@ -587,7 +675,7 @@ function startTurn(s, u, ev) {
   u.buffs = u.buffs.filter((b) => --b.t > 0 || b.t === undefined);
   for (const k of ['sig', 'eq']) if (u.cd[k] > 0) u.cd[k]--;
   if (u.passive === 'regen') heal(s, u, 3, ev);
-  if (u.piece === 'king') heal(s, u, stats(u).maxHp * 0.04, ev);
+  if (u.piece === 'king') heal(s, u, stats(u).maxHp * 0.03, ev);
   if (s.storm.ring >= STORM.maxRing && u.kind === 'player') {
     const d = Math.max(3, Math.round(stats(u).maxHp * 0.06));
     u.hp -= d; ev.push({ e: 'dmg', id: u.id, n: d, storm: true });
@@ -600,9 +688,54 @@ function startTurn(s, u, ev) {
   }
 }
 
+function freeTiles(s, minRing) {
+  const out = [];
+  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (ringOf(x, y) >= Math.max(minRing, s.storm.ring + 1) && !isSolid(s, x, y) && !unitAt(s, x, y) && !s.items.some((i) => i.x === x && i.y === y)) out.push(pt(x, y));
+  return out;
+}
+function worldEvents(s, ev) {
+  const r = s.round;
+  // resolve last round's event
+  s.bloodMoon = 0;
+  if (s.meteors.length) {
+    const hit = new Set();
+    for (const m of s.meteors) for (const [dx, dy] of [[0, 0], ...ORTH]) { const x = m.x + dx, y = m.y + dy; if (inB(x, y)) hit.add(y * SIZE + x); }
+    const tiles = [...hit].map((i) => pt(i % SIZE, Math.floor(i / SIZE)));
+    ev.push({ e: 'world', kind: 'meteor', phase: 'strike', tiles, centers: s.meteors });
+    for (const t of tiles) { const v = unitAt(s, t.x, t.y); if (v) dealFixed(s, v, 26, ev, 'meteor'); else hitTile(s, null, t.x, t.y, ev); if (s.over) break; }
+    s.meteors = [];
+    if (s.over) return;
+  }
+  if (r < 3 || r % 3 !== 0) return;
+  const pool = ['shardRain', 'meteor', 'bloodMoon', 'supply'].filter((k) => k !== s.lastEvent);
+  const kind = pool[ri(s, pool.length)];
+  s.lastEvent = kind;
+  if (kind === 'shardRain') {
+    const f = freeTiles(s, 1); const tiles = [];
+    for (let i = 0; i < 6 && f.length; i++) { const t = f.splice(ri(s, f.length), 1)[0]; s.items.push({ x: t.x, y: t.y, k: 'shard', n: 1 }); tiles.push(t); }
+    ev.push({ e: 'world', kind, tiles });
+  } else if (kind === 'meteor') {
+    const players = alivePlayers(s); const ms = [];
+    for (let i = 0; i < Math.min(5, players.length + 1); i++) {
+      const p = players[i % players.length];
+      const x = Math.max(0, Math.min(SIZE - 1, p.x + ri(s, 3) - 1)), y = Math.max(0, Math.min(SIZE - 1, p.y + ri(s, 3) - 1));
+      if (!ms.some((m) => m.x === x && m.y === y)) ms.push(pt(x, y));
+    }
+    s.meteors = ms;
+    ev.push({ e: 'world', kind, phase: 'warn', centers: ms });
+  } else if (kind === 'bloodMoon') { s.bloodMoon = 1; ev.push({ e: 'world', kind }); }
+  else if (kind === 'supply') {
+    const f = freeTiles(s, 3).filter((t) => s.tiles[t.y * SIZE + t.x].t === 'floor');
+    if (f.length) { const t = f[ri(s, f.length)]; s.tiles[t.y * SIZE + t.x] = { t: 'chest', hp: 3 }; ev.push({ e: 'world', kind, x: t.x, y: t.y }); }
+  }
+  s.event = { kind, round: r };
+}
+
 function onRound(s, ev) {
   for (const t of s.tiles) if (t.t === 'shrine' && t.cd > 0) t.cd--;
   const r = s.round;
+  worldEvents(s, ev);
+  if (s.over) return;
   if (s.storm.ring < STORM.maxRing && r >= STORM.firstCrack && (r - STORM.firstCrack) % STORM.every === 0 && !s.storm.crack) {
     s.storm.crack = true;
     ev.push({ e: 'storm', phase: 'crack', ring: s.storm.ring });
@@ -738,14 +871,15 @@ export function planBot(s, u) {
     const ps = posScore(m.x, m.y);
     let bestAct = null, as = 0;
     if (canAct(s, real)) {
-      for (const slot of ['atk', 'sig', 'eq']) {
-        if (slot !== 'atk' && u.cd[slot] > 0) continue;
+      for (const slot of ['atk', 'sig', 'eq', 'ult']) {
+        if (slot === 'ult' ? (real.ult || 0) < 100 : slot !== 'atk' && u.cd[slot] > 0) continue;
         const sid = slotAbility(u, slot); if (sid && ABILITIES[sid].free) continue;
         const { best, bs } = actScore(abilityOptionsFor(s, u, real, slot));
         if (best && bs > as) { as = bs; bestAct = { slot, o: best }; }
       }
     }
-    const total = ps + as + (m.stay ? 0.5 : 0);
+    const noise = u.botLevel === 'easy' ? rand(s) * 30 : u.botLevel === 'hard' ? 0 : rand(s) * 4;
+    const total = ps + as * (u.botLevel === 'easy' ? 0.6 : u.botLevel === 'hard' ? 1.25 : 1) + (m.stay ? 0.5 : 0) + noise;
     if (total > top) { top = total; plan = { m, bestAct }; }
   }
   real.x = ox; real.y = oy;

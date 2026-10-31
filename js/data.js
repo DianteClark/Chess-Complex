@@ -4,17 +4,17 @@ export const MAX_PLAYERS = 8;
 export const TURN_MS = 30000;
 
 export const PIECES = {
-  pawn:   { name: 'Pawn',   tier: 1, hp: 60,  atk: 10, def: 5,  spd: 10, attack: 'pawnStrike', sig: 'shove',     equips: ['sprint', 'digin', 'pickpocket'],
+  pawn:   { ult: 'enPassant', name: 'Pawn',   tier: 1, hp: 60,  atk: 10, def: 5,  spd: 10, attack: 'pawnStrike', sig: 'shove',     equips: ['sprint', 'digin', 'pickpocket'],
             moveDesc: 'Steps 1 tile in any direction.' },
-  knight: { name: 'Knight', tier: 2, hp: 90,  atk: 16, def: 8,  spd: 12, attack: 'tstrike',    sig: 'vault',     equips: ['trample', 'stagger', 'rally'],
+  knight: { ult: 'fork', name: 'Knight', tier: 2, hp: 90,  atk: 16, def: 8,  spd: 12, attack: 'tstrike',    sig: 'vault',     equips: ['trample', 'stagger', 'rally'],
             moveDesc: 'L-shaped jump. Ignores anything in the way.' },
-  bishop: { name: 'Bishop', tier: 2, hp: 80,  atk: 14, def: 6,  spd: 11, attack: 'ray',        sig: 'transpose', equips: ['sanctuary', 'cross', 'blink'],
+  bishop: { ult: 'excommunicate', name: 'Bishop', tier: 2, hp: 80,  atk: 14, def: 6,  spd: 11, attack: 'ray',        sig: 'transpose', equips: ['sanctuary', 'cross', 'blink'],
             moveDesc: 'Slides diagonally up to 4 tiles.' },
-  rook:   { name: 'Rook',   tier: 3, hp: 140, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege'],
+  rook:   { ult: 'castling', name: 'Rook',   tier: 3, hp: 140, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege'],
             moveDesc: 'Slides straight up to 4 tiles.' },
-  queen:  { name: 'Queen',  tier: 4, hp: 120, atk: 22, def: 10, spd: 10, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate'],
+  queen:  { ult: 'nova', name: 'Queen',  tier: 4, hp: 120, atk: 22, def: 10, spd: 10, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate'],
             moveDesc: 'Slides any direction up to 5 tiles.' },
-  king:   { name: 'King',   tier: 5, hp: 0,   atk: 0,  def: 0,  spd: 0,  attack: 'royalStrike', sig: 'royalGuard', equips: [],
+  king:   { ult: 'divineRight', name: 'King',   tier: 5, hp: 0,   atk: 0,  def: 0,  spd: 0,  attack: 'royalStrike', sig: 'royalGuard', equips: [],
             moveDesc: 'Steps 1 tile. Wears the Crown.' },
 };
 
@@ -40,6 +40,13 @@ export const ABILITIES = {
   charge:     { name: 'Battering Charge', cd: 3, desc: 'Ram in a straight line. The first piece hit takes heavy damage and is knocked back.', honed: 'Hits harder, knocks back 3.' },
   decree:     { name: 'Royal Decree',     cd: 3, desc: 'Dash along any line, cutting through every piece in the path.', honed: 'Hits harder, cooldown 2.' },
   royalGuard: { name: 'Royal Guard',      cd: 3, desc: 'Double DEF until your next turn and heal 15%.' },
+  // ultimates (charge by dealing and taking damage)
+  enPassant:     { name: 'En Passant',     cd: 0, ult: true, desc: 'Leap up to 2 tiles and strike everything around where you land.' },
+  fork:          { name: 'Fork',           cd: 0, ult: true, desc: 'Jump, then hit every square a knight could reach from your landing.' },
+  excommunicate: { name: 'Excommunicate',  cd: 0, ult: true, desc: 'Holy beams down all four diagonals, the full length of the board.' },
+  castling:      { name: 'Castling',       cd: 0, ult: true, desc: 'Swap with any piece in a straight line, then crush everything around you.' },
+  nova:          { name: 'Checkmate Nova', cd: 0, ult: true, desc: 'Detonate a 5x5 blast centred on the Queen. Survivors are staggered.' },
+  divineRight:   { name: 'Divine Right',   cd: 0, ult: true, desc: 'Heal 25% and smite every adjacent tile.' },
   // pawn equips
   sprint:     { name: 'Sprint',       cd: 3, free: true, desc: 'Free action: gain an extra step this turn.' },
   digin:      { name: 'Dig In',       cd: 3, desc: '+60% DEF until your next turn.' },
@@ -81,6 +88,8 @@ export const PRESETS = {
 
 export const PLAYER_COLORS = ['#ff4d6d', '#4dabff', '#ffd24d', '#5cff9d', '#c77dff', '#ff8f3d', '#3dfff0', '#ff6ad5'];
 
+export const ATTUNE = { max: 30, hp: 0.01, atk: 0.008, def: 0.005, spdEvery: 6 };
+
 export const SKINS = {
   ivory:    { name: 'Ivory',        price: 0,   body: ['#fbf4e2', '#b3a383'], rim: '#fffaf0', glow: '#ffe7a8', line: '#6b5d45', fx: 'dust' },
   obsidian: { name: 'Obsidian',     price: 0,   body: ['#4a4466', '#0e0c16'], rim: '#a59bea', glow: '#7f6bff', line: '#05040a', fx: 'dust' },
@@ -89,6 +98,8 @@ export const SKINS = {
   verdant:  { name: 'Verdant',      price: 200, body: ['#b4f09f', '#1b4f27'], rim: '#efffe6', glow: '#6dff7a', line: '#0b2411', fx: 'leaf' },
   neon:     { name: 'Neon Circuit', price: 450, body: ['#24123d', '#08040f'], rim: '#ff3df2', glow: '#00f0ff', line: '#00f0ff', fx: 'spark', wire: true },
   gilded:   { name: 'Gilded',       price: 500, body: ['#fff0b8', '#9b6a12'], rim: '#fffbe6', glow: '#ffcf4a', line: '#4a3006', fx: 'glint' },
+  crimson:  { name: 'Crimson Regalia', price: 600, body: ['#ff6b7d', '#4a0010'], rim: '#ffe3a1', glow: '#ff2a4a', line: '#1a0006', fx: 'glint' },
+  celestial:{ name: 'Celestial',    price: 1000, body: ['#ffffff', '#5a3aa8'], rim: '#ffffff', glow: '#9df3ff', line: '#1a1040', fx: 'aurora' },
   voidborn: { name: 'Voidborn',     price: 750, body: ['#2a0a3a', '#000000'], rim: '#d6a6ff', glow: '#b04dff', line: '#000000', fx: 'star' },
 };
 export const DEFAULT_SKINS = ['ivory', 'obsidian'];
@@ -97,12 +108,13 @@ export const HOLLOW_STATS = { hp: 45, atk: 9, def: 4, spd: 8 };
 
 // ---------- cosmetics: boards ----------
 export const BOARDS = {
-  hall:   { name: 'Obsidian Hall', price: 0,   light: '#2a2638', dark: '#1c1928', vein: 'rgba(255,255,255,0.035)', frame: '#d6b05c', grid: 'rgba(214,176,92,0.07)', wallTop: ['#4b4560', '#353047'], wallFront: '#272335', bg: ['#1a1626', '#07060b'], mote: '#ffe7a8' },
-  marble: { name: 'Marble Court',  price: 300, light: '#d9d4cc', dark: '#a8a196', vein: 'rgba(90,80,70,0.18)',      frame: '#c9a24a', grid: 'rgba(60,40,10,0.12)',  wallTop: ['#f1ece4', '#bdb5a8'], wallFront: '#8a8274', bg: ['#2a2622', '#0c0b0a'], mote: '#fff6dc' },
-  neon:   { name: 'Neon Grid',     price: 400, light: '#0f0b1f', dark: '#0a0716', vein: 'rgba(0,240,255,0.05)',     frame: '#ff3df2', grid: 'rgba(0,240,255,0.28)', wallTop: ['#2a1450', '#160a2e'], wallFront: '#0d0620', bg: ['#160a2e', '#030108'], mote: '#00f0ff', glowGrid: true },
-  forge:  { name: 'Ember Forge',   price: 500, light: '#2b1712', dark: '#1d0f0b', vein: 'rgba(255,90,30,0.10)',     frame: '#ff7a2a', grid: 'rgba(255,110,40,0.10)', wallTop: ['#4a2a20', '#2e1a14'], wallFront: '#1e100b', bg: ['#2a0f08', '#070302'], mote: '#ff8a3d', lava: true },
-  garden: { name: 'Moonlit Garden', price: 250, light: '#1f2b26', dark: '#16201c', vein: 'rgba(140,255,190,0.05)',  frame: '#9be3b4', grid: 'rgba(155,227,180,0.08)', wallTop: ['#3b4f45', '#283a32'], wallFront: '#1a2721', bg: ['#14241e', '#040807'], mote: '#c8ffd9' },
+  hall:   { weather: 'dust', name: 'Obsidian Hall', price: 0,   light: '#2a2638', dark: '#1c1928', vein: 'rgba(255,255,255,0.035)', frame: '#d6b05c', grid: 'rgba(214,176,92,0.07)', wallTop: ['#4b4560', '#353047'], wallFront: '#272335', bg: ['#1a1626', '#07060b'], mote: '#ffe7a8' },
+  marble: { weather: 'petals', name: 'Marble Court',  price: 300, light: '#d9d4cc', dark: '#a8a196', vein: 'rgba(90,80,70,0.18)',      frame: '#c9a24a', grid: 'rgba(60,40,10,0.12)',  wallTop: ['#f1ece4', '#bdb5a8'], wallFront: '#8a8274', bg: ['#2a2622', '#0c0b0a'], mote: '#fff6dc' },
+  neon:   { weather: 'pixels', name: 'Neon Grid',     price: 400, light: '#0f0b1f', dark: '#0a0716', vein: 'rgba(0,240,255,0.05)',     frame: '#ff3df2', grid: 'rgba(0,240,255,0.28)', wallTop: ['#2a1450', '#160a2e'], wallFront: '#0d0620', bg: ['#160a2e', '#030108'], mote: '#00f0ff', glowGrid: true },
+  forge:  { weather: 'embers', name: 'Ember Forge',   price: 500, light: '#2b1712', dark: '#1d0f0b', vein: 'rgba(255,90,30,0.10)',     frame: '#ff7a2a', grid: 'rgba(255,110,40,0.10)', wallTop: ['#4a2a20', '#2e1a14'], wallFront: '#1e100b', bg: ['#2a0f08', '#070302'], mote: '#ff8a3d', lava: true },
+  garden: { weather: 'fireflies', name: 'Moonlit Garden', price: 250, light: '#1f2b26', dark: '#16201c', vein: 'rgba(140,255,190,0.05)',  frame: '#9be3b4', grid: 'rgba(155,227,180,0.08)', wallTop: ['#3b4f45', '#283a32'], wallFront: '#1a2721', bg: ['#14241e', '#040807'], mote: '#c8ffd9' },
 };
+BOARDS.astral = { weather: 'stars', name: 'Astral Sanctum', price: 700, light: '#1b1840', dark: '#110e2c', vein: 'rgba(180,160,255,0.08)', frame: '#9df3ff', grid: 'rgba(157,243,255,0.12)', wallTop: ['#3a3270', '#251f52'], wallFront: '#17123a', bg: ['#1a1450', '#02010a'], mote: '#d8f6ff', stars: true };
 export const DEFAULT_BOARDS = ['hall'];
 
 // ---------- cosmetics: finishers (how pieces you eliminate die) ----------
@@ -112,6 +124,7 @@ export const FINISHERS = {
   lightning: { name: 'Thunderclap',  price: 350, desc: 'Struck down by a bolt from above.' },
   voidrift:  { name: 'Void Rift',    price: 500, desc: 'Pulled into a collapsing singularity.' },
   midas:     { name: 'Midas Touch',  price: 600, desc: 'Turned to gold, then crumbled to coins.' },
+  starfall:  { name: 'Starfall',     price: 800, desc: 'A falling star crashes down on them.' },
 };
 export const DEFAULT_FINISHERS = ['shatter'];
 
@@ -121,3 +134,25 @@ export const EMOTES = { gg: 'GG', check: 'Check!', nice: 'Nice one', oops: 'Oops
 export const TITLES = ['Recruit', 'Squire', 'Footsoldier', 'Knight Errant', 'Bishop\'s Hand', 'Castellan', 'Warden', 'Champion', 'Master', 'Grandmaster', 'Legend'];
 export const xpForLevel = (lv) => Math.round(120 * Math.pow(lv, 1.25));
 export const titleFor = (lv) => TITLES[Math.min(TITLES.length - 1, Math.floor((lv - 1) / 3))];
+
+export const WORLD_EVENTS = {
+  shardRain: { name: 'Shard Rain',  desc: 'Shards are falling across the board' },
+  meteor:    { name: 'Meteor Storm', desc: 'Impacts next round. Get off the marked tiles' },
+  bloodMoon: { name: 'Blood Moon',   desc: 'All damage +30% this round' },
+  supply:    { name: 'Supply Drop',  desc: 'A royal cache has landed. Break it open' },
+};
+
+export const QUESTS = {
+  win:      { text: 'Win a match', goal: 1, reward: 150 },
+  kills:    { text: 'Eliminate 3 players', goal: 3, reward: 100 },
+  rook:     { text: 'Evolve into a Rook', goal: 1, reward: 80 },
+  queen:    { text: 'Evolve into a Queen', goal: 1, reward: 150 },
+  crown:    { text: 'Claim the Crown', goal: 1, reward: 120 },
+  shards:   { text: 'Collect 15 shards in one match', goal: 15, reward: 100, best: true },
+  top3:     { text: 'Finish in the top 3', goal: 1, reward: 80 },
+  damage:   { text: 'Deal 300 damage in one match', goal: 300, reward: 90, best: true },
+  ults:     { text: 'Use 2 Ultimates', goal: 2, reward: 90 },
+  hollows:  { text: 'Defeat 3 Hollows', goal: 3, reward: 70 },
+  attune:   { text: 'Reach Attunement 3', goal: 3, reward: 90, best: true },
+};
+export const BOT_LEVELS = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };

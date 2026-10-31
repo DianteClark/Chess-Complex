@@ -6,9 +6,14 @@
 <meta name="theme-color" content="#0b0a10">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Chess Complex">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>Chess Complex</title>
 <meta name="description" content="A turn-based chess battle royale. Start as a pawn, collect shards, evolve, and be the last piece standing.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0a10'/%3E%3Cpath d='M18 54h28l-3-6H21zM24 46h16l-3-16H27zM32 8a8 8 0 1 0 0.01 0zM25 28h14v-4H25z' fill='%23d6b05c'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="alternate icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0a10'/%3E%3Cpath d='M18 54h28l-3-6H21zM24 46h16l-3-16H27zM32 8a8 8 0 1 0 0.01 0zM25 28h14v-4H25z' fill='%23d6b05c'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Cinzel:wght@600;800;900&display=swap" rel="stylesheet">
@@ -45,7 +50,10 @@
           <button class="btn" data-go="loadout">Loadout</button>
           <button class="btn" data-go="armory">Armory</button>
         </div>
-        <button class="btn ghost small" data-go="howto">How to Play</button>
+        <div class="row2">
+          <button class="btn small quest-btn" data-go="quests">Daily Quests <i class="badge" id="q-badge"></i></button>
+          <button class="btn small" data-go="howto">How to Play</button>
+        </div>
       </nav>
     </div>
     <div class="corner-tl">
@@ -56,7 +64,7 @@
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v1.1</div>
+    <div class="version">v1.2</div>
   </section>
 
   <!-- LOADOUT -->
@@ -111,6 +119,10 @@
         <div class="lbl">Opponents <span class="pts" id="bot-n">7</span></div>
         <input type="range" id="in-bots" min="1" max="7" value="7">
       </div>
+      <div class="panel">
+        <div class="lbl">Bot Difficulty</div>
+        <div class="seg" id="seg-diff"><button data-diff="easy">Easy</button><button data-diff="normal">Normal</button><button data-diff="hard">Hard</button></div>
+      </div>
       <div class="panel loadout-mini" id="solo-loadout"></div>
       <button class="btn big gold wide shine" data-act="start-solo">Enter the Board</button>
     </div>
@@ -153,6 +165,19 @@
     </div>
   </section>
 
+  <!-- QUESTS -->
+  <section class="screen" id="s-quests">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Quests</h2><div class="marks"><i class="mark-ico"></i><b id="marks-quests">0</b></div></header>
+    <div class="scroll">
+      <p class="hint center" id="q-reset"></p>
+      <div id="quest-list"></div>
+      <div class="panel">
+        <div class="lbl">Career</div>
+        <div class="career" id="career"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- HOW TO -->
   <section class="screen" id="s-howto">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>How to Play</h2><div></div></header>
@@ -160,6 +185,9 @@
       <div class="panel"><h3>Last piece standing</h3><p>Everyone starts as a Pawn on a 16 by 16 board. Up to 8 players. Eliminate everyone else.</p></div>
       <div class="panel"><h3>Turns run on speed</h3><p>Every piece has a speed meter. Higher SPD means you act more often. The strip at the top shows who moves next. On your turn you get one move and one action, in either order. Vault and Sprint are free actions.</p></div>
       <div class="panel"><h3>Evolve</h3><p>Collect Promotion Shards from the floor, crates, Hollows and fallen players. Spend them to evolve: Pawn, then Knight or Bishop, then Rook, then Queen. Or Hone your current piece for +15% stats and a stronger signature, so you can stay your favourite piece all game.</p></div>
+      <div class="panel"><h3>Attunement</h3><p>Every shard you pick up also attunes you, permanently: +1% HP, +0.8% ATK and +0.5% DEF per shard, plus +1 SPD every 6 shards, up to 30. Spending shards never removes attunement, so keep collecting even after you max out your piece. Every 5 attunement adds an orbiting crystal so everyone can see how strong you are.</p></div>
+      <div class="panel"><h3>Ultimates</h3><p>Dealing and taking damage charges your Ultimate. When the gold button is full, unleash your piece's ultimate: En Passant, Fork, Excommunicate, Castling, Checkmate Nova, or the King's Divine Right.</p></div>
+      <div class="panel"><h3>World events</h3><p>Every third round something happens: Shard Rain, a Meteor Storm (get off the marked tiles), a Blood Moon that boosts all damage, or a Supply Drop cache worth breaking open.</p></div>
       <div class="panel"><h3>The board</h3><p>Walls block movement and shots. Rubble and crates break. Brambles stop slides and slow you down. Shrines heal once, then recharge. Hollows guard shard caches.</p></div>
       <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later. Standing in the void burns 20% of your HP every turn. Once the board is fully closed, everyone burns.</p></div>
       <div class="panel"><h3>The Crown</h3><p>On round 7 the Crown appears at the centre. Whoever takes it becomes the King: more HP, steady healing, but slow single steps. Kill the King and the Crown drops.</p></div>
@@ -187,6 +215,8 @@
     <div class="banner" id="h-banner"><div class="b-main"></div><div class="b-sub"></div></div>
     <div class="streak" id="h-streak"></div>
     <div class="inspect hidden" id="h-inspect"></div>
+    <button class="ult-btn" id="ult-btn" data-slot="ult" aria-label="Ultimate"><svg class="ult-ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" class="ur-bg"/><circle cx="32" cy="32" r="28" class="ur-fg" id="ult-fg"/></svg><span class="ult-k">ULT</span><span class="ult-pct" id="ult-pct">0%</span></button>
+    <div class="event-chip hidden" id="event-chip"></div>
     <div class="emote-wrap">
       <button class="icon-btn emote-btn" data-act="emotes" aria-label="Emotes"><svg><use href="#i-chat"/></svg></button>
       <div class="emote-menu hidden" id="emote-menu"></div>
@@ -200,7 +230,7 @@
           <div class="card-name"><b id="h-name"></b><span id="h-piece"></span></div>
           <div class="hpbar"><em id="h-hpghost"></em><i id="h-hp"></i><span id="h-hptext"></span></div>
           <div class="mini-stats" id="h-stats"></div>
-          <div class="shardbar"><span class="shard-ico" id="h-shard-ico"></span><b id="h-shards">0</b><div class="shardprog"><i id="h-shardprog"></i></div><span id="h-next"></span></div>
+          <div class="shardbar"><span class="shard-ico" id="h-shard-ico"></span><b id="h-shards">0</b><div class="shardprog"><i id="h-shardprog"></i></div><span id="h-next"></span><span class="attune-pill" id="h-attune">ATT 0</span></div>
         </div>
       </div>
       <div class="actions" id="h-actions">
@@ -247,6 +277,7 @@
         <div class="r-stats" id="r-stats"></div>
         <div class="r-xp"><div class="r-xp-top"><span class="lvl small" id="r-lvl">1</span><span id="r-xptext"></span></div><div class="xpbar big"><i id="r-xpbar"></i></div><div class="r-levelup hidden" id="r-levelup">Level Up</div></div>
         <div class="r-marks" id="r-marks"></div>
+        <div class="r-quests" id="r-quests"></div>
         <ol class="r-board" id="r-board"></ol>
         <div class="row2"><button class="btn big wide" data-act="to-title">Menu</button><button class="btn big gold wide shine" data-act="rematch" id="btn-rematch">Play Again</button></div>
       </div>

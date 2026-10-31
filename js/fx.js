@@ -30,7 +30,7 @@ export class FX {
   constructor() { this.reset(); }
   reset() {
     this.parts = []; this.shards = []; this.rings = []; this.beams = []; this.bolts = []; this.flashes = [];
-    this.shocks = []; this.falls = []; this.pillars = []; this.decals = []; this.slashes = []; this.projs = []; this.implodes = []; this.glyphs = [];
+    this.meteors = []; this.fireworks = []; this.shocks = []; this.falls = []; this.pillars = []; this.decals = []; this.slashes = []; this.projs = []; this.implodes = []; this.glyphs = [];
     this.screenFlash = 0; this.flashColor = '#ffffff'; this.time = 0; this.pending = [];
   }
   after(t, fn) { this.pending.push({ at: this.time + t, fn }); }
@@ -64,6 +64,11 @@ export class FX {
     this.bolts.push({ pts, color, life: 0.45, t: 0 });
   }
   fallTile(x, y, color, delay) { this.falls.push({ x, y, color, delay, t: -delay, life: 0.9, rot: rnd(-1, 1) }); }
+  meteor(x, y, delay = 0, color = '#ff8a3d', onHit = null) { this.meteors.push({ x, y, t: -delay, life: 0.5, color, onHit, done: false }); }
+  firework(x, y, color) {
+    this.ring(x, y, color, 3.5, 0.8, 0.06);
+    for (let i = 0; i < 40; i++) { const a = (i / 40) * Math.PI * 2, v = 2.5 + Math.random() * 1.5; this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: 1.6, life: 0.9 + Math.random() * 0.4, t: 0, color: i % 3 ? color : '#ffffff', size: 0.04, kind: 'spark', rot: 0, vr: 0 }); }
+  }
   decal(x, y, color, r = 0.45, life = 8) { this.decals.push({ x, y, color, r, life, t: 0 }); }
 
   shatterSprite(img, x, y, power = 1, opts = {}) {
@@ -115,6 +120,14 @@ export class FX {
           this.ring(x, y, '#ffd24d', 2.4, 0.6); this.flash(0.25, '#ffe7a0');
         });
         break;
+      case 'starfall':
+        this.meteor(x, y - 0.3, 0, '#9df3ff', () => {
+          this.flash(0.5, '#d8f6ff'); this.shatterSprite(base, x, y, 1.4);
+          this.burst(x, y - 0.3, '#d8f6ff', 30, 5); this.burst(x, y - 0.3, '#ffe9a8', 20, 4, 'up');
+          this.ring(x, y, '#9df3ff', 3.4, 0.7, 0.12); this.shock(x, y - 0.2, 'rgba(157,243,255,0.5)', 1.8, 0.4);
+          this.decal(x, y - 0.1, 'rgba(10,14,40,0.7)', 0.5);
+        });
+        break;
       default: // shatter
         this.shatterSprite(base, x, y, 1.1);
         this.shatterSprite(pieceSprite(piece, skin, 'white'), x, y, 0.4, { life: 0.25 });
@@ -163,6 +176,23 @@ export class FX {
         this.after(0.36, () => { this.shock(ax, ay + 0.2, 'rgba(255,220,170,0.45)', 1.8, 0.35); this.ring(ax, ay + 0.3, '#ffe2a8', 3, 0.5); this.burst(ax, ay + 0.3, '#d9cfb8', 20, 3, 'dust'); });
         return 0.4;
       case 'charge': case 'decree': return 0.12;
+      case 'enPassant': case 'fork':
+        this.after(0.36, () => { this.shock(ax, ay + 0.2, 'rgba(255,230,160,0.55)', 2.6, 0.45); this.ring(ax, ay + 0.3, '#ffe2a8', 4.5, 0.6, 0.14); this.burst(ax, ay + 0.3, glow, 30, 5); this.flash(0.35); for (const t of tiles) this.after(Math.random() * 0.12, () => { this.burst(t.x + 0.5, t.y + 0.5, '#fff1d6', 8, 3); this.flashTile(t.x, t.y, '#ffd24d'); }); });
+        return 0.42;
+      case 'excommunicate': {
+        const ends = new Map();
+        for (const t of tiles) { const dx = Math.sign(t.x - from.x), dy = Math.sign(t.y - from.y), k = dx + ',' + dy, d = Math.abs(t.x - from.x); if (!ends.has(k) || ends.get(k).d < d) ends.set(k, { t, d }); }
+        for (const { t } of ends.values()) { this.beam({ x: fx, y: fy - 0.35 }, { x: t.x + 0.5, y: t.y + 0.2 }, '#fff3c4', 0.55, 0.7); this.beam({ x: fx, y: fy - 0.35 }, { x: t.x + 0.5, y: t.y + 0.2 }, '#ffd24d', 0.25, 0.9); }
+        this.pillar(fx, fy + 0.36, '#ffe9a8', 1, 0.9); this.flash(0.5, '#fff3c4'); this.ring(fx, fy + 0.3, '#ffd24d', 4, 0.7, 0.12);
+        return 0.12;
+      }
+      case 'nova':
+        this.flash(0.7, '#ffffff'); this.shock(fx, fy, 'rgba(255,240,200,0.6)', 3.4, 0.55); this.ring(fx, fy + 0.2, '#ffd24d', 6, 0.7, 0.18); this.ring(fx, fy + 0.2, glow, 4.5, 0.7, 0.12, 0.1);
+        this.burst(fx, fy, '#fff1c4', 60, 7); this.burst(fx, fy, glow, 40, 5);
+        for (const t of tiles) this.flashTile(t.x, t.y, '#ffd24d', 0.6, Math.hypot(t.x - from.x, t.y - from.y) * 0.04);
+        return 0.12;
+      case 'castling': this.glyph(fx, fy, '#ffd24d', 'swap'); this.glyph(ax, ay, '#ffd24d', 'swap'); this.after(0.25, () => { this.shock(ax, ay + 0.2, 'rgba(255,220,160,0.55)', 2.2, 0.4); this.ring(ax, ay + 0.3, '#ffd24d', 3.6, 0.6, 0.12); this.burst(ax, ay, '#d9cfb8', 24, 4, 'chunk'); this.flash(0.3); }); return 0.3;
+      case 'divineRight': this.pillar(fx, fy + 0.36, '#ffd24d', 1.2, 1.1, 8); this.flash(0.5, '#ffe7a0'); this.ring(fx, fy + 0.3, '#ffd24d', 3.2, 0.7, 0.12); this.burst(fx, fy, '#fff1c4', 40, 4, 'up'); return 0.15;
       case 'sanctuary': this.glyph(fx, fy + 0.3, '#6dffa8', 'heal'); this.burst(fx, fy, '#6dffa8', 18, 1.5, 'up'); return 0.05;
       case 'digin': case 'fortify': case 'royalGuard': this.glyph(fx, fy - 0.3, '#7fb6ff', 'shield'); return 0.05;
       case 'rally': this.glyph(fx, fy, '#ffe04d', 'speed'); this.burst(fx, fy, '#ffe04d', 16, 2, 'up'); return 0.05;
@@ -194,6 +224,8 @@ export class FX {
     this.rings = step(this.rings); this.beams = step(this.beams); this.bolts = step(this.bolts); this.flashes = step(this.flashes);
     this.shocks = step(this.shocks); this.falls = step(this.falls); this.pillars = step(this.pillars); this.decals = step(this.decals);
     this.slashes = step(this.slashes); this.projs = step(this.projs); this.implodes = step(this.implodes); this.glyphs = step(this.glyphs);
+    for (const m of this.meteors) { m.t += dt; if (!m.done && m.t >= m.life) { m.done = true; this.shock(m.x, m.y + 0.2, 'rgba(255,170,90,0.55)', 1.8, 0.4); this.burst(m.x, m.y, m.color, 26, 4.5); this.burst(m.x, m.y, '#3a2a24', 16, 1.5, 'dust'); this.decal(m.x, m.y + 0.1, 'rgba(20,10,6,0.7)', 0.55, 10); this.ring(m.x, m.y + 0.3, '#ffd27a', 2.6, 0.5, 0.1); if (m.onHit) m.onHit(); this.impactKick = (this.impactKick || 0) + 8; } }
+    this.meteors = this.meteors.filter((m) => m.t < m.life + 0.05);
     this.screenFlash = Math.max(0, this.screenFlash - dt * 3);
   }
 
@@ -231,6 +263,19 @@ export class FX {
   }
   drawAbove(ctx) {
     const T = this.time;
+    for (const m of this.meteors) {
+      if (m.t < 0) continue;
+      const k = Math.min(1, m.t / m.life);
+      const sx = m.x - 5 * (1 - k), sy = m.y - 9 * (1 - k);
+      const g = ctx.createLinearGradient(sx - 2.2, sy - 4, sx, sy);
+      g.addColorStop(0, m.color + '00'); g.addColorStop(1, m.color);
+      ctx.strokeStyle = g; ctx.lineWidth = 0.35; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(sx - 2.2, sy - 4); ctx.lineTo(sx, sy); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(sx, sy, 0.22, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = m.color; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(sx, sy, 0.4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+      if (Math.random() < 0.8) this.parts.push({ x: sx, y: sy, vx: (Math.random() - 0.5), vy: -Math.random(), g: 0, life: 0.4, t: 0, color: m.color, size: 0.06, kind: 'spark', rot: 0, vr: 0 });
+    }
+    ctx.lineCap = 'butt';
     for (const p of this.pillars) {
       const a = Math.sin((p.t / p.life) * Math.PI);
       const g = ctx.createLinearGradient(0, p.y - p.h, 0, p.y + 0.3);

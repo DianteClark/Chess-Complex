@@ -99,9 +99,15 @@ export const sfx = {
   stinger: (n = 1) => { const base = [440, 494, 523, 587, 659][Math.min(4, n - 1)]; chord([base, base * 1.25, base * 1.5, base * 2], 0.5, { type: 'sawtooth', v: 0.06, roll: 0.03, rev: 0.5 }); noise(0.3, { v: 0.25, f: 2000, sweep: 0.2 }); },
   tick: () => tone(1800, 0.02, { type: 'square', v: 0.03 }),
   heartbeat: () => { tone(60, 0.12, { v: 0.35, slide: 0.7 }); tone(55, 0.12, { v: 0.25, slide: 0.7, at: 0.18 }); },
+  attune: () => { chord([784, 988, 1319, 1568], 0.5, { type: 'triangle', v: 0.09, roll: 0.04, rev: 0.6 }); },
+  ultcharge: () => { tone(110, 0.8, { type: 'sawtooth', v: 0.12, slide: 4, rev: 0.4 }); noise(0.8, { v: 0.25, f: 400, type: 'bandpass', sweep: 8, rev: 0.4 }); tone(55, 0.9, { v: 0.3, rev: 0.3 }); },
+  ultready: () => { chord([523, 784, 1047], 0.5, { type: 'sawtooth', v: 0.05, roll: 0.05, rev: 0.6 }); tone(1568, 0.6, { type: 'sine', v: 0.06, at: 0.15, rev: 0.6 }); },
+  meteorfall: () => noise(0.7, { v: 0.35, f: 3000, type: 'bandpass', sweep: 0.1, rev: 0.4 }),
+  firework: () => { noise(0.08, { v: 0.4, f: 3000 }); noise(0.9, { v: 0.2, f: 6000, type: 'highpass', at: 0.05, rev: 0.6 }); },
+  quest: () => chord([659, 988, 1319], 0.4, { type: 'triangle', v: 0.1, roll: 0.06, rev: 0.5 }),
   emote: () => { tone(880, 0.06, { type: 'sine', v: 0.08 }); tone(1320, 0.08, { type: 'sine', v: 0.06, at: 0.05 }); },
 };
-const AB_SFX = { ray: 'zap', cross: 'zap', checkmate: 'zap', siege: 'cannon', starburst: 'boom', dominion: 'dark', trample: 'jump', transpose: 'blink', blink: 'blink', charge: 'whoosh', decree: 'whoosh', rampart: 'rampart', sanctuary: 'heal' };
+const AB_SFX = { excommunicate: 'zap', nova: 'boom', fork: 'boom', enPassant: 'boom', castling: 'rampart', divineRight: 'shrine', ray: 'zap', cross: 'zap', checkmate: 'zap', siege: 'cannon', starburst: 'boom', dominion: 'dark', trample: 'jump', transpose: 'blink', blink: 'blink', charge: 'whoosh', decree: 'whoosh', rampart: 'rampart', sanctuary: 'heal' };
 const KILL_SFX = {
   shatter: () => sfx.shatter(),
   inferno: () => { noise(0.9, { v: 0.5, f: 1200, type: 'bandpass', sweep: 0.3, rev: 0.4 }); tone(80, 0.6, { v: 0.4, slide: 0.5 }); },

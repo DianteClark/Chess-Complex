@@ -29,8 +29,9 @@ for (let g = 0; g < N; g++) {
   if (!s.over) { tally.stalls++; continue; }
   const w = unitById(s, s.winner);
   tally.rounds.push(s.round); tally.turns.push(s.turnNo);
+  if (w) { (tally.att ||= []).push(w.attune); (tally.ult ||= []).push(w.ults); }
   if (w) { tally.piecesAtWin[w.piece] = (tally.piecesAtWin[w.piece] || 0) + 1; tally.presetWins[w.name.replace(/\d+$/, '')] = (tally.presetWins[w.name.replace(/\d+$/, '')] || 0) + 1; }
   tally.crowned += s.log.some((l) => l.includes('claimed the Crown')) ? 1 : 0;
 }
 const avg = (a) => (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1);
-console.log({ games: N, stalls: tally.stalls, avgRounds: avg(tally.rounds), avgTurns: avg(tally.turns), maxRounds: Math.max(...tally.rounds), piecesAtWin: tally.piecesAtWin, presetWins: tally.presetWins, crownGames: tally.crowned });
+console.log({ games: N, stalls: tally.stalls, avgRounds: avg(tally.rounds), avgTurns: avg(tally.turns), maxRounds: Math.max(...tally.rounds), piecesAtWin: tally.piecesAtWin, presetWins: tally.presetWins, crownGames: tally.crowned, winnerAttune: avg(tally.att), winnerUlts: avg(tally.ult) });
