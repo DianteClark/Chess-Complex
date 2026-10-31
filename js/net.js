@@ -9,7 +9,12 @@ const useLocal = () => new URLSearchParams(location.search).get('net') === 'loca
 
 const PEER_OPTS = {
   debug: 0,
-  config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }] },
+  // STUN for direct connections, plus a public TURN relay as a fallback for strict networks.
+  // For a commercial launch, replace the relay with your own (Cloudflare Calls or coturn); see docs/ROADMAP.md.
+  config: { iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+  ] },
 };
 
 // ---------- transports ----------
