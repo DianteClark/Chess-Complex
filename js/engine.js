@@ -65,7 +65,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0) {
   const s = {
     seed, v: 0, round: 1, roundTurns: 0, turnNo: 0, over: false, winner: null,
     tiles: [], units: [], items: [], storm: { ring: 0, crack: false },
-    active: null, turn: null, crownSpawned: false, log: [], nextId: 1,
+    active: null, turn: null, crownSpawned: false, log: [], nextId: 1, firstBlood: false,
   };
   for (let i = 0; i < SIZE * SIZE; i++) s.tiles.push({ t: 'floor' });
 
@@ -103,7 +103,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0) {
     const [x, y] = spawnOrder[i];
     const u = {
       id: s.nextId++, pid: p.pid, name: p.name, bot: !!p.isBot, kind: 'player', slot: i,
-      color: PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory',
+      color: PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter',
       piece: 'pawn', hone: {}, pts: { ...p.build.pts }, passive: p.build.passive, equips: { ...p.build.equips },
       x, y, hp: 1, gauge: rand(s) * 40, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [],
       alive: true, kills: 0, momentum: 0, mark: null, place: 0, dmgDealt: 0, pref: rand(s) < 0.5 ? 'knight' : 'bishop',
@@ -365,6 +365,8 @@ function kill(s, v, killer, ev) {
     if (killer && killer !== v && killer.kind === 'player') {
       killer.kills++;
       if (killer.passive === 'momentum') killer.momentum = Math.min(4, killer.momentum + 1);
+      const de = ev.find((q) => q.e === 'death' && q.id === v.id);
+      if (de) { de.streak = killer.kills; if (!s.firstBlood) { s.firstBlood = true; de.firstBlood = true; } }
     }
     const left = alivePlayers(s);
     if (left.length <= 1) {
@@ -433,7 +435,7 @@ export function useAbility(s, u, slot, anchor, ev) {
   const opts = abilityOptions(s, u, slot);
   const o = opts.find((q) => q.anchor.x === anchor.x && q.anchor.y === anchor.y);
   if (!o) return false;
-  ev.push({ e: 'ability', id: u.id, ab: id, slot, anchor });
+  ev.push({ e: 'ability', id: u.id, ab: id, slot, anchor, from: { x: u.x, y: u.y }, tiles: o.tiles, n: o.hits.length });
   let cdOverride = null;
   switch (id) {
     case 'shove': {
@@ -631,6 +633,16 @@ export function predictOrder(s, n = 8) {
     if (best) { best.g -= 100; out.push(best.id); } else for (const u of sim) u.g += u.sp;
   }
   return out;
+}
+
+// Damage range preview for the UI: [min, max] before crits.
+export function previewDamage(src, tgt, mult) {
+  if (mult <= 0) return [0, 0];
+  const a = stats(src), d = stats(tgt);
+  let m = mult;
+  if (src.passive === 'first' && tgt.hp >= d.maxHp) m *= 1.5;
+  const k = 30 / (30 + d.def * defMul(tgt));
+  return [Math.max(1, Math.round(a.atk * m * 0.9 * k)), Math.max(1, Math.round(a.atk * m * 1.1 * k))];
 }
 
 // ---------- AI ----------

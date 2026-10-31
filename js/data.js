@@ -94,3 +94,30 @@ export const SKINS = {
 export const DEFAULT_SKINS = ['ivory', 'obsidian'];
 
 export const HOLLOW_STATS = { hp: 45, atk: 9, def: 4, spd: 8 };
+
+// ---------- cosmetics: boards ----------
+export const BOARDS = {
+  hall:   { name: 'Obsidian Hall', price: 0,   light: '#2a2638', dark: '#1c1928', vein: 'rgba(255,255,255,0.035)', frame: '#d6b05c', grid: 'rgba(214,176,92,0.07)', wallTop: ['#4b4560', '#353047'], wallFront: '#272335', bg: ['#1a1626', '#07060b'], mote: '#ffe7a8' },
+  marble: { name: 'Marble Court',  price: 300, light: '#d9d4cc', dark: '#a8a196', vein: 'rgba(90,80,70,0.18)',      frame: '#c9a24a', grid: 'rgba(60,40,10,0.12)',  wallTop: ['#f1ece4', '#bdb5a8'], wallFront: '#8a8274', bg: ['#2a2622', '#0c0b0a'], mote: '#fff6dc' },
+  neon:   { name: 'Neon Grid',     price: 400, light: '#0f0b1f', dark: '#0a0716', vein: 'rgba(0,240,255,0.05)',     frame: '#ff3df2', grid: 'rgba(0,240,255,0.28)', wallTop: ['#2a1450', '#160a2e'], wallFront: '#0d0620', bg: ['#160a2e', '#030108'], mote: '#00f0ff', glowGrid: true },
+  forge:  { name: 'Ember Forge',   price: 500, light: '#2b1712', dark: '#1d0f0b', vein: 'rgba(255,90,30,0.10)',     frame: '#ff7a2a', grid: 'rgba(255,110,40,0.10)', wallTop: ['#4a2a20', '#2e1a14'], wallFront: '#1e100b', bg: ['#2a0f08', '#070302'], mote: '#ff8a3d', lava: true },
+  garden: { name: 'Moonlit Garden', price: 250, light: '#1f2b26', dark: '#16201c', vein: 'rgba(140,255,190,0.05)',  frame: '#9be3b4', grid: 'rgba(155,227,180,0.08)', wallTop: ['#3b4f45', '#283a32'], wallFront: '#1a2721', bg: ['#14241e', '#040807'], mote: '#c8ffd9' },
+};
+export const DEFAULT_BOARDS = ['hall'];
+
+// ---------- cosmetics: finishers (how pieces you eliminate die) ----------
+export const FINISHERS = {
+  shatter:   { name: 'Shatter',      price: 0,   desc: 'Your victims break apart like glass.' },
+  inferno:   { name: 'Inferno',      price: 300, desc: 'A pillar of fire, then ash.' },
+  lightning: { name: 'Thunderclap',  price: 350, desc: 'Struck down by a bolt from above.' },
+  voidrift:  { name: 'Void Rift',    price: 500, desc: 'Pulled into a collapsing singularity.' },
+  midas:     { name: 'Midas Touch',  price: 600, desc: 'Turned to gold, then crumbled to coins.' },
+};
+export const DEFAULT_FINISHERS = ['shatter'];
+
+export const EMOTES = { gg: 'GG', check: 'Check!', nice: 'Nice one', oops: 'Oops', come: 'Come at me', mercy: 'Mercy!' };
+
+// ---------- progression ----------
+export const TITLES = ['Recruit', 'Squire', 'Footsoldier', 'Knight Errant', 'Bishop\'s Hand', 'Castellan', 'Warden', 'Champion', 'Master', 'Grandmaster', 'Legend'];
+export const xpForLevel = (lv) => Math.round(120 * Math.pow(lv, 1.25));
+export const titleFor = (lv) => TITLES[Math.min(TITLES.length - 1, Math.floor((lv - 1) / 3))];

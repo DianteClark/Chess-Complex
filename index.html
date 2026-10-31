@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b0a10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Chess Complex</title>
 <meta name="description" content="A turn-based chess battle royale. Start as a pawn, collect shards, evolve, and be the last piece standing.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0a10'/%3E%3Cpath d='M18 54h28l-3-6H21zM24 46h16l-3-16H27zM32 8a8 8 0 1 0 0.01 0zM25 28h14v-4H25z' fill='%23d6b05c'/%3E%3C/svg%3E">
@@ -15,16 +17,28 @@
 </head>
 <body>
 <canvas id="bg"></canvas>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3l3 3h-2v4h4V8l3 3-3 3v-2h-4v4h2l-3 3-3-3h2v-4H7v2l-3-3 3-3v2h4V6H9z"/></symbol>
+    <symbol id="i-atk" viewBox="0 0 24 24"><path d="M19 3l2 2-9.5 9.5 1.5 1.5-1.5 1.5-1.5-1.5L6 20l-2-2 4-4-1.5-1.5L8 11l1.5 1.5z"/></symbol>
+    <symbol id="i-sig" viewBox="0 0 24 24"><path d="M12 2l2.6 6.2L21 9l-5 4.4L17.5 20 12 16.6 6.5 20 8 13.4 3 9l6.4-.8z"/></symbol>
+    <symbol id="i-eq" viewBox="0 0 24 24"><path d="M12 2l8 6-3 12H7L4 8zm0 4L7.5 9 9 17h6l1.5-8z"/></symbol>
+    <symbol id="i-promo" viewBox="0 0 24 24"><path d="M3 18l2-10 4.5 4L12 5l2.5 7L19 8l2 10zM4 20h16v2H4z"/></symbol>
+    <symbol id="i-end" viewBox="0 0 24 24"><path d="M6 2h12v5l-4 5 4 5v5H6v-5l4-5-4-5zm2 2v2.3L12 11l4-4.7V4z"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 5.5v-3l-2.4-.6-.8-1.8 1.3-2.1-2.1-2.1-2.1 1.3-1.8-.8L13.5 2h-3l-.6 2.4-1.8.8L6 3.9 3.9 6l1.3 2.1-.8 1.8L2 10.5v3l2.4.6.8 1.8L3.9 18 6 20.1l2.1-1.3 1.8.8.6 2.4h3l.6-2.4 1.8-.8 2.1 1.3 2.1-2.1-1.3-2.1.8-1.8z"/></symbol>
+  </defs>
+</svg>
 <div id="app">
 
   <!-- TITLE -->
   <section class="screen active" id="s-title">
     <div class="title-wrap">
       <div class="kicker">A chess battle royale</div>
-      <h1 class="logo"><span>CHESS</span><span class="logo-b">COMPLEX</span></h1>
+      <h1 class="logo"><span class="logo-a">CHESS</span><span class="logo-b">COMPLEX</span></h1>
       <div class="logo-line"></div>
       <nav class="menu">
-        <button class="btn big gold" data-go="solo">Play Solo</button>
+        <button class="btn big gold shine" data-go="solo">Play Solo</button>
         <button class="btn big" data-go="host">Host Online</button>
         <button class="btn big" data-go="join">Join With Code</button>
         <div class="row2">
@@ -34,8 +48,15 @@
         <button class="btn ghost small" data-go="howto">How to Play</button>
       </nav>
     </div>
-    <div class="corner-tl"><div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div></div>
-    <div class="corner-tr"><button class="icon-btn" data-act="mute" aria-label="Toggle sound"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg></button></div>
+    <div class="corner-tl">
+      <div class="profile-chip">
+        <div class="lvl" id="t-lvl">1</div>
+        <div class="pc-body"><b id="t-title">Recruit</b><div class="xpbar"><i id="t-xp"></i></div></div>
+      </div>
+      <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
+    </div>
+    <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
+    <div class="version">v1.1</div>
   </section>
 
   <!-- LOADOUT -->
@@ -71,8 +92,13 @@
   <!-- ARMORY -->
   <section class="screen" id="s-armory">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Armory</h2><div class="marks"><i class="mark-ico"></i><b id="marks-armory">0</b></div></header>
+    <div class="tabs" id="armory-tabs">
+      <button class="tab on" data-tab="pieces">Piece Sets</button>
+      <button class="tab" data-tab="boards">Boards</button>
+      <button class="tab" data-tab="finishers">Finishers</button>
+    </div>
     <div class="scroll">
-      <p class="hint center">Earn Marks every match. Spend them on piece sets.</p>
+      <p class="hint center" id="armory-hint">Earn Marks every match. Spend them here.</p>
       <div class="skins" id="skins"></div>
     </div>
   </section>
@@ -86,7 +112,7 @@
         <input type="range" id="in-bots" min="1" max="7" value="7">
       </div>
       <div class="panel loadout-mini" id="solo-loadout"></div>
-      <button class="btn big gold wide" data-act="start-solo">Enter the Board</button>
+      <button class="btn big gold wide shine" data-act="start-solo">Enter the Board</button>
     </div>
   </section>
 
@@ -105,7 +131,7 @@
         <ul class="lobby" id="host-lobby"></ul>
         <div class="row2"><button class="btn small" data-act="add-bot">Add Bot</button><button class="btn small" data-act="fill-bots">Fill With Bots</button></div>
       </div>
-      <button class="btn big gold wide" data-act="start-host" id="btn-start-host" disabled>Start Match</button>
+      <button class="btn big gold wide shine" data-act="start-host" id="btn-start-host" disabled>Start Match</button>
     </div>
   </section>
 
@@ -132,12 +158,12 @@
     <header class="bar"><button class="back" data-go="title">Back</button><h2>How to Play</h2><div></div></header>
     <div class="scroll prose">
       <div class="panel"><h3>Last piece standing</h3><p>Everyone starts as a Pawn on a 16 by 16 board. Up to 8 players. Eliminate everyone else.</p></div>
-      <div class="panel"><h3>Turns run on speed</h3><p>Every piece has a speed meter. Higher SPD means you act more often. The strip at the top shows who moves next. On your turn you get one move and one action, in either order.</p></div>
+      <div class="panel"><h3>Turns run on speed</h3><p>Every piece has a speed meter. Higher SPD means you act more often. The strip at the top shows who moves next. On your turn you get one move and one action, in either order. Vault and Sprint are free actions.</p></div>
       <div class="panel"><h3>Evolve</h3><p>Collect Promotion Shards from the floor, crates, Hollows and fallen players. Spend them to evolve: Pawn, then Knight or Bishop, then Rook, then Queen. Or Hone your current piece for +15% stats and a stronger signature, so you can stay your favourite piece all game.</p></div>
       <div class="panel"><h3>The board</h3><p>Walls block movement and shots. Rubble and crates break. Brambles stop slides and slow you down. Shrines heal once, then recharge. Hollows guard shard caches.</p></div>
       <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later. Standing in the void burns 20% of your HP every turn. Once the board is fully closed, everyone burns.</p></div>
       <div class="panel"><h3>The Crown</h3><p>On round 7 the Crown appears at the centre. Whoever takes it becomes the King: more HP, steady healing, but slow single steps. Kill the King and the Crown drops.</p></div>
-      <div class="panel"><h3>Controls</h3><p>Tap a highlighted tile to move. Pick an ability, tap a target to preview, tap again to confirm. Drag to pan, pinch or scroll to zoom.</p></div>
+      <div class="panel"><h3>Controls</h3><p>Tap a highlighted tile to move. Pick an ability, tap a target to preview the damage, tap again to confirm. Drag to pan, pinch or scroll to zoom. On a keyboard: 1-4 for actions, P to promote, Space to end your turn.</p></div>
     </div>
   </section>
 
@@ -152,32 +178,38 @@
       <div class="order" id="h-order"></div>
       <div class="hud-btns">
         <div class="pill" id="h-alive"></div>
-        <button class="icon-btn" data-act="zoom" aria-label="Toggle overview"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 12h16M12 4v16"/></svg></button>
-        <button class="icon-btn" data-act="menu" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button>
+        <button class="icon-btn" data-act="zoom" aria-label="Toggle overview"><svg viewBox="0 0 24 24" class="stroke"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 12h16M12 4v16"/></svg></button>
+        <button class="icon-btn" data-act="menu" aria-label="Menu"><svg viewBox="0 0 24 24" class="stroke"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button>
       </div>
     </div>
     <div class="timer"><i id="h-timer"></i></div>
     <div class="feed" id="h-feed"></div>
     <div class="banner" id="h-banner"><div class="b-main"></div><div class="b-sub"></div></div>
+    <div class="streak" id="h-streak"></div>
     <div class="inspect hidden" id="h-inspect"></div>
+    <div class="emote-wrap">
+      <button class="icon-btn emote-btn" data-act="emotes" aria-label="Emotes"><svg><use href="#i-chat"/></svg></button>
+      <div class="emote-menu hidden" id="emote-menu"></div>
+    </div>
+    <div class="fx-layer" id="fx-layer"></div>
 
     <div class="hud-bottom">
       <div class="card" id="h-card">
-        <img class="portrait" id="h-portrait" alt="">
+        <div class="portrait-wrap"><img class="portrait" id="h-portrait" alt=""><div class="hone-pips" id="h-hone"></div></div>
         <div class="card-body">
           <div class="card-name"><b id="h-name"></b><span id="h-piece"></span></div>
-          <div class="hpbar"><i id="h-hp"></i><span id="h-hptext"></span></div>
+          <div class="hpbar"><em id="h-hpghost"></em><i id="h-hp"></i><span id="h-hptext"></span></div>
           <div class="mini-stats" id="h-stats"></div>
-          <div class="shardbar"><span class="shard-ico"></span><b id="h-shards">0</b><div class="shardprog"><i id="h-shardprog"></i></div><span id="h-next"></span></div>
+          <div class="shardbar"><span class="shard-ico" id="h-shard-ico"></span><b id="h-shards">0</b><div class="shardprog"><i id="h-shardprog"></i></div><span id="h-next"></span></div>
         </div>
       </div>
       <div class="actions" id="h-actions">
-        <button class="act" data-slot="move"><span class="a-k">Move</span><span class="a-n" id="a-move"></span></button>
-        <button class="act" data-slot="atk"><span class="a-k">Attack</span><span class="a-n" id="a-atk"></span></button>
-        <button class="act" data-slot="sig"><span class="a-k">Signature</span><span class="a-n" id="a-sig"></span><em class="cd" id="cd-sig"></em></button>
-        <button class="act" data-slot="eq"><span class="a-k">Equipped</span><span class="a-n" id="a-eq"></span><em class="cd" id="cd-eq"></em></button>
-        <button class="act promo" data-slot="promote"><span class="a-k">Promote</span><span class="a-n" id="a-promo"></span></button>
-        <button class="act end" data-slot="end"><span class="a-k">End</span><span class="a-n">Turn</span></button>
+        <button class="act" data-slot="move"><svg class="a-i"><use href="#i-move"/></svg><span class="a-k">Move</span><span class="a-n" id="a-move"></span></button>
+        <button class="act" data-slot="atk"><svg class="a-i"><use href="#i-atk"/></svg><span class="a-k">Attack</span><span class="a-n" id="a-atk"></span></button>
+        <button class="act" data-slot="sig"><svg class="a-i"><use href="#i-sig"/></svg><span class="a-k">Signature</span><span class="a-n" id="a-sig"></span><em class="cd" id="cd-sig"></em></button>
+        <button class="act" data-slot="eq"><svg class="a-i"><use href="#i-eq"/></svg><span class="a-k">Equipped</span><span class="a-n" id="a-eq"></span><em class="cd" id="cd-eq"></em></button>
+        <button class="act promo" data-slot="promote"><svg class="a-i"><use href="#i-promo"/></svg><span class="a-k">Promote</span><span class="a-n" id="a-promo"></span></button>
+        <button class="act end" data-slot="end"><svg class="a-i"><use href="#i-end"/></svg><span class="a-k">End</span><span class="a-n">Turn</span></button>
       </div>
       <div class="tip" id="h-tip"></div>
     </div>
@@ -194,7 +226,7 @@
         <h3>Paused</h3>
         <p class="hint center">The match keeps running for everyone else.</p>
         <button class="btn wide" data-act="close-menu">Resume</button>
-        <button class="btn wide" data-act="mute">Toggle Sound</button>
+        <button class="btn wide" data-act="settings">Settings</button>
         <button class="btn wide danger" data-act="forfeit">Leave Match</button>
       </div>
     </div>
@@ -202,23 +234,39 @@
       <div class="modal-box">
         <h3 class="red">Eliminated</h3>
         <div class="big-place" id="dead-place"></div>
+        <p class="hint center" id="dead-by"></p>
         <button class="btn wide" data-act="spectate">Spectate</button>
         <button class="btn wide gold" data-act="results">See Results</button>
       </div>
     </div>
     <div class="modal hidden" id="m-results">
+      <canvas id="confetti"></canvas>
       <div class="modal-box results">
         <div class="r-title" id="r-title"></div>
         <div class="r-place" id="r-place"></div>
         <div class="r-stats" id="r-stats"></div>
+        <div class="r-xp"><div class="r-xp-top"><span class="lvl small" id="r-lvl">1</span><span id="r-xptext"></span></div><div class="xpbar big"><i id="r-xpbar"></i></div><div class="r-levelup hidden" id="r-levelup">Level Up</div></div>
         <div class="r-marks" id="r-marks"></div>
         <ol class="r-board" id="r-board"></ol>
-        <button class="btn big gold wide" data-act="to-title">Continue</button>
+        <div class="row2"><button class="btn big wide" data-act="to-title">Menu</button><button class="btn big gold wide shine" data-act="rematch" id="btn-rematch">Play Again</button></div>
       </div>
     </div>
   </section>
 </div>
+
+<!-- SETTINGS (global) -->
+<div class="modal hidden global" id="m-settings">
+  <div class="modal-box">
+    <h3>Settings</h3>
+    <div class="setting"><span>Music</span><input type="range" min="0" max="1" step="0.05" id="set-music"></div>
+    <div class="setting"><span>Sound Effects</span><input type="range" min="0" max="1" step="0.05" id="set-sfx"></div>
+    <label class="setting toggle"><span>Screen Shake</span><input type="checkbox" id="set-shake"><i></i></label>
+    <label class="setting toggle"><span>Vibration</span><input type="checkbox" id="set-haptics"><i></i></label>
+    <button class="btn wide" data-act="close-settings">Done</button>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
+<div class="flash" id="ui-flash"></div>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

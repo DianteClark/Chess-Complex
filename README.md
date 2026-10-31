@@ -13,7 +13,9 @@ A turn-based chess battle royale for up to 8 players. Everyone starts as a Pawn 
 - **The storm:** the outer ring cracks and collapses every few rounds, then sudden death.
 - **The Crown:** appears on round 7. Whoever takes it becomes King until someone takes it from them.
 - **Online friend codes:** host a room, share a 5-letter code or invite link, fill empty seats with bots.
-- **Armory:** earn Marks every match and unlock piece sets (Ember, Glacier, Verdant, Neon Circuit, Gilded, Voidborn).
+- **Armory:** earn Marks every match and unlock piece sets, board themes (Marble Court, Neon Grid, Ember Forge, Moonlit Garden) and finishers (Inferno, Thunderclap, Void Rift, Midas Touch) that play when you eliminate someone.
+- **Progression:** XP and levels with titles from Recruit to Legend; every level-up pays out Marks.
+- **Juice:** hit-stop, slow-motion eliminations, camera punches, lunging attacks, per-ability VFX, shattering pieces, collapsing storm tiles, damage previews with KO markers, kill streak callouts, emotes, haptics and a generative soundtrack that intensifies as the match closes in.
 
 ## How online play works
 GitHub Pages only serves static files, so matches are peer to peer over WebRTC using [PeerJS](https://peerjs.com). The host's browser runs the authoritative game; the friend code is the host's room ID. If a player disconnects, a bot takes over their piece. A few strict networks (some school or corporate Wi-Fi) block direct peer connections; mobile data or home Wi-Fi usually works.
