@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0a10">
+<title>Chess Complex</title>
+<meta name="description" content="A turn-based chess battle royale. Start as a pawn, collect shards, evolve, and be the last piece standing.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0a10'/%3E%3Cpath d='M18 54h28l-3-6H21zM24 46h16l-3-16H27zM32 8a8 8 0 1 0 0.01 0zM25 28h14v-4H25z' fill='%23d6b05c'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Cinzel:wght@600;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" defer></script>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="app">
+
+  <!-- TITLE -->
+  <section class="screen active" id="s-title">
+    <div class="title-wrap">
+      <div class="kicker">A chess battle royale</div>
+      <h1 class="logo"><span>CHESS</span><span class="logo-b">COMPLEX</span></h1>
+      <div class="logo-line"></div>
+      <nav class="menu">
+        <button class="btn big gold" data-go="solo">Play Solo</button>
+        <button class="btn big" data-go="host">Host Online</button>
+        <button class="btn big" data-go="join">Join With Code</button>
+        <div class="row2">
+          <button class="btn" data-go="loadout">Loadout</button>
+          <button class="btn" data-go="armory">Armory</button>
+        </div>
+        <button class="btn ghost small" data-go="howto">How to Play</button>
+      </nav>
+    </div>
+    <div class="corner-tl"><div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div></div>
+    <div class="corner-tr"><button class="icon-btn" data-act="mute" aria-label="Toggle sound"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg></button></div>
+  </section>
+
+  <!-- LOADOUT -->
+  <section class="screen" id="s-loadout">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Loadout</h2><div></div></header>
+    <div class="scroll">
+      <div class="panel">
+        <label class="lbl">Name</label>
+        <input id="in-name" maxlength="14" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="panel">
+        <div class="lbl">Preset</div>
+        <div class="presets" id="presets"></div>
+      </div>
+      <div class="panel">
+        <div class="lbl">Pawn Build <span class="pts" id="pts-left"></span></div>
+        <p class="hint">Points carry into every piece you evolve into.</p>
+        <div id="stat-alloc"></div>
+        <div class="stat-preview" id="stat-preview"></div>
+      </div>
+      <div class="panel">
+        <div class="lbl">Base Ability</div>
+        <div class="choice-list" id="passives"></div>
+      </div>
+      <div class="panel">
+        <div class="lbl">Equipped Abilities</div>
+        <p class="hint">Choose one active ability for each piece. It unlocks when you evolve.</p>
+        <div id="equips"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARMORY -->
+  <section class="screen" id="s-armory">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Armory</h2><div class="marks"><i class="mark-ico"></i><b id="marks-armory">0</b></div></header>
+    <div class="scroll">
+      <p class="hint center">Earn Marks every match. Spend them on piece sets.</p>
+      <div class="skins" id="skins"></div>
+    </div>
+  </section>
+
+  <!-- SOLO -->
+  <section class="screen" id="s-solo">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Solo</h2><div></div></header>
+    <div class="scroll">
+      <div class="panel">
+        <div class="lbl">Opponents <span class="pts" id="bot-n">7</span></div>
+        <input type="range" id="in-bots" min="1" max="7" value="7">
+      </div>
+      <div class="panel loadout-mini" id="solo-loadout"></div>
+      <button class="btn big gold wide" data-act="start-solo">Enter the Board</button>
+    </div>
+  </section>
+
+  <!-- HOST -->
+  <section class="screen" id="s-host">
+    <header class="bar"><button class="back" data-go="title" data-act="leave-lobby">Back</button><h2>Host</h2><div></div></header>
+    <div class="scroll">
+      <div class="panel code-panel">
+        <div class="lbl center">Friend Code</div>
+        <div class="code" id="host-code">-----</div>
+        <div class="status" id="host-status">Opening room...</div>
+        <div class="row2"><button class="btn small" data-act="copy-code">Copy Code</button><button class="btn small" data-act="copy-link">Copy Invite Link</button></div>
+      </div>
+      <div class="panel">
+        <div class="lbl">Players <span class="pts" id="lobby-count"></span></div>
+        <ul class="lobby" id="host-lobby"></ul>
+        <div class="row2"><button class="btn small" data-act="add-bot">Add Bot</button><button class="btn small" data-act="fill-bots">Fill With Bots</button></div>
+      </div>
+      <button class="btn big gold wide" data-act="start-host" id="btn-start-host" disabled>Start Match</button>
+    </div>
+  </section>
+
+  <!-- JOIN -->
+  <section class="screen" id="s-join">
+    <header class="bar"><button class="back" data-go="title" data-act="leave-lobby">Back</button><h2>Join</h2><div></div></header>
+    <div class="scroll">
+      <div class="panel code-panel">
+        <div class="lbl center">Enter Friend Code</div>
+        <input id="in-code" class="code-in" maxlength="5" autocomplete="off" spellcheck="false" placeholder="ABCDE">
+        <button class="btn big gold wide" data-act="join">Join</button>
+        <div class="status" id="join-status"></div>
+      </div>
+      <div class="panel hidden" id="join-lobby-panel">
+        <div class="lbl">Lobby</div>
+        <ul class="lobby" id="join-lobby"></ul>
+        <p class="hint center">Waiting for the host to start...</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW TO -->
+  <section class="screen" id="s-howto">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>How to Play</h2><div></div></header>
+    <div class="scroll prose">
+      <div class="panel"><h3>Last piece standing</h3><p>Everyone starts as a Pawn on a 16 by 16 board. Up to 8 players. Eliminate everyone else.</p></div>
+      <div class="panel"><h3>Turns run on speed</h3><p>Every piece has a speed meter. Higher SPD means you act more often. The strip at the top shows who moves next. On your turn you get one move and one action, in either order.</p></div>
+      <div class="panel"><h3>Evolve</h3><p>Collect Promotion Shards from the floor, crates, Hollows and fallen players. Spend them to evolve: Pawn, then Knight or Bishop, then Rook, then Queen. Or Hone your current piece for +15% stats and a stronger signature, so you can stay your favourite piece all game.</p></div>
+      <div class="panel"><h3>The board</h3><p>Walls block movement and shots. Rubble and crates break. Brambles stop slides and slow you down. Shrines heal once, then recharge. Hollows guard shard caches.</p></div>
+      <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later. Standing in the void burns 20% of your HP every turn. Once the board is fully closed, everyone burns.</p></div>
+      <div class="panel"><h3>The Crown</h3><p>On round 7 the Crown appears at the centre. Whoever takes it becomes the King: more HP, steady healing, but slow single steps. Kill the King and the Crown drops.</p></div>
+      <div class="panel"><h3>Controls</h3><p>Tap a highlighted tile to move. Pick an ability, tap a target to preview, tap again to confirm. Drag to pan, pinch or scroll to zoom.</p></div>
+    </div>
+  </section>
+
+  <!-- GAME -->
+  <section class="screen" id="s-game">
+    <canvas id="board"></canvas>
+    <div class="hud-top">
+      <div class="hud-info">
+        <div class="pill" id="h-round">Round 1</div>
+        <div class="pill storm" id="h-storm"></div>
+      </div>
+      <div class="order" id="h-order"></div>
+      <div class="hud-btns">
+        <div class="pill" id="h-alive"></div>
+        <button class="icon-btn" data-act="zoom" aria-label="Toggle overview"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 12h16M12 4v16"/></svg></button>
+        <button class="icon-btn" data-act="menu" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button>
+      </div>
+    </div>
+    <div class="timer"><i id="h-timer"></i></div>
+    <div class="feed" id="h-feed"></div>
+    <div class="banner" id="h-banner"><div class="b-main"></div><div class="b-sub"></div></div>
+    <div class="inspect hidden" id="h-inspect"></div>
+
+    <div class="hud-bottom">
+      <div class="card" id="h-card">
+        <img class="portrait" id="h-portrait" alt="">
+        <div class="card-body">
+          <div class="card-name"><b id="h-name"></b><span id="h-piece"></span></div>
+          <div class="hpbar"><i id="h-hp"></i><span id="h-hptext"></span></div>
+          <div class="mini-stats" id="h-stats"></div>
+          <div class="shardbar"><span class="shard-ico"></span><b id="h-shards">0</b><div class="shardprog"><i id="h-shardprog"></i></div><span id="h-next"></span></div>
+        </div>
+      </div>
+      <div class="actions" id="h-actions">
+        <button class="act" data-slot="move"><span class="a-k">Move</span><span class="a-n" id="a-move"></span></button>
+        <button class="act" data-slot="atk"><span class="a-k">Attack</span><span class="a-n" id="a-atk"></span></button>
+        <button class="act" data-slot="sig"><span class="a-k">Signature</span><span class="a-n" id="a-sig"></span><em class="cd" id="cd-sig"></em></button>
+        <button class="act" data-slot="eq"><span class="a-k">Equipped</span><span class="a-n" id="a-eq"></span><em class="cd" id="cd-eq"></em></button>
+        <button class="act promo" data-slot="promote"><span class="a-k">Promote</span><span class="a-n" id="a-promo"></span></button>
+        <button class="act end" data-slot="end"><span class="a-k">End</span><span class="a-n">Turn</span></button>
+      </div>
+      <div class="tip" id="h-tip"></div>
+    </div>
+
+    <div class="modal hidden" id="m-promote">
+      <div class="modal-box">
+        <h3>Promotion</h3>
+        <div class="promo-opts" id="promo-opts"></div>
+        <button class="btn ghost wide" data-act="close-promote">Not yet</button>
+      </div>
+    </div>
+    <div class="modal hidden" id="m-menu">
+      <div class="modal-box">
+        <h3>Paused</h3>
+        <p class="hint center">The match keeps running for everyone else.</p>
+        <button class="btn wide" data-act="close-menu">Resume</button>
+        <button class="btn wide" data-act="mute">Toggle Sound</button>
+        <button class="btn wide danger" data-act="forfeit">Leave Match</button>
+      </div>
+    </div>
+    <div class="modal hidden" id="m-dead">
+      <div class="modal-box">
+        <h3 class="red">Eliminated</h3>
+        <div class="big-place" id="dead-place"></div>
+        <button class="btn wide" data-act="spectate">Spectate</button>
+        <button class="btn wide gold" data-act="results">See Results</button>
+      </div>
+    </div>
+    <div class="modal hidden" id="m-results">
+      <div class="modal-box results">
+        <div class="r-title" id="r-title"></div>
+        <div class="r-place" id="r-place"></div>
+        <div class="r-stats" id="r-stats"></div>
+        <div class="r-marks" id="r-marks"></div>
+        <ol class="r-board" id="r-board"></ol>
+        <button class="btn big gold wide" data-act="to-title">Continue</button>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
