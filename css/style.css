@@ -602,3 +602,16 @@ body.reduced .banner.show, body.reduced .streak.show { animation-duration: 1.2s;
 .gm-tip p { margin: 0; font-size: 12.5px; line-height: 1.4; color: #ece6f6; }
 .gm-tip p b { color: var(--gold2); }
 .order .o { animation: none !important; }
+
+/* QA round 2 */
+.banner { top: calc(150px + var(--st)); }
+.event-chip { top: calc(104px + var(--st)); }
+.feed { top: calc(132px + var(--st)); }
+.gm-tip { top: auto; bottom: calc(var(--hb, 190px) + 86px); }
+.hud-top .order { max-width: 520px; margin: 0 auto; }
+.mode .mi { width: 54px; height: 54px; right: -4px; bottom: -6px; opacity: .14; }
+.mode.on .mi { opacity: .35; }
+.mode p { padding-right: 18px; }
+.modal-box.results { padding-bottom: 0; }
+.modal-box.results > .row2 { position: sticky; bottom: 0; padding: 12px 0 14px; margin-top: 6px; background: linear-gradient(0deg, #0f0d16 75%, rgba(15,13,22,0)); }
+body.bigtext .scroll, body.bigtext .modal-box, body.bigtext .feed, body.bigtext .inspect, body.bigtext .title-wrap, body.bigtext .gm-tip, body.bigtext .coach { zoom: 1.12; }

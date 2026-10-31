@@ -42,6 +42,10 @@
 - The service worker no longer serves HTML in place of a missing script offline, and it now times out on flaky networks.
 - iOS audio recovers after interruptions. Music no longer bursts after backgrounding.
 
+- QA round 2: portrait recenter from full-board view, correct killer shown for the final elimination, no fake timer in untimed modes, correct leaderboard ranks on early or forfeited results, results buttons pinned on small screens, banners, tips and chips no longer overlap, the danger overlay shows enemy piece attacks only, and the Crown can no longer land on a chest in the last storm ring.
+- One-time Grandmaster tips the first time you meet the storm, Hollows, world events, a full ultimate and the Crown.
+- Public TURN relay fallback for friend-code play on strict networks.
+
 **Performance**
 - Pieces are drawn from cached high-resolution sprites (animated skins excepted). Background and vignette gradients are cached. Particles are capped. Noise buffers are reused. The menu background runs at 30 fps and pauses under dialogs. Backdrop blur removed.
 

@@ -22,7 +22,7 @@ export function rewardLabel(r) {
   if (r.board) return { kind: 'Board', name: BOARDS[r.board].name, icon: 'board', id: r.board };
   if (r.finisher) return { kind: 'Finisher', name: FINISHERS[r.finisher].name, icon: 'finisher', id: r.finisher };
   if (r.title) return { kind: 'Title', name: r.title, icon: 'title' };
-  return { kind: 'Marks', name: `${r.marks} Marks`, icon: 'marks' };
+  return { kind: 'Reward', name: `${r.marks} Marks`, icon: 'marks' };
 }
 
 function grant(p, r) {

@@ -84,7 +84,7 @@ export class GameHost {
     this.aiT = null; this.timerT = null; this.fast = false;
   }
   start() { this.publish([]); this.schedule(); }
-  publish(ev) { this.emit({ t: 'state', state: structuredClone(this.s), ev, dl: Math.max(0, this.deadline - Date.now()) }); }
+  publish(ev) { this.emit({ t: 'state', state: structuredClone(this.s), ev, dl: this.deadline ? Math.max(0, this.deadline - Date.now()) : -1 }); }
   act(pid, a) {
     if (this.s.over) return false;
     const r = applyAction(this.s, pid, a);
@@ -96,7 +96,7 @@ export class GameHost {
     clearTimeout(this.aiT); clearTimeout(this.timerT);
     const s = this.s; if (s.over) return;
     const u = unitById(s, s.active); if (!u) return;
-    if (s.turnNo !== this.lastTurn) { this.lastTurn = s.turnNo; this.deadline = Date.now() + ((this.s.rules && this.s.rules.turnMs) || TURN_MS); if (!(u.kind === 'hollow' || u.bot)) this.publish([]); else this.deadline = 0; }
+    if (s.turnNo !== this.lastTurn) { this.lastTurn = s.turnNo; this.deadline = this.noTimer ? 0 : Date.now() + ((this.s.rules && this.s.rules.turnMs) || TURN_MS); if (!(u.kind === 'hollow' || u.bot)) this.publish([]); else this.deadline = 0; }
     if (u.kind === 'hollow' || u.bot) {
       const turn = s.turnNo;
       this.aiT = setTimeout(() => this.runAI(u.id, turn), this.fast ? 0 : u.kind === 'hollow' ? 260 : 520);

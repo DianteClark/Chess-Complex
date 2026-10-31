@@ -423,6 +423,7 @@ function dropNear(s, x, y, item) {
   let cands = [pt(x, y), ...around8(x, y)].filter((t) => !isSolid(s, t.x, t.y) && !isVoid(s, t.x, t.y));
   if (!cands.length) cands = freeTiles(s, 0).slice(0, 1);
   const spot = cands.find((t) => !s.items.some((i) => i.x === t.x && i.y === t.y)) || cands[0] || pt(x, y);
+  if (isSolid(s, spot.x, spot.y) && tileAt(s, spot.x, spot.y) && tileAt(s, spot.x, spot.y).t !== 'out') s.tiles[spot.y * SIZE + spot.x] = { t: 'floor' };
   const same = s.items.find((i) => i.x === spot.x && i.y === spot.y && i.k === item.k && item.k === 'shard');
   if (same) same.n += item.n; else s.items.push({ x: spot.x, y: spot.y, ...item });
 }
@@ -774,7 +775,12 @@ function onRound(s, ev) {
   } else if (s.storm.crack && (R.every === 1 || (r - R.first) % R.every === 1)) {
     s.storm.crack = false; s.storm.ring++;
     s.items = s.items.filter((i) => i.k === 'crown' || !isVoid(s, i.x, i.y));
-    for (const it of s.items) if (it.k === 'crown' && isVoid(s, it.x, it.y)) { const f = freeTiles(s, s.storm.ring); const c = f.find((t) => !unitAt(s, t.x, t.y)) || pt(7, 7); it.x = c.x; it.y = c.y; }
+    for (const it of s.items) if (it.k === 'crown' && isVoid(s, it.x, it.y)) {
+      let c = null;
+      for (let y = 0; y < SIZE && !c; y++) for (let x = 0; x < SIZE && !c; x++) if (!isVoid(s, x, y) && !isSolid(s, x, y) && !unitAt(s, x, y)) c = pt(x, y);
+      if (!c) { c = pt(7, 7); if (isSolid(s, 7, 7)) s.tiles[7 * SIZE + 7] = { t: 'floor' }; }
+      it.x = c.x; it.y = c.y;
+    }
     ev.push({ e: 'storm', phase: 'collapse', ring: s.storm.ring });
   }
   if (!s.crownSpawned && r >= R.crown) {

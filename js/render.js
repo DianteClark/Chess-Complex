@@ -304,9 +304,9 @@ export class Renderer {
     cam.x = lerp(cam.x, cam.tx, k); cam.y = lerp(cam.y, cam.ty, k); cam.z = lerp(cam.z, cam.tz, k);
     const z = this.z;
     const B = this.bounds || { x0: 0, y0: 0, x1: SIZE - 1, y1: SIZE - 1 };
-    const clamp = (v, span, lo, hi) => { const h = span / z / 2, len = hi - lo + 1; return len + 1 <= h * 2 ? lo + len / 2 : Math.max(lo + h - 0.5, Math.min(hi + 1.5 - h, v)); };
-    cam.x = clamp(cam.x, this.W, B.x0, B.x1); cam.y = clamp(cam.y, this.VH, B.y0, B.y1);
-    cam.tx = clamp(cam.tx, this.W, B.x0, B.x1); cam.ty = clamp(cam.ty, this.VH, B.y0, B.y1);
+    const clamp = (v, span, lo, hi, zz) => { const h = span / zz / 2, len = hi - lo + 1; return len + 1 <= h * 2 ? lo + len / 2 : Math.max(lo + h - 0.5, Math.min(hi + 1.5 - h, v)); };
+    cam.x = clamp(cam.x, this.W, B.x0, B.x1, z); cam.y = clamp(cam.y, this.VH, B.y0, B.y1, z);
+    cam.tx = clamp(cam.tx, this.W, B.x0, B.x1, cam.tz); cam.ty = clamp(cam.ty, this.VH, B.y0, B.y1, cam.tz);
     this.punch *= Math.pow(0.02, realDt);
     for (const d of this.disp.values()) {
       const t = Math.max(0, Math.min(1, (this.time - d.t0) / d.dur));

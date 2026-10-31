@@ -84,7 +84,7 @@ function renderProfile() {
   let np = $('#new-player');
   if (!profile.tutorial.length && !profile.games) { if (!np) { np = document.createElement('div'); np.id = 'new-player'; np.className = 'new-player'; np.dataset.go = 'tutorial'; np.textContent = 'New here? Learn the ropes'; $('.logo-line').after(np); } }
   else if (np) np.remove();
-  $('#t-lvl').textContent = profile.level; $('#t-title').textContent = titleFor(profile.level);
+  $('#t-lvl').textContent = profile.level; $('#t-title').textContent = profile.title || titleFor(profile.level);
   $('#t-xp').style.width = Math.min(100, (profile.xp / xpForLevel(profile.level)) * 100) + '%';
 }
 function countUp(el, from, to, dur = 900, tick = false) {
@@ -210,7 +210,7 @@ function renderArmory() {
   const hints = { pieces: 'Piece sets change how your pieces look to everyone.', boards: 'Boards change the arena you see.', finishers: 'Finishers play when you eliminate someone. Everyone sees them.' };
   $('#armory-hint').textContent = hints[armoryTab];
   const tag = (price) => `<div class="price-tag"><i class="mark-ico"></i>${price}</div>`;
-  const btn = (kind, k, owned, eq, price) => eq ? `<button class="btn small" disabled>Equipped</button>` : owned ? `<button class="btn small" data-equip-${kind}="${k}">Equip</button>` : price == null ? `<button class="btn small" disabled>Crown Path reward</button>` : `<button class="btn small gold" data-buy-${kind}="${k}" ${profile.marks < price ? 'disabled' : ''}>Unlock ${price}</button>`;
+  const btn = (kind, k, owned, eq, price) => eq ? `<button class="btn small" disabled>Equipped</button>` : owned ? `<button class="btn small" data-equip-${kind}="${k}">Equip</button>` : price == null ? `<button class="btn small" disabled>Crown Path reward</button>` : `<button class="btn small gold" data-buy-${kind}="${k}">Unlock ${price}</button>`;
   armoryPreviews.list = [];
   if (armoryTab === 'pieces') {
     $('#skins').innerHTML = Object.entries(SKINS).map(([k, s]) => {
@@ -277,7 +277,7 @@ function onArmoryClick(e) {
   const d = b.dataset;
   const buy = (list, ownedKey, eqKey, k, label) => {
     const price = list[k].price;
-    if (profile.marks < price) { sfx.error(); return; }
+    if (profile.marks < price) { sfx.error(); toast(`You need ${price - profile.marks} more Marks`); return; }
     if (!b.classList.contains('confirm-buy')) { $$('.confirm-buy').forEach((x) => { x.classList.remove('confirm-buy'); x.textContent = x.dataset.lbl; }); b.dataset.lbl = b.textContent; b.textContent = `Confirm ${price}?`; b.classList.add('confirm-buy'); sfx.select(); return; }
     profile.marks -= price; profile[ownedKey].push(k); profile[eqKey] = k; save(); sfx.buy(); uiFlash(); haptic([20, 30, 40]);
     toast(`${label} unlocked`); renderArmory();
@@ -636,7 +636,7 @@ const game = {
       session.send({ type: 'promote', to: b.dataset.to }); $('#m-promote').classList.add('hidden');
     });
     $('#emote-menu').innerHTML = Object.entries(EMOTES).map(([k, t]) => `<button data-emote="${k}">${t}</button>`).join('');
-    $('#h-portrait').parentElement.addEventListener('click', () => { const u = this.me; if (u) { this.r.follow = true; this.r.closeup(); this.r.focus(u.x, u.y); sfx.tap(); } });
+    $('#h-portrait').parentElement.addEventListener('click', () => { const u = this.me; if (u) { this.r.closeup(); this.r.follow = false; this.r.focus(u.x, u.y); sfx.tap(); } });
     $('#ult-btn').addEventListener('click', () => { if (this.suppress) { this.suppress = false; return; } this.onAction('ult'); });
     $('#gm-tip').addEventListener('click', () => $('#gm-tip').classList.add('hidden'));
     $('#emote-menu').addEventListener('click', (e) => { const b = e.target.closest('[data-emote]'); if (!b || !session || !session.emote) return; session.emote(b.dataset.emote); $('#emote-menu').classList.add('hidden'); sfx.tap(); });
@@ -676,7 +676,7 @@ const game = {
     this.s = m.state;
     if (settings.cb) for (const u of this.s.units) if (u.kind === 'player') u.color = CB_COLORS[u.slot % 8];
     { const mu = this.s.units.find((u) => session && u.pid === session.myPid); if (mu && mu.alive) this.minHp = Math.min(this.minHp ?? 1, mu.hp / stats(mu).maxHp); }
-    this.deadline = Date.now() + m.dl;
+    this.deadline = m.dl < 0 ? 0 : Date.now() + m.dl;
     const mine = this.me;
     this.r.myId = mine ? mine.id : null;
     this.r.setState(this.s, m.ev, first);
@@ -729,7 +729,7 @@ const game = {
         const k = e.by ? unitById(s, e.by) : null;
         const ico = (u) => `<img src="${pieceIcon(u.piece, u.skin, null, 18)}" alt="">`;
         this.after(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : 'fell to the storm'}</span>`), 400);
-        if (e.id === myId && !s.over) { this.killedBy = k; this.after(() => this.showDead(), 1700); }
+        if (e.id === myId) { this.killedBy = k && k.id !== myId ? k : null; if (!s.over) this.after(() => this.showDead(), 1700); }
       }
       if (e.e === 'over') this.after(() => this.showResults(), 4800);
     }
@@ -737,6 +737,7 @@ const game = {
   tip(id, html) {
     profile.tips = profile.tips || [];
     if (profile.tips.includes(id) || (session && session.mode === 'tutorial')) return;
+    if ($('#h-banner').classList.contains('show') && performance.now() - (this.bannerAt || 0) < 1700) { this.after(() => this.tip(id, html), 1800); return; }
     profile.tips.push(id); save();
     const el = $('#gm-tip'); el.querySelector('img').src = pieceIcon('king', 'gilded', null, 34);
     el.querySelector('p').innerHTML = html; el.classList.remove('hidden');
@@ -815,7 +816,7 @@ const game = {
   banner(main, sub, tone) {
     const b = $('#h-banner'); b.className = 'banner ' + (tone || '');
     b.querySelector('.b-main').textContent = main; b.querySelector('.b-sub').textContent = sub;
-    void b.offsetWidth; b.classList.add('show');
+    void b.offsetWidth; b.classList.add('show'); this.bannerAt = performance.now();
   },
   feed(html) { const d = document.createElement('div'); d.innerHTML = html; $('#h-feed').prepend(d); setTimeout(() => d.remove(), 5200); while ($('#h-feed').children.length > 4) $('#h-feed').lastChild.remove(); },
   heartbeat(dt) {
@@ -834,12 +835,12 @@ const game = {
     const set = new Map();
     for (const v of s.units) {
       if (!v.alive || v.id === me.id) continue;
-      if (v.kind === 'hollow' && v.dummy) continue;
+      if (v.kind !== 'player') continue;
       const save = { x: v.x, y: v.y };
       const spots = [save, ...legalMoves(s, v)];
       for (const p of spots) {
         v.x = p.x; v.y = p.y;
-        for (const slot of v.kind === 'hollow' ? ['atk'] : ['atk', 'sig', 'eq']) {
+        for (const slot of ['atk']) {
           if (slot !== 'atk' && v.cd && v.cd[slot] > 0) continue;
           let opts = []; try { opts = abilityOptions(s, v, slot); } catch {}
           for (const o of opts) if (o.mult > 0) for (const t of o.tiles) set.set(t.y * 16 + t.x, t);
@@ -941,11 +942,11 @@ const game = {
   tickTimer() {
     const t = $('#h-timer'); if (!this.s || this.s.over) { t.style.transform = 'scaleX(0)'; return; }
     const a = unitById(this.s, this.s.active);
-    const human = a && a.kind === 'player' && !a.bot;
+    const human = a && a.kind === 'player' && !a.bot && this.deadline > 0;
     const left = Math.max(0, this.deadline - Date.now());
     t.style.transform = `scaleX(${human ? left / ((this.s.rules && this.s.rules.turnMs) || TURN_MS) : 0})`;
     t.classList.toggle('low', left < 8000);
-    if (this.myTurn() && left < 5000 && Math.floor(left / 1000) !== this.lastTick) { this.lastTick = Math.floor(left / 1000); sfx.warn(); }
+    if (human && this.myTurn() && left < 5000 && Math.floor(left / 1000) !== this.lastTick) { this.lastTick = Math.floor(left / 1000); sfx.warn(); }
   },
   onAction(slot) {
     unlockAudio();
@@ -1000,6 +1001,7 @@ const game = {
     const st = stats(v);
     const extra = v.dummy ? 'A training dummy. It will not fight back.' : v.kind === 'hollow' ? 'Guards a shard cache. Drops 2 shards.' : `${PASSIVES[v.passive].name} - ${v.shards} shard${v.shards === 1 ? '' : 's'} - Attune ${v.attune || 0} - Ult ${Math.round(v.ult || 0)}% - ${v.kills} KO`;
     box.innerHTML = `<img src="${pieceIcon(v.piece, v.skin, v.color, 46)}" alt=""><div>${v.title ? `<span style="color:var(--gold);font-size:10px;letter-spacing:.12em;text-transform:uppercase">${esc(v.title)}</span>` : ''}<b style="color:${v.kind === 'player' ? v.color : '#bbb'}">${esc(v.name)}${v.piece === 'king' ? ' - King' : v.kind === 'player' ? ' - ' + PIECES[v.piece].name : ''}</b><span>HP ${v.hp}/${st.maxHp} - ATK ${st.atk} - DEF ${st.def} - SPD ${st.spd}</span><span>${extra}</span></div>`;
+    const co = $('#coach'); box.style.top = co.classList.contains('hidden') ? '' : (co.getBoundingClientRect().bottom + 6) + 'px';
     box.classList.remove('hidden'); sfx.tap();
     this.inspT = setTimeout(() => box.classList.add('hidden'), 3200);
   },
@@ -1070,7 +1072,7 @@ const game = {
     }, 700);
     const tk = Object.entries(this.taken || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
     const rc = $('#r-recap');
-    if (!win && tk.length) { rc.innerHTML = `${this.killedBy ? `Eliminated by <b>${esc(this.killedBy.name)}</b>${this.killedBy.piece ? ` (${PIECES[this.killedBy.piece] ? PIECES[this.killedBy.piece].name : ''})` : ''}. ` : u.alive ? '' : 'The board claimed you. '}Damage taken: ${tk.map(([n, v]) => `<b>${esc(n)}</b> ${v}`).join(', ')}.`; rc.classList.remove('hidden'); }
+    if (!win && tk.length) { rc.innerHTML = `${this.killedBy ? `Eliminated by <b>${esc(this.killedBy.name)}</b>${this.killedBy.kind === 'player' && PIECES[this.killedBy.piece] ? ` (${PIECES[this.killedBy.piece].name})` : ''}. ` : u.alive ? '' : 'The board claimed you. '}Damage taken: ${tk.map(([n, v]) => `<b>${esc(n)}</b> ${v}`).join(', ')}.`; rc.classList.remove('hidden'); }
     else rc.classList.add('hidden');
     $('#r-quests').innerHTML = (this.questsDone || []).map((q, i) => `<div style="animation-delay:${1 + i * 0.15}s"><span>Quest complete: ${q.text}</span><b>+${q.reward}</b></div>`).join('');
     if (this.questsDone && this.questsDone.length) setTimeout(() => sfx.quest(), 1100);
@@ -1084,8 +1086,9 @@ const game = {
     if (winner && !win) $('#r-place').innerHTML = `Placed ${place} of ${total} <div class="r-winner"><img src="${pieceIcon(winner.piece, winner.skin, winner.color, 54)}" alt=""><div><span>WINNER</span><b style="color:${winner.color}">${esc(winner.name)}</b></div></div>`;
     $('#r-marks').innerHTML = earned ? `<i class="mark-ico"></i>+<span id="rm">0</span> Marks` : '';
     if (earned) setTimeout(() => countUp($('#rm'), 0, earned, 1000, true), 900);
-    const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 0 : a.place) - (b.alive ? 0 : b.place));
-    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${v.alive ? 1 : v.place}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
+    const rankOf = (v) => (v.id === u.id ? place : v.alive ? (s.over ? 1 : 0) : v.place);
+    const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (rankOf(a) || 0.5) - (rankOf(b) || 0.5));
+    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${rankOf(v) || '-'}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
     $('#btn-rematch').classList.toggle('hidden', session && session.mode === 'client');
     $('#m-results').classList.remove('hidden');
     music.set(0, 'menu');
@@ -1206,7 +1209,7 @@ document.addEventListener('click', (e) => {
     case 'fill-bots': while (session && session.players && session.players.length < session.maxP) hostAddBot(); break;
     case 'start-host': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startHost(); break;
     case 'join': joinGame(); break;
-    case 'danger': game.danger = !game.danger; $('#btn-danger').classList.toggle('on', game.danger); game.refresh(); sfx.tap(); if (game.danger) toast('Red tiles: where enemies can hit next turn'); break;
+    case 'danger': game.danger = !game.danger; $('#btn-danger').classList.toggle('on', game.danger); game.refresh(); sfx.tap(); if (game.danger) toast('Red tiles: where enemy pieces can attack next turn'); break;
     case 'zoom': if (game.r.cam.tz > game.r.fitZoom * 1.05) game.r.overview(); else game.r.closeup(); sfx.tap(); break;
     case 'menu': $('#m-menu').classList.remove('hidden'); sfx.tap(); break;
     case 'close-menu': $('#m-menu').classList.add('hidden'); break;
