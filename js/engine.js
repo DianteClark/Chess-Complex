@@ -29,7 +29,7 @@ export const isVoid = (s, x, y) => ringOf(x, y) < s.storm.ring;
 export const isCracked = (s, x, y) => s.storm.crack && ringOf(x, y) === s.storm.ring;
 export const unitAt = (s, x, y) => s.units.find((u) => u.alive && u.x === x && u.y === y) || null;
 export const unitById = (s, id) => s.units.find((u) => u.id === id) || null;
-const SOLID = { wall: 1, rubble: 1, crate: 1, chest: 1 };
+const SOLID = { wall: 1, rubble: 1, crate: 1, chest: 1, out: 1 };
 export const isSolid = (s, x, y) => { const t = tileAt(s, x, y); return !t || !!SOLID[t.t]; };
 export const canStand = (s, x, y) => inB(x, y) && !isSolid(s, x, y) && !unitAt(s, x, y);
 const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
@@ -53,7 +53,7 @@ export function baseStats(u) {
 }
 export const attuneSpd = (u) => Math.floor((u.attune || 0) / ATTUNE.spdEvery);
 export function stats(u) {
-  if (u.kind === 'hollow') return { maxHp: HOLLOW_STATS.hp, atk: HOLLOW_STATS.atk, def: HOLLOW_STATS.def, spd: HOLLOW_STATS.spd + buffSum(u, 'spd') };
+  if (u.kind === 'hollow') return { maxHp: u.hpMax || HOLLOW_STATS.hp, atk: HOLLOW_STATS.atk, def: u.dummy ? 2 : HOLLOW_STATS.def, spd: (u.dummy ? 5 : HOLLOW_STATS.spd) + buffSum(u, 'spd') };
   const b = baseStats(u), a = u.attune || 0;
   return {
     maxHp: Math.round(b.hp * (1 + ATTUNE.hp * a)), atk: Math.round(b.atk * (1 + ATTUNE.atk * a)), def: Math.round(b.def * (1 + ATTUNE.def * a)),
@@ -136,6 +136,27 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0) {
   const ev = [];
   nextTurn(s, ev);
   return s;
+}
+
+// ---------- tutorial arena ----------
+export const ARENA = { x0: 4, y0: 5, x1: 11, y1: 11 };
+export function createTutorial(player) {
+  const s = createMatch([player], 7);
+  s.tutorial = true; s.units = s.units.filter((u) => u.kind === 'player'); s.items = [];
+  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
+    const inside = x >= ARENA.x0 && x <= ARENA.x1 && y >= ARENA.y0 && y <= ARENA.y1;
+    s.tiles[y * SIZE + x] = { t: inside ? 'floor' : 'out' };
+  }
+  const me = s.units[0]; me.x = 5; me.y = 9; me.gauge = 100;
+  s.active = me.id; s.turn = { moved: false, acted: false, extraMoves: 0, rooted: false };
+  return s;
+}
+export function spawnDummy(s, x, y, hp = 40) {
+  const old = unitAt(s, x, y); if (old) return old;
+  if (tileAt(s, x, y)) s.tiles[y * SIZE + x] = { t: 'floor' };
+  const d = { id: s.nextId++, kind: 'hollow', dummy: true, name: 'Dummy', piece: 'hollow', x, y, hx: x, hy: y, hp, hpMax: hp, gauge: 0, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow' };
+  s.units.push(d);
+  return d;
 }
 
 // ---------- movement ----------
@@ -734,6 +755,7 @@ function worldEvents(s, ev) {
 function onRound(s, ev) {
   for (const t of s.tiles) if (t.t === 'shrine' && t.cd > 0) t.cd--;
   const r = s.round;
+  if (s.tutorial) return;
   worldEvents(s, ev);
   if (s.over) return;
   if (s.storm.ring < STORM.maxRing && r >= STORM.firstCrack && (r - STORM.firstCrack) % STORM.every === 0 && !s.storm.crack) {
@@ -782,6 +804,7 @@ export function previewDamage(src, tgt, mult) {
 function estDmg(src, tgt, mult) { return Math.max(1, stats(src).atk * mult * 30 / (30 + stats(tgt).def * defMul(tgt))); }
 
 export function planHollow(s, u) {
+  if (u.dummy) return [{ type: 'end' }];
   const players = alivePlayers(s);
   let target = null, bd = 99;
   for (const p of players) { const d = cheb(u, p); if (d < bd) { bd = d; target = p; } }

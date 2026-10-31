@@ -21,7 +21,7 @@ export class Renderer {
     this.hitFlash = new Map(); this.follow = true; this.hs = 0; this.slow = null; this.punch = 0;
     this.theme = BOARDS.hall; this.shakeOn = true; this.timers = [];
     this.motes = Array.from({ length: 46 }, () => ({ x: Math.random() * SIZE, y: Math.random() * SIZE, v: 0.05 + Math.random() * 0.15, p: Math.random() * 6, s: 0.015 + Math.random() * 0.03 }));
-    this.intro = null;
+    this.intro = null; this.bounds = null; this.marks = [];
     this.resize();
     addEventListener('resize', () => this.resize());
   }
@@ -33,12 +33,14 @@ export class Renderer {
     this.c.width = Math.round(this.W * dpr); this.c.height = Math.round(this.H * dpr);
     this.pad = this.pad || { t: 0, b: 0 };
     this.VH = Math.max(120, this.H - this.pad.t - this.pad.b); this.CY = this.pad.t + this.VH / 2;
-    this.fitZoom = Math.min(this.W, this.VH) / (SIZE + 1.2);
+    const bw = this.bounds ? this.bounds.x1 - this.bounds.x0 + 1 : SIZE, bh = this.bounds ? this.bounds.y1 - this.bounds.y0 + 1 : SIZE;
+    this.fitZoom = Math.min(this.W / (bw + 1.2), this.VH / (bh + 1.2));
     this.minZ = this.fitZoom * 0.9; this.maxZ = Math.max(this.fitZoom * 3, 70);
     if (!this.zoomSet) { this.cam.z = this.cam.tz = this.defaultZoom(); }
   }
   setPad(t, b) { this.pad = { t, b }; this.resize(); }
-  defaultZoom() { return Math.max(this.fitZoom, Math.min(this.W, this.VH) / 10.5); }
+  defaultZoom() { return this.bounds ? this.fitZoom : Math.max(this.fitZoom, Math.min(this.W, this.VH) / 10.5); }
+  setBounds(b) { this.bounds = b; this.zoomSet = false; this.resize(); if (b) { this.cam.x = this.cam.tx = (b.x0 + b.x1 + 1) / 2; this.cam.y = this.cam.ty = (b.y0 + b.y1 + 1) / 2; } }
   get z() { return this.cam.z * (1 + this.punch); }
   toScreen(wx, wy) { return [(wx - this.cam.x) * this.z + this.W / 2, (wy - this.cam.y) * this.z + this.CY]; }
   toWorld(sx, sy) { return [(sx - this.W / 2) / this.z + this.cam.x, (sy - this.CY) / this.z + this.cam.y]; }
@@ -52,9 +54,9 @@ export class Renderer {
     this.cam.x += wx - nx; this.cam.y += wy - ny; this.cam.tx = this.cam.x; this.cam.ty = this.cam.y;
   }
   pan(dx, dy) { this.cam.x -= dx / this.z; this.cam.y -= dy / this.z; this.cam.tx = this.cam.x; this.cam.ty = this.cam.y; this.follow = false; }
-  overview() { this.cam.tz = this.fitZoom; this.cam.tx = SIZE / 2; this.cam.ty = SIZE / 2; this.zoomSet = true; }
+  overview() { this.cam.tz = this.fitZoom; const b = this.bounds; this.cam.tx = b ? (b.x0 + b.x1 + 1) / 2 : SIZE / 2; this.cam.ty = b ? (b.y0 + b.y1 + 1) / 2 : SIZE / 2; this.zoomSet = true; }
   closeup() { this.cam.tz = this.defaultZoom(); this.follow = true; this.zoomSet = true; }
-  reset() { this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; }
+  reset() { this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; }
 
   kick(n) { if (this.shakeOn) this.shake = Math.min(16, this.shake + n); }
   hitstop(t) { this.hs = Math.max(this.hs, t); }
@@ -284,9 +286,10 @@ export class Renderer {
     const k = 1 - Math.pow(0.0015, realDt);
     cam.x = lerp(cam.x, cam.tx, k); cam.y = lerp(cam.y, cam.ty, k); cam.z = lerp(cam.z, cam.tz, k);
     const z = this.z;
-    const clamp = (v, span) => { const h = span / z / 2; return SIZE + 1 <= h * 2 ? SIZE / 2 : Math.max(h - 0.5, Math.min(SIZE + 0.5 - h, v)); };
-    cam.x = clamp(cam.x, this.W); cam.y = clamp(cam.y, this.VH);
-    cam.tx = clamp(cam.tx, this.W); cam.ty = clamp(cam.ty, this.VH);
+    const B = this.bounds || { x0: 0, y0: 0, x1: SIZE - 1, y1: SIZE - 1 };
+    const clamp = (v, span, lo, hi) => { const h = span / z / 2, len = hi - lo + 1; return len + 1 <= h * 2 ? lo + len / 2 : Math.max(lo + h - 0.5, Math.min(hi + 1.5 - h, v)); };
+    cam.x = clamp(cam.x, this.W, B.x0, B.x1); cam.y = clamp(cam.y, this.VH, B.y0, B.y1);
+    cam.tx = clamp(cam.tx, this.W, B.x0, B.x1); cam.ty = clamp(cam.ty, this.VH, B.y0, B.y1);
     this.punch *= Math.pow(0.02, realDt);
     for (const d of this.disp.values()) {
       const t = Math.max(0, Math.min(1, (this.time - d.t0) / d.dur));
@@ -332,10 +335,12 @@ export class Renderer {
     // frame
     const fa = this.tileVisible(0, 0) > 0 ? 1 : 0;
     ctx.globalAlpha = this.intro && this.intro.t < 1.6 ? Math.min(1, this.intro.t * 1.5) : 1;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(-0.45, -0.25, SIZE + 0.9, SIZE + 0.9);
-    ctx.fillStyle = '#0d0b13'; ctx.fillRect(-0.35, -0.35, SIZE + 0.7, SIZE + 0.7);
-    ctx.strokeStyle = th.frame; ctx.globalAlpha *= 0.6; ctx.lineWidth = 0.05; ctx.strokeRect(-0.3, -0.3, SIZE + 0.6, SIZE + 0.6);
-    ctx.globalAlpha *= 0.4; ctx.lineWidth = 0.02; ctx.strokeRect(-0.18, -0.18, SIZE + 0.36, SIZE + 0.36);
+    const FB = this.bounds || { x0: 0, y0: 0, x1: SIZE - 1, y1: SIZE - 1 };
+    const fw = FB.x1 - FB.x0 + 1, fh = FB.y1 - FB.y0 + 1;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(FB.x0 - 0.45, FB.y0 - 0.25, fw + 0.9, fh + 0.9);
+    ctx.fillStyle = '#0d0b13'; ctx.fillRect(FB.x0 - 0.35, FB.y0 - 0.35, fw + 0.7, fh + 0.7);
+    ctx.strokeStyle = th.frame; ctx.globalAlpha *= 0.6; ctx.lineWidth = 0.05; ctx.strokeRect(FB.x0 - 0.3, FB.y0 - 0.3, fw + 0.6, fh + 0.6);
+    ctx.globalAlpha *= 0.4; ctx.lineWidth = 0.02; ctx.strokeRect(FB.x0 - 0.18, FB.y0 - 0.18, fw + 0.36, fh + 0.36);
     ctx.globalAlpha = 1; void fa;
 
     // floor
@@ -343,6 +348,7 @@ export class Renderer {
       const vis = this.tileVisible(x, y);
       if (vis <= 0) continue;
       const ring = ringOf(x, y);
+      if (s.tiles[y * SIZE + x].t === 'out') continue;
       if (ring < s.storm.ring) { this.drawVoid(x, y, T); continue; }
       ctx.globalAlpha = vis;
       const inset = (1 - vis) * 0.5;
@@ -360,7 +366,7 @@ export class Renderer {
     ctx.globalAlpha = 1;
     // grid
     ctx.strokeStyle = th.grid; ctx.lineWidth = th.glowGrid ? 0.025 : 0.015;
-    ctx.beginPath(); for (let i = 0; i <= SIZE; i++) { ctx.moveTo(i, 0); ctx.lineTo(i, SIZE); ctx.moveTo(0, i); ctx.lineTo(SIZE, i); } ctx.stroke();
+    ctx.beginPath(); for (let i = FB.x0; i <= FB.x1 + 1; i++) { ctx.moveTo(i, FB.y0); ctx.lineTo(i, FB.y1 + 1); } for (let i = FB.y0; i <= FB.y1 + 1; i++) { ctx.moveTo(FB.x0, i); ctx.lineTo(FB.x1 + 1, i); } ctx.stroke();
     if (th.glowGrid) {
       const sweep = (T * 3) % (SIZE + 6) - 3;
       ctx.strokeStyle = 'rgba(0,240,255,0.5)'; ctx.lineWidth = 0.04;
@@ -377,6 +383,15 @@ export class Renderer {
     }
 
     this.drawOverlay(T);
+    for (const m of this.marks) {
+      const p = 0.5 + 0.5 * Math.sin(T * 5);
+      const g = ctx.createRadialGradient(m.x + 0.5, m.y + 0.5, 0.05, m.x + 0.5, m.y + 0.5, 0.75);
+      g.addColorStop(0, `rgba(255,215,110,${0.35 + p * 0.25})`); g.addColorStop(1, 'rgba(255,215,110,0)');
+      ctx.fillStyle = g; ctx.fillRect(m.x - 0.3, m.y - 0.3, 1.6, 1.6);
+      ctx.strokeStyle = '#ffd76a'; ctx.lineWidth = 0.06; ctx.strokeRect(m.x + 0.08, m.y + 0.08, 0.84, 0.84);
+      const ay = m.y - 0.55 - Math.abs(Math.sin(T * 4)) * 0.3;
+      ctx.fillStyle = '#ffd76a'; ctx.beginPath(); ctx.moveTo(m.x + 0.3, ay); ctx.lineTo(m.x + 0.7, ay); ctx.lineTo(m.x + 0.5, ay + 0.25); ctx.closePath(); ctx.fill();
+    }
     if (s.meteors && s.meteors.length) {
       for (const m of s.meteors) {
         const p = 0.5 + 0.5 * Math.sin(T * 8);

@@ -71,8 +71,9 @@ function localClient(code, h) {
 
 // ---------- authoritative match runner (used by solo and by online hosts) ----------
 export class GameHost {
-  constructor(players, emit, { seed } = {}) {
-    this.s = createMatch(players, seed);
+  constructor(players, emit, { seed, state, noTimer } = {}) {
+    this.s = state || createMatch(players, seed);
+    this.noTimer = !!noTimer;
     this.emit = emit;
     this.lastTurn = -1; this.deadline = 0;
     this.aiT = null; this.timerT = null; this.fast = false;
@@ -95,7 +96,8 @@ export class GameHost {
       const turn = s.turnNo;
       this.aiT = setTimeout(() => this.runAI(u.id, turn), this.fast ? 0 : u.kind === 'hollow' ? 260 : 520);
     } else {
-      this.timerT = setTimeout(() => { if (s.active === u.id) this.act(u.pid, { type: 'end' }); }, Math.max(0, this.deadline - Date.now()));
+      if (!this.noTimer) this.timerT = setTimeout(() => { if (s.active === u.id) this.act(u.pid, { type: 'end' }); }, Math.max(0, this.deadline - Date.now()));
+      else this.deadline = 0;
     }
   }
   runAI(id, turn) {

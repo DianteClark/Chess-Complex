@@ -1,6 +1,8 @@
 // Chess Complex — app shell: menus, loadout, armory, sessions, in-game HUD, progression.
-import { PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS } from './data.js';
-import { legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM } from './engine.js';
+import { PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES } from './data.js';
+import { legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM, createTutorial, ARENA, isVoid, isCracked } from './engine.js';
+import { LESSONS, Tutorial } from './tutorial.js';
+import { renderCodex, diagram } from './codex.js';
 import { Renderer } from './render.js';
 import { pieceIcon, drawPiece } from './pieces.js';
 import { FX } from './fx.js';
@@ -22,11 +24,11 @@ function defaultProfile() {
     name: 'Pawn' + Math.floor(100 + Math.random() * 900),
     build: { preset: 'bruiser', pts: { ...p.pts }, passive: p.passive, equips: { pawn: 'sprint', knight: 'trample', bishop: 'sanctuary', rook: 'rampart', queen: 'execute' } },
     skin: 'ivory', owned: [...DEFAULT_SKINS], marks: 100, played: [], wins: 0, games: 0, kills: 0,
-    board: 'hall', ownedBoards: [...DEFAULT_BOARDS], finisher: 'shatter', ownedFinishers: [...DEFAULT_FINISHERS], xp: 0, level: 1, botLevel: 'normal', quests: null, bestAttune: 0, crowns: 0,
+    board: 'hall', ownedBoards: [...DEFAULT_BOARDS], finisher: 'shatter', ownedFinishers: [...DEFAULT_FINISHERS], xp: 0, level: 1, botLevel: 'normal', quests: null, bestAttune: 0, crowns: 0, tutorial: [], discovered: [],
   };
 }
 let profile = defaultProfile();
-try { const raw = localStorage.getItem(PKEY); if (raw) { const d = defaultProfile(); profile = { ...d, ...JSON.parse(raw) }; for (const k of ['ownedBoards', 'ownedFinishers', 'owned']) if (!Array.isArray(profile[k])) profile[k] = d[k]; } } catch {}
+try { const raw = localStorage.getItem(PKEY); if (raw) { const d = defaultProfile(); profile = { ...d, ...JSON.parse(raw) }; for (const k of ['ownedBoards', 'ownedFinishers', 'owned', 'tutorial', 'discovered']) if (!Array.isArray(profile[k])) profile[k] = d[k]; } } catch {}
 const save = () => { try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch {} };
 const ptsUsed = () => Object.values(profile.build.pts).reduce((a, b) => a + b, 0);
 
@@ -70,6 +72,10 @@ function uiFlash() { const f = $('#ui-flash'); f.classList.remove('go'); void f.
 function renderProfile() {
   $('#marks-title').textContent = profile.marks; $('#marks-armory').textContent = profile.marks; $('#marks-quests').textContent = profile.marks;
   $('#q-badge').textContent = dailyQuests().filter((q) => !q.done).length || '';
+  $('#t-badge').textContent = profile.tutorial.length ? '' : 'NEW';
+  let np = $('#new-player');
+  if (!profile.tutorial.length && !profile.games) { if (!np) { np = document.createElement('div'); np.id = 'new-player'; np.className = 'new-player'; np.dataset.go = 'tutorial'; np.textContent = 'New here? Learn the ropes'; $('.logo-line').after(np); } }
+  else if (np) np.remove();
   $('#t-lvl').textContent = profile.level; $('#t-title').textContent = titleFor(profile.level);
   $('#t-xp').style.width = Math.min(100, (profile.xp / xpForLevel(profile.level)) * 100) + '%';
 }
@@ -137,6 +143,8 @@ function go(name) {
   if (name === 'host') startHostLobby();
   if (name === 'title') renderProfile();
   if (name === 'quests') renderQuests();
+  if (name === 'tutorial') renderLessons();
+  if (name === 'codex') renderCodexTab();
   if (name !== 'game') music.set(0, 'menu');
   armoryPreviews.active = name === 'armory';
 }
@@ -161,7 +169,7 @@ function renderLoadout() {
     const p = PIECES[pc], sig = ABILITIES[p.sig];
     return `<div class="eq-piece"><div><img src="${pieceIcon(pc, profile.skin, null, 52)}" alt="">${p.name}</div><div>
       <div class="eq-sig">Signature: ${sig.name} <em>- ${sig.desc}</em></div>
-      <div class="choice-list">${p.equips.map((e) => `<button class="choice ${profile.build.equips[pc] === e ? 'on' : ''}" data-equip="${pc}:${e}"><i class="dot"></i><div><b>${ABILITIES[e].name}</b><span>${ABILITIES[e].desc} Cooldown ${ABILITIES[e].cd}.</span></div></button>`).join('')}</div>
+      <div class="choice-list">${p.equips.map((e) => `<button class="choice with-dia ${profile.build.equips[pc] === e ? 'on' : ''}" data-equip="${pc}:${e}"><i class="dot"></i><img class="dia" src="${diagram(pc, e, 64, profile.skin)}" alt=""><div><b>${ABILITIES[e].name}</b><span>${ABILITIES[e].desc} Cooldown ${ABILITIES[e].cd}.</span></div></button>`).join('')}</div>
     </div></div>`;
   }).join('');
 }
@@ -274,6 +282,83 @@ function renderSoloMini() {
   $('#solo-loadout').innerHTML = `<img src="${pieceIcon('pawn', profile.skin, '#d6b05c', 64)}" alt=""><div class="lm-t"><b>${esc(profile.name)}</b><span>${b.preset ? PRESETS[b.preset].name : 'Custom'} build - ${PASSIVES[b.passive].name} - ${SKINS[profile.skin].name} - ${FINISHERS[profile.finisher].name}</span></div>`;
 }
 
+// ---------- tutorial ----------
+let tutorial = null;
+function renderLessons() {
+  $('#mentor-img').src = pieceIcon('king', 'gilded', '#d6b05c', 64);
+  const done = profile.tutorial;
+  const nextIdx = LESSONS.findIndex((l) => !done.includes(l.id));
+  $('#lesson-list').innerHTML = LESSONS.map((l, i) => `<button class="lesson ${done.includes(l.id) ? 'done' : ''} ${i === nextIdx ? 'next' : ''}" data-lesson="${l.id}" style="animation-delay:${i * 0.05}s"><div class="num"><span>${i + 1}</span></div><div><b>${l.name}</b><p>${l.blurb}</p></div><span class="st">${done.includes(l.id) ? 'Done' : i === nextIdx ? 'Start' : 'Play'}</span></button>`).join('')
+    + `<button class="lesson grad ${done.includes('graduation') ? 'done' : ''} ${nextIdx === -1 && !done.includes('graduation') ? 'next' : ''}" data-lesson="graduation"><div class="num"><span>G</span></div><div><b>Graduation</b><p>A real match against 2 easy bots. 100 Marks for finishing.</p></div><span class="st">${done.includes('graduation') ? 'Done' : 'Play'}</span></button>`;
+}
+const coachUI = {
+  coach(text, obj, next) {
+    const el = $('#coach'); el.classList.remove('hidden');
+    $('#coach-img').src = pieceIcon('king', 'gilded', null, 44);
+    const p = $('#coach-text'); clearInterval(coachUI.tw); p.textContent = ''; let i = 0;
+    coachUI.full = text;
+    coachUI.tw = setInterval(() => { i += 2; p.textContent = text.slice(0, i); if (i % 6 === 0) sfx.tick(); if (i >= text.length) clearInterval(coachUI.tw); }, 16);
+    const o = $('#coach-obj'); o.classList.toggle('hidden', !obj); o.classList.remove('ok'); o.querySelector('span').textContent = obj || '';
+    $('#coach-next').classList.toggle('hidden', !next);
+    el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    setTimeout(() => game.fitPad(), 30);
+  },
+  glow(sel) { $$('.tut-glow').forEach((e) => e.classList.remove('tut-glow')); if (sel) $$(sel).forEach((e) => e.classList.add('tut-glow')); },
+  marks(m) { game.r.marks = m || []; },
+  objDone() { $('#coach-obj').classList.add('ok'); sfx.quest(); haptic(30); },
+  complete(lesson) {
+    $('#coach').classList.add('hidden');
+    let reward = 0;
+    if (!profile.tutorial.includes(lesson.id)) { profile.tutorial.push(lesson.id); profile.marks += 50; reward = 50; save(); }
+    $('#lesson-name').textContent = lesson.name;
+    $('#lesson-reward').innerHTML = reward ? `<i class="mark-ico"></i>+${reward} Marks` : '';
+    const idx = LESSONS.indexOf(lesson);
+    $('#btn-next-lesson').textContent = idx < LESSONS.length - 1 ? 'Next Lesson' : 'Graduation Match';
+    $('#btn-next-lesson').dataset.next = idx < LESSONS.length - 1 ? LESSONS[idx + 1].id : 'graduation';
+    $('#m-lesson').classList.remove('hidden');
+    sfx.levelup(); uiFlash(); confetti();
+  },
+};
+function startLesson(id) {
+  endSession();
+  coachUI.glow(null);
+  $('#m-lesson').classList.add('hidden');
+  if (id === 'graduation') {
+    const keep = profile.botLevel; profile.botLevel = 'easy';
+    matchKey = 'm' + Date.now(); startSolo(2); profile.botLevel = keep; session.graduation = true;
+    return;
+  }
+  const lesson = LESSONS.find((l) => l.id === id);
+  const sess = { mode: 'tutorial', myPid: 'me', lesson: id };
+  session = sess;
+  const state = createTutorial(me());
+  sess.host = new GameHost([], (m) => { game.onMsg(m); if (tutorial && session === sess) tutorial.onState(m.ev); }, { state, noTimer: true });
+  sess.send = (a) => sess.host.act('me', a);
+  sess.emote = (k) => hostEmote(sess, 'me', k);
+  game.enter();
+  $('#s-game').classList.add('tut');
+  game.r.setBounds(ARENA);
+  tutorial = new Tutorial(lesson, sess.host, coachUI);
+  sess.host.start();
+  setTimeout(() => { if (session === sess) tutorial.begin(); }, 1300);
+}
+let codexTab = 'pieces';
+function renderCodexTab() {
+  $$('#codex-tabs .tab').forEach((t) => t.classList.toggle('on', t.dataset.ctab === codexTab));
+  renderCodex(codexTab, $('#codex-body'), profile);
+  $('#codex-body').scrollTop = 0;
+}
+
+// ---------- discoveries ----------
+function discover(id) {
+  if (!session || session.mode === 'tutorial' || profile.discovered.includes(id)) return;
+  profile.discovered.push(id); profile.marks += 60; save();
+  const d = DISCOVERIES[id], el = $('#discovery');
+  el.innerHTML = `<small>Combo Discovered</small><b>${d.name}</b><span>${d.desc}</span><em>+60 Marks</em>`;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  sfx.levelup(); haptic([30, 40, 30, 40, 80]);
+}
+
 // ---------- bots ----------
 function botPlayer(i, used) {
   const names = BOT_NAMES.filter((n) => !used.includes(n));
@@ -288,6 +373,7 @@ const me = () => ({ pid: 'me', name: profile.name || 'Player', skin: profile.ski
 // ---------- sessions ----------
 let session = null;
 function endSession() {
+  tutorial = null; $('#coach').classList.add('hidden'); coachUI && coachUI.glow && coachUI.glow(null);
   if (!session) return;
   try { session.host && session.host.stop(); } catch {}
   try { session.server && session.server.close(); } catch {}
@@ -455,19 +541,30 @@ const game = {
     requestAnimationFrame(loop);
     this.bindInput();
     addEventListener('resize', () => { if (screen === 'game') this.fitPad(); });
-    $('#h-actions').addEventListener('click', (e) => { const b = e.target.closest('.act'); if (b) this.onAction(b.dataset.slot); });
+    $('#h-actions').addEventListener('click', (e) => { const b = e.target.closest('.act'); if (!b) return; if (this.suppress) { this.suppress = false; return; } this.onAction(b.dataset.slot); });
+    const lp = (el, slotOf) => {
+      let t = null;
+      el.addEventListener('pointerdown', (e) => { const slot = slotOf(e); if (!slot || slot === 'end' || slot === 'promote') return; t = setTimeout(() => { this.suppress = true; this.showAbInfo(slot); }, 420); });
+      const end = () => { clearTimeout(t); if (!$('#abinfo').classList.contains('hidden')) setTimeout(() => $('#abinfo').classList.add('hidden'), 60); };
+      el.addEventListener('pointerup', end); el.addEventListener('pointerleave', end); el.addEventListener('pointercancel', end);
+      el.addEventListener('contextmenu', (e) => e.preventDefault());
+    };
+    lp($('#h-actions'), (e) => { const b = e.target.closest('.act'); return b && b.dataset.slot; });
+    lp($('#ult-btn'), () => 'ult');
     $('#promo-opts').addEventListener('click', (e) => {
       const b = e.target.closest('.popt'); if (!b || b.disabled) return;
       session.send({ type: 'promote', to: b.dataset.to }); $('#m-promote').classList.add('hidden');
     });
     $('#emote-menu').innerHTML = Object.entries(EMOTES).map(([k, t]) => `<button data-emote="${k}">${t}</button>`).join('');
-    $('#ult-btn').addEventListener('click', () => this.onAction('ult'));
+    $('#ult-btn').addEventListener('click', () => { if (this.suppress) { this.suppress = false; return; } this.onAction('ult'); });
     $('#emote-menu').addEventListener('click', (e) => { const b = e.target.closest('[data-emote]'); if (!b || !session || !session.emote) return; session.emote(b.dataset.emote); $('#emote-menu').classList.add('hidden'); sfx.tap(); });
   },
   enter() {
     this.ms = { kills: 0, hollows: 0, ults: 0, crown: false, rook: false, queen: false };
     this.s = null; this.mode = 'move'; this.preview = null; this.lastTurnNo = -1; this.resultsShown = false; this.lastHp = null; this.lastAlive = 99;
-    this.r.reset(); this.r.setTheme(profile.board); this.r.shakeOn = settings.shake; this.r.resize();
+    $('#s-game').classList.remove('tut');
+    this.r.reset(); this.r.setBounds(null); this.r.setTheme(profile.board); this.turnVault = false;
+    $('#coach').classList.add('hidden'); $('#abinfo').classList.add('hidden'); this.r.shakeOn = settings.shake; this.r.resize();
     $$('#s-game .modal').forEach((m) => m.classList.add('hidden'));
     $('#h-feed').innerHTML = ''; $('#emote-menu').classList.add('hidden');
     go('game');
@@ -475,7 +572,8 @@ const game = {
     requestAnimationFrame(() => this.fitPad());
   },
   fitPad() {
-    const top = $('.hud-top').getBoundingClientRect().bottom;
+    const coach = $('#coach');
+    const top = coach.classList.contains('hidden') ? $('.hud-top').getBoundingClientRect().bottom : coach.getBoundingClientRect().bottom;
     const bot = $('.hud-bottom').getBoundingClientRect();
     this.r.setPad(top + 4, Math.max(0, innerHeight - bot.top - 10));
     $('#s-game').style.setProperty('--hb', Math.round(innerHeight - bot.top) + 'px');
@@ -515,9 +613,11 @@ const game = {
   },
   handleEvents(ev, first) {
     const s = this.s, myId = this.r.myId;
-    if (first) { setTimeout(() => this.banner('Round 1', 'Last piece standing wins', ''), 1500); return; }
+    const tut = session && session.mode === 'tutorial';
+    if (first) { if (!tut) setTimeout(() => this.banner('Round 1', 'Last piece standing wins', ''), 1500); return; }
+    if (!tut) this.checkDiscoveries(ev);
     for (const e of ev) {
-      if (e.e === 'turn' && e.id === myId) setTimeout(() => { this.banner('Your Turn', '', ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
+      if (e.e === 'turn' && e.id === myId) setTimeout(() => { if (!tut) this.banner('Your Turn', '', ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
       if (e.e === 'storm') setTimeout(() => e.phase === 'crack' ? this.banner('The Storm Gathers', 'The outer ring collapses next round', 'red') : this.banner('Collapse', s.storm.ring >= STORM.maxRing ? 'Sudden death - everyone burns' : 'Stay inside the ring', 'red'), 200);
       if (e.e === 'crownSpawn') this.banner('The Crown', 'Has appeared at the centre', '');
       if (e.e === 'world' && !(e.kind === 'meteor' && e.phase === 'strike')) { const W = WORLD_EVENTS[e.kind]; setTimeout(() => this.banner(W.name, W.desc, e.kind === 'meteor' || e.kind === 'bloodMoon' ? 'red' : 'cyan'), 300); }
@@ -538,6 +638,40 @@ const game = {
       }
       if (e.e === 'over') setTimeout(() => this.showResults(), 4800);
     }
+  },
+  checkDiscoveries(ev) {
+    const s = this.s, myId = this.r.myId; if (!myId) return;
+    const mine = ev.filter((e) => e.e === 'ability' && e.id === myId);
+    for (const e of ev) if (e.e === 'turn' && e.id === myId) this.turnVault = false;
+    for (const a of mine) {
+      if (a.ab === 'vault') this.turnVault = true;
+      if (a.ab === 'fork' && this.turnVault) discover('leap');
+    }
+    if (mine.length) {
+      if (ev.some((e) => e.e === 'impact')) discover('wallbanger');
+      const hit = new Set(ev.filter((e) => e.e === 'dmg' && e.src === myId).map((e) => e.id));
+      if (hit.size >= 3) discover('collateral');
+      if (mine.some((a) => a.slot === 'ult') && ev.filter((e) => e.e === 'death' && e.by === myId && unitById(s, e.id) && unitById(s, e.id).kind === 'player').length >= 2) discover('checkmate');
+      if (mine.some((a) => a.ab === 'transpose')) for (const e of ev) if (e.e === 'move' && e.how === 'swap' && e.id !== myId && (isVoid(s, e.to.x, e.to.y) || isCracked(s, e.to.x, e.to.y))) discover('hostile');
+    }
+    for (const e of ev) {
+      if (e.e === 'dmg' && e.src === myId && e.n >= 60) discover('overkill');
+      if (e.e === 'pickup' && e.id === myId && e.steal) { const v = unitById(s, e.steal); if (v && v.piece === 'king') discover('tax'); }
+      if (e.e === 'death' && e.by === myId) { const v = unitById(s, e.id); if (v && v.piece === 'king') discover('kingslayer'); }
+      if (e.e === 'attune' && e.id === myId && e.lv >= 30) discover('ascended');
+    }
+  },
+  showAbInfo(slot) {
+    const u = this.me; if (!u || !this.s) return;
+    const box = $('#abinfo');
+    if (slot === 'move') { box.innerHTML = `<img src="${diagram(u.piece === 'king' ? 'king' : u.piece, 'move', 96, u.skin)}" alt=""><div><b>${PIECES[u.piece].name} Movement</b><p>${PIECES[u.piece].moveDesc}</p></div>`; }
+    else {
+      const id = slotAbility(u, slot); if (!id) return;
+      const A = ABILITIES[id];
+      const cd = slot === 'ult' ? `Charge ${Math.round(u.ult || 0)}/100` : A.cd ? `Cooldown ${A.cd}${u.cd[slot] ? ` - ready in ${u.cd[slot]}` : ''}` : 'Every turn';
+      box.innerHTML = `<img src="${diagram(u.piece, id, 96, u.skin)}" alt=""><div><b>${A.name}</b><p>${A.desc}</p><em>${cd}${A.free ? ' - Free action' : ''}${A.honed ? `<br>Honed: ${A.honed}` : ''}</em></div>`;
+    }
+    box.classList.remove('hidden'); sfx.hover(); haptic(10);
   },
   onStreak(e) {
     const k = unitById(this.s, e.by); if (!k) return;
@@ -800,6 +934,8 @@ const game = {
     $('#m-results').classList.remove('hidden');
     music.set(0, 'menu');
     if (win) { sfx.win(); confetti(); haptic([50, 50, 50, 50, 150]); } else sfx.lose();
+    if (win && u.alive && u.hp / stats(u).maxHp < 0.1) setTimeout(() => discover('clutch'), 1500);
+    if (session && session.graduation && !profile.tutorial.includes('graduation')) { profile.tutorial.push('graduation'); profile.marks += 100; save(); setTimeout(() => toast('Graduated! +100 Marks'), 1200); }
   },
   bindInput() {
     const c = $('#board');
@@ -899,10 +1035,13 @@ document.addEventListener('click', (e) => {
     case 'close-menu': $('#m-menu').classList.add('hidden'); break;
     case 'close-promote': $('#m-promote').classList.add('hidden'); break;
     case 'emotes': $('#emote-menu').classList.toggle('hidden'); sfx.tap(); break;
-    case 'forfeit': $('#m-menu').classList.add('hidden'); game.showResults(!!(game.s && !game.s.over && game.me && game.me.alive)); break;
+    case 'forfeit': if (session && session.mode === 'tutorial') { $('#m-menu').classList.add('hidden'); endSession(); go('tutorial'); break; }
+      $('#m-menu').classList.add('hidden'); game.showResults(!!(game.s && !game.s.over && game.me && game.me.alive)); break;
     case 'spectate': $('#m-dead').classList.add('hidden'); game.r.overview(); break;
     case 'results': game.showResults(); break;
     case 'to-title': endSession(); go('title'); break;
+    case 'next-lesson': startLesson(b.dataset.next); break;
+    case 'to-tutorial': endSession(); go('tutorial'); break;
     case 'rematch':
       if (!session || session.mode === 'solo' || !session) { const n = session ? session.bots : 7; matchKey = 'm' + Date.now(); startSolo(n); }
       else if (session.mode === 'host') { try { session.host.stop(); } catch {} session.host = null; session.started = false; session.rematch = true; go('host'); }
@@ -928,6 +1067,10 @@ $('#in-code').addEventListener('input', (e) => { e.target.value = e.target.value
 $('#in-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinGame(); });
 document.addEventListener('pointerover', (e) => { if (e.pointerType === 'mouse' && e.target.closest && e.target.closest('.btn:not(:disabled), .tab, .preset, .choice')) { const el = e.target.closest('.btn, .tab, .preset, .choice'); if (el !== document.__lastHover) { document.__lastHover = el; sfx.hover(); } } });
 
+$('#lesson-list').addEventListener('click', (e) => { const b = e.target.closest('[data-lesson]'); if (!b) return; sfx.select(); uiFlash(); startLesson(b.dataset.lesson); });
+$('#codex-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-ctab]'); if (!b) return; codexTab = b.dataset.ctab; sfx.tap(); renderCodexTab(); });
+$('#coach-next').addEventListener('click', () => { sfx.select(); if (tutorial) tutorial.next(); });
+$('#coach-text').addEventListener('click', () => { clearInterval(coachUI.tw); $('#coach-text').textContent = coachUI.full || ''; });
 $('#seg-diff').addEventListener('click', (e) => { const b = e.target.closest('[data-diff]'); if (!b) return; profile.botLevel = b.dataset.diff; save(); sfx.select(); renderSoloMini(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 addEventListener('pagehide', () => endSession());

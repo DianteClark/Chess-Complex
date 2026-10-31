@@ -17,6 +17,12 @@ A turn-based chess battle royale for up to 8 players. Everyone starts as a Pawn 
 - **Progression:** XP and levels with titles from Recruit to Legend; every level-up pays out Marks.
 - **Juice:** hit-stop, slow-motion eliminations, camera punches, lunging attacks, per-ability VFX, shattering pieces, collapsing storm tiles, damage previews with KO markers, kill streak callouts, emotes, haptics and a generative soundtrack that intensifies as the match closes in.
 
+## v1.3 highlights
+- **Tutorial:** five guided lessons with the Grandmaster (First Steps, Combat, Evolution, Ultimates, The Board) plus a Graduation match. Each pays Marks the first time.
+- **Codex:** every piece, attack, signature, equippable and ultimate with shape diagrams generated from the real rules engine, plus builds, board rules and example combos.
+- **Secret discoveries:** ten hidden combos to find in real matches. Hints only, no answers.
+- **Hold any action button** in a match to see that ability's shape and details.
+
 ## v1.2 highlights
 - **Shard Attunement:** every shard you collect permanently boosts HP, ATK and DEF (and SPD every 6), up to 30, even after spending. Orbiting crystals show your attunement tier.
 - **Ultimates:** charge by dealing and taking damage, then unleash a cinematic piece ultimate (En Passant, Fork, Excommunicate, Castling, Checkmate Nova, Divine Right).

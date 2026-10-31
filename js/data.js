@@ -156,3 +156,28 @@ export const QUESTS = {
   attune:   { text: 'Reach Attunement 3', goal: 3, reward: 90, best: true },
 };
 export const BOT_LEVELS = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
+
+// Example combos shown in the Codex. The strongest ones are left for players to find.
+export const COMBOS = [
+  { name: 'Wall Slam', pieces: ['Pawn'], text: 'Line up a Shove so the target hits a wall, rubble or another piece. The collision adds bonus damage, and if it hits a piece, both take it.' },
+  { name: 'Double Jump', pieces: ['Knight'], text: 'Vault is free. Vault, jump twice to close distance, and you still have your action for a T-Strike.' },
+  { name: 'Initiative Lock', pieces: ['Knight'], text: 'Stagger knocks targets back in the turn order. Pair it with Rally Cry and you can act again before they recover.' },
+  { name: 'Shrine Anchor', pieces: ['Bishop'], text: 'Drop a Blink Mark on a shrine, go fight, then blink home when you are hurt.' },
+  { name: 'Hostile Takeover', pieces: ['Bishop'], text: 'Transpose swaps places with ANY piece in diagonal sight, enemies included. Think about where that leaves them.' },
+  { name: 'Barricade and Ram', pieces: ['Rook'], text: 'Raise a Rampart behind a target, then Battering Charge into them. The knockback has nowhere to go.' },
+  { name: 'Dash and Finish', pieces: ['Queen'], text: 'Royal Decree through a group to soften them up, then Execute whoever drops below 30%.' },
+  { name: 'Blood Moon Burst', pieces: ['Any'], text: 'Hold a full ultimate until a Blood Moon round. All damage is +30% for that round.' },
+  { name: 'Meteor Bait', pieces: ['Any'], text: 'Meteor tiles are marked a round early. Push, swap or pin enemies onto them before impact.' },
+];
+export const DISCOVERIES = {
+  wallbanger: { name: 'Wallbanger', hint: 'Introduce someone to a wall.', desc: 'Slam a piece into something solid.' },
+  leap:       { name: 'Leap of Faith', hint: 'A knight that refuses to stay grounded.', desc: 'Vault, then unleash Fork in the same turn.' },
+  collateral: { name: 'Collateral', hint: 'Why hit one when you can hit three?', desc: 'Damage 3 or more pieces with one ability.' },
+  overkill:   { name: 'Overkill', hint: 'Some hits are just rude.', desc: 'Deal 60 or more damage in a single hit.' },
+  tax:        { name: 'Royal Tax', hint: 'Even kings pay their dues.', desc: 'Pickpocket a shard from the King.' },
+  kingslayer: { name: 'Kingslayer', hint: 'Heavy is the head.', desc: 'Eliminate the King.' },
+  checkmate:  { name: 'Checkmate', hint: 'One move, many endings.', desc: 'Eliminate 2 players with a single ultimate.' },
+  ascended:   { name: 'Ascended', hint: 'Collect everything.', desc: 'Reach Attunement 30.' },
+  clutch:     { name: 'Clutch', hint: 'Win with your last breath.', desc: 'Win a match below 10% HP.' },
+  hostile:    { name: 'Hostile Takeover', hint: 'Trade places with destiny.', desc: 'Transpose an enemy into the storm\'s cracked ring or the void.' },
+};

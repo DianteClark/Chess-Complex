@@ -51,6 +51,10 @@
           <button class="btn" data-go="armory">Armory</button>
         </div>
         <div class="row2">
+          <button class="btn small learn-btn" data-go="tutorial">Tutorial <i class="badge new" id="t-badge"></i></button>
+          <button class="btn small" data-go="codex">Codex</button>
+        </div>
+        <div class="row2">
           <button class="btn small quest-btn" data-go="quests">Daily Quests <i class="badge" id="q-badge"></i></button>
           <button class="btn small" data-go="howto">How to Play</button>
         </div>
@@ -64,7 +68,7 @@
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v1.2</div>
+    <div class="version">v1.3</div>
   </section>
 
   <!-- LOADOUT -->
@@ -165,6 +169,27 @@
     </div>
   </section>
 
+  <!-- TUTORIAL -->
+  <section class="screen" id="s-tutorial">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Tutorial</h2><div></div></header>
+    <div class="scroll">
+      <div class="mentor"><img id="mentor-img" alt=""><div><b>The Grandmaster</b><p>Five short lessons, then a graduation match. Each lesson pays 50 Marks the first time you finish it.</p></div></div>
+      <div id="lesson-list"></div>
+    </div>
+  </section>
+
+  <!-- CODEX -->
+  <section class="screen" id="s-codex">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Codex</h2><div></div></header>
+    <div class="tabs" id="codex-tabs">
+      <button class="tab on" data-ctab="pieces">Pieces</button>
+      <button class="tab" data-ctab="passives">Builds</button>
+      <button class="tab" data-ctab="board">Board</button>
+      <button class="tab" data-ctab="combos">Combos</button>
+    </div>
+    <div class="scroll" id="codex-body"></div>
+  </section>
+
   <!-- QUESTS -->
   <section class="screen" id="s-quests">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Quests</h2><div class="marks"><i class="mark-ico"></i><b id="marks-quests">0</b></div></header>
@@ -215,6 +240,9 @@
     <div class="banner" id="h-banner"><div class="b-main"></div><div class="b-sub"></div></div>
     <div class="streak" id="h-streak"></div>
     <div class="inspect hidden" id="h-inspect"></div>
+    <div class="coach hidden" id="coach"><img id="coach-img" alt=""><div class="coach-body"><b>The Grandmaster</b><p id="coach-text"></p><div class="coach-obj hidden" id="coach-obj"><i></i><span></span></div></div><button class="btn small gold" id="coach-next">Next</button></div>
+    <div class="abinfo hidden" id="abinfo"></div>
+    <div class="discovery" id="discovery"></div>
     <button class="ult-btn" id="ult-btn" data-slot="ult" aria-label="Ultimate"><svg class="ult-ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" class="ur-bg"/><circle cx="32" cy="32" r="28" class="ur-fg" id="ult-fg"/></svg><span class="ult-k">ULT</span><span class="ult-pct" id="ult-pct">0%</span></button>
     <div class="event-chip hidden" id="event-chip"></div>
     <div class="emote-wrap">
@@ -249,6 +277,15 @@
         <h3>Promotion</h3>
         <div class="promo-opts" id="promo-opts"></div>
         <button class="btn ghost wide" data-act="close-promote">Not yet</button>
+      </div>
+    </div>
+    <div class="modal hidden" id="m-lesson">
+      <div class="modal-box results">
+        <div class="r-title">Lesson Complete</div>
+        <div class="r-place" id="lesson-name"></div>
+        <div class="r-marks" id="lesson-reward"></div>
+        <button class="btn big gold wide shine" data-act="next-lesson" id="btn-next-lesson">Next Lesson</button>
+        <button class="btn wide" data-act="to-tutorial">Lessons</button>
       </div>
     </div>
     <div class="modal hidden" id="m-menu">
