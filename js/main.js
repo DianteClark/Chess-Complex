@@ -638,6 +638,7 @@ const game = {
     $('#emote-menu').innerHTML = Object.entries(EMOTES).map(([k, t]) => `<button data-emote="${k}">${t}</button>`).join('');
     $('#h-portrait').parentElement.addEventListener('click', () => { const u = this.me; if (u) { this.r.follow = true; this.r.closeup(); this.r.focus(u.x, u.y); sfx.tap(); } });
     $('#ult-btn').addEventListener('click', () => { if (this.suppress) { this.suppress = false; return; } this.onAction('ult'); });
+    $('#gm-tip').addEventListener('click', () => $('#gm-tip').classList.add('hidden'));
     $('#emote-menu').addEventListener('click', (e) => { const b = e.target.closest('[data-emote]'); if (!b || !session || !session.emote) return; session.emote(b.dataset.emote); $('#emote-menu').classList.add('hidden'); sfx.tap(); });
   },
   after(fn, ms) { const g = this.gen; return setTimeout(() => { if (g === this.gen) fn(); }, ms); },
@@ -706,6 +707,7 @@ const game = {
     const tut = session && session.mode === 'tutorial';
     if (first) { if (!tut) this.after(() => this.banner('Round 1', 'Last piece standing wins', ''), 1500); return; }
     if (!tut) this.checkDiscoveries(ev);
+    if (!tut) this.tips(ev);
     for (const e of ev) {
       if (e.e === 'dmg' && e.id === myId) { const src = e.storm ? 'The storm' : e.meteor ? 'Meteors' : (unitById(s, e.src) || {}).name || 'Unknown'; this.taken[src] = (this.taken[src] || 0) + e.n; this.since[src] = (this.since[src] || 0) + e.n; }
       if (e.e === 'timeout' && e.id === myId) { toast('Time ran out - turn skipped'); sfx.error(); }
@@ -731,6 +733,27 @@ const game = {
       }
       if (e.e === 'over') this.after(() => this.showResults(), 4800);
     }
+  },
+  tip(id, html) {
+    profile.tips = profile.tips || [];
+    if (profile.tips.includes(id) || (session && session.mode === 'tutorial')) return;
+    profile.tips.push(id); save();
+    const el = $('#gm-tip'); el.querySelector('img').src = pieceIcon('king', 'gilded', null, 34);
+    el.querySelector('p').innerHTML = html; el.classList.remove('hidden');
+    el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    clearTimeout(this.tipT); this.tipT = setTimeout(() => el.classList.add('hidden'), 6500);
+  },
+  tips(ev) {
+    const s = this.s, me = this.me; if (!me) return;
+    for (const e of ev) {
+      if (e.e === 'turn' && e.id === me.id && s.turnNo <= 30) this.after(() => this.tip('first-turn', '<b>Your move.</b> Tap a blue tile to move, then pick an action. Hold any button to see what it hits.'), 900);
+      if (e.e === 'storm' && e.phase === 'crack') this.after(() => this.tip('storm', '<b>The storm is coming.</b> Red cracked tiles collapse next round. Get toward the middle.'), 1800);
+      if (e.e === 'world') this.after(() => this.tip('world', '<b>World event!</b> One hits every few rounds. Check the banner and adapt.'), 2000);
+      if (e.e === 'ultReady' && e.id === me.id) this.after(() => this.tip('ult', '<b>Ultimate ready.</b> Tap the gold button on your turn. Save it for a crowd or a finishing blow.'), 1200);
+      if (e.e === 'crownSpawn') this.after(() => this.tip('crown', '<b>The Crown appeared.</b> Whoever holds it is tougher, but slow, and everyone will hunt them.'), 1800);
+      if (e.e === 'pickup' && e.id === me.id && e.k === 'shard') this.after(() => this.tip('shard', '<b>Shard collected.</b> Spend shards to evolve with Promote. Every shard also Attunes you permanently.'), 900);
+    }
+    if (!profile.tips?.includes('hollow') && s.units.some((v) => v.kind === 'hollow' && v.alive && Math.max(Math.abs(v.x - me.x), Math.abs(v.y - me.y)) <= 3)) this.tip('hollow', '<b>A Hollow.</b> Neutral ghosts guard shard caches. They wake when you get close and drop 2 shards.');
   },
   checkDiscoveries(ev) {
     const s = this.s, myId = this.r.myId; if (!myId) return;

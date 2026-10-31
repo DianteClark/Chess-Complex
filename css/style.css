@@ -596,3 +596,9 @@ body.reduced .banner.show, body.reduced .streak.show { animation-duration: 1.2s;
 .play-btns { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
 .r-quests .r-season, .r-quests .r-season .xpbar { display: block; }
 .r-quests .r-season .xpbar i { display: block; }
+
+.gm-tip { position: absolute; left: 50%; top: calc(96px + var(--st)); transform: translateX(-50%); width: min(380px, 92vw); display: flex; gap: 10px; align-items: center; padding: 9px 12px; background: rgba(20,17,30,.96); border: 1px solid var(--gold); border-radius: 6px; z-index: 7; animation: coachIn .35s cubic-bezier(.2,1.4,.4,1) both; box-shadow: 0 8px 24px rgba(0,0,0,.5); cursor: pointer; }
+.gm-tip img { width: 34px; height: 34px; flex: none; }
+.gm-tip p { margin: 0; font-size: 12.5px; line-height: 1.4; color: #ece6f6; }
+.gm-tip p b { color: var(--gold2); }
+.order .o { animation: none !important; }
