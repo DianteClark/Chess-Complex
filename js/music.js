@@ -27,6 +27,8 @@ class Music {
   set(intensity, mode) { this.target = intensity; if (mode) this.pendingMode = mode; }
   schedule() {
     const a = this.a; if (!a) return;
+    if (a.state !== 'running') return;
+    if (this.next < a.currentTime) this.next = a.currentTime + 0.05;
     while (this.next < a.currentTime + 0.15) { this.play(this.step, this.next); this.advance(); }
   }
   advance() {

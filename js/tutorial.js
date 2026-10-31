@@ -44,7 +44,7 @@ export const LESSONS = [
       { say: 'Tap Attack, then tap the dummy. The first tap previews the damage. Tap again to confirm.', obj: 'Strike the dummy', glow: '[data-slot=atk]', mark: (c) => c.dummies().map((d) => ({ x: d.x, y: d.y })), check: (c, ev) => c.ev(ev, (e) => e.e === 'dmg' && e.src === c.me.id) },
       { say: 'Every piece has a Signature. The Pawn\'s is Shove: push a piece away. Slam it into a wall or another piece for bonus damage. Shove the dummy into that wall.', obj: 'Shove the dummy into the wall', glow: '[data-slot=sig]',
         setup: (c) => { c.clear(); c.reset('pawn', 6, 8); c.dummy(7, 8, 70); c.tile(8, 8, 'wall'); c.fresh(); }, mark: () => [{ x: 7, y: 8 }], check: (c, ev) => c.ev(ev, (e) => e.e === 'impact') },
-      { say: 'Crunch. Collisions hurt. Now finish it. Remember, Pawns strike diagonally, so step into position first.', obj: 'Defeat the dummy', glow: '[data-slot=atk]', setup: (c) => { const d = c.dummies()[0]; if (d) d.hp = Math.min(d.hp, 18); }, check: (c) => c.dummies().length === 0 },
+      { say: 'Crunch. Collisions hurt. Now finish it. Remember, Pawns strike diagonally, so step into position first.', obj: 'Defeat the dummy', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'), setup: (c) => { const d = c.dummies()[0]; if (d) d.hp = Math.min(d.hp, 18); }, check: (c) => c.dummies().length === 0 },
       { say: 'Every piece you defeat drops all the shards it was carrying. In a real match, hunting is how you grow.', next: true },
     ],
   },
@@ -55,7 +55,7 @@ export const LESSONS = [
       { say: 'You are carrying 3 shards. That is enough to evolve. Tap Promote and choose the Knight. Promoting never costs your action.', obj: 'Evolve into a Knight', glow: '[data-slot=promote]', setup: (c) => { c.me.shards = Math.max(3, c.me.shards); c.fresh(); }, check: (c) => c.me.piece === 'knight' },
       { say: 'Knights jump in an L and ignore anything in the way. Their Signature, Vault, is a free action that grants a second jump.', next: true },
       { say: 'Use Vault, then make two jumps this turn.', obj: 'Vault, then jump twice', glow: '[data-slot=sig]', setup: (c) => { c.me.cd.sig = 0; c.fresh(); }, check: (c) => c.t.vaulted && c.t.moves >= 2 },
-      { say: 'The Knight\'s attack, T-Strike, hits the tile ahead plus a 3-wide crossbar behind it. Line it up and hit both dummies at once.', obj: 'Hit 2 dummies with one T-Strike', glow: '[data-slot=atk]',
+      { say: 'The Knight\'s attack, T-Strike, hits the tile ahead plus a 3-wide crossbar just beyond it. Line it up and hit both dummies at once.', obj: 'Hit 2 dummies with one T-Strike', glow: '[data-slot=atk]',
         setup: (c) => {
           c.clear(); c.reset('knight', 7, 10); c.fresh();
           c.dummy(7, 9, 60); c.dummy(8, 8, 60);
@@ -84,8 +84,8 @@ export const LESSONS = [
     start(c) { c.clear(); c.reset('knight', 7, 8); },
     steps: [
       { say: 'The board fights back. From round 5, the outer ring cracks. A round later it collapses into the void, which burns 20% of your HP every turn. Those red tiles are cracking right now.', setup: (c) => { c.s.storm = { ring: 4, crack: true }; c.fresh(); }, next: true },
-      { say: 'Walls block movement and shots. Rubble and crates break when hit. Brambles stop slides and slow you down. Shrines heal you once, then recharge.', setup: (c) => { c.s.storm = { ring: 0, crack: false }; c.tile(9, 7, 'wall'); c.tile(9, 8, 'wall'); c.tile(5, 6, 'rubble', { hp: 2 }); c.tile(10, 10, 'crate', { hp: 1 }); c.tile(5, 10, 'bramble'); c.tile(9, 10, 'shrine', { cd: 0 }); }, mark: () => [{ x: 9, y: 7 }, { x: 5, y: 6 }, { x: 10, y: 10 }, { x: 5, y: 10 }, { x: 9, y: 10 }], next: true },
-      { say: 'Every third round a World Event hits: Shard Rain, a Meteor Storm, a Blood Moon, or a Supply Drop. A supply cache just landed. Break it open with T-Strike.', obj: 'Break open the cache', glow: '[data-slot=atk]',
+      { say: 'Walls block movement and shots. Rubble and crates break when hit. Brambles stop slides and slow you down. Shrines heal you once, then recharge.', setup: (c) => { c.s.storm = { ring: 0, crack: false }; c.tile(9, 7, 'wall'); c.tile(9, 8, 'wall'); c.tile(5, 6, 'rubble', { hp: 2 }); c.tile(10, 10, 'crate', { hp: 1 }); c.tile(5, 10, 'bramble'); c.tile(9, 10, 'shrine', { cd: 0 }); }, mark: () => [{ x: 9, y: 7, label: 'Wall' }, { x: 5, y: 6, label: 'Rubble' }, { x: 10, y: 10, label: 'Crate' }, { x: 5, y: 10, label: 'Bramble' }, { x: 9, y: 10, label: 'Shrine' }], next: true },
+      { say: 'Every third round a World Event hits: Shard Rain, a Meteor Storm, a Blood Moon, or a Supply Drop. A supply cache just landed. Break it open with T-Strike. It takes two hits, so end your turn between them.', obj: 'Break open the cache', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'),
         setup: (c) => { c.clear(); c.reset('knight', 7, 9); c.tile(7, 8, 'chest', { hp: 2 }); c.fresh(); }, mark: () => [{ x: 7, y: 8 }], check: (c, ev) => c.ev(ev, (e) => e.e === 'chest' && e.broke) },
       { say: 'On round 7 the Crown appears at the centre. Claim it to become the King: tougher and self-healing, but slow. Everyone will hunt you. Go on, take it.', obj: 'Claim the Crown',
         setup: (c) => { c.clear(); c.reset('knight', 6, 9); c.item(7, 7, 'crown'); c.fresh(); }, mark: () => [{ x: 7, y: 7 }], check: (c) => c.me.piece === 'king' },
@@ -111,6 +111,7 @@ export class Tutorial {
     this.show();
   }
   trySetup() {
+    if (this.dead) return;
     const s = this.host.s, me = this.c.me;
     if (!this.pending || !me || s.active !== me.id) return;
     this.pending = false;
@@ -122,12 +123,12 @@ export class Tutorial {
   show() {
     const st = this.step;
     this.ui.coach(st.say, st.obj || null, !!st.next);
-    this.ui.glow(st.glow || null);
+    this.ui.glow(typeof st.glow === 'function' ? st.glow(this.c) : st.glow || null);
     this.ui.marks(st.mark ? st.mark(this.c) : []);
   }
   next() { if (this.step && this.step.next && !this.pending) this.advance(); }
   onState(ev) {
-    if (this.done || !this.step) return;
+    if (this.dead || this.done || !this.step) return;
     const me = this.c.me;
     for (const e of ev) {
       if (e.e === 'turn' && me && e.id === me.id) { this.track.turns++; this.track.moves = 0; this.track.vaulted = false; }
@@ -137,6 +138,7 @@ export class Tutorial {
     if (this.pending) { this.trySetup(); return; }
     const st = this.step;
     if (st.mark) this.ui.marks(st.mark(this.c));
-    if (!this.checked && st.check && st.check(this.c, ev)) { this.checked = true; this.ui.objDone(); setTimeout(() => this.advance(), 900); }
+    if (typeof st.glow === 'function') this.ui.glow(st.glow(this.c));
+    if (!this.checked && st.check && st.check(this.c, ev)) { this.checked = true; this.ui.objDone(); setTimeout(() => { if (!this.dead) this.advance(); }, 900); }
   }
 }

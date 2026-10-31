@@ -71,8 +71,8 @@ function localClient(code, h) {
 
 // ---------- authoritative match runner (used by solo and by online hosts) ----------
 export class GameHost {
-  constructor(players, emit, { seed, state, noTimer } = {}) {
-    this.s = state || createMatch(players, seed);
+  constructor(players, emit, { seed, state, noTimer, mode } = {}) {
+    this.s = state || createMatch(players, seed, { mode });
     this.noTimer = !!noTimer;
     this.emit = emit;
     this.lastTurn = -1; this.deadline = 0;
@@ -91,12 +91,12 @@ export class GameHost {
     clearTimeout(this.aiT); clearTimeout(this.timerT);
     const s = this.s; if (s.over) return;
     const u = unitById(s, s.active); if (!u) return;
-    if (s.turnNo !== this.lastTurn) { this.lastTurn = s.turnNo; this.deadline = Date.now() + TURN_MS; if (!(u.kind === 'hollow' || u.bot)) this.publish([]); }
+    if (s.turnNo !== this.lastTurn) { this.lastTurn = s.turnNo; this.deadline = Date.now() + ((this.s.rules && this.s.rules.turnMs) || TURN_MS); if (!(u.kind === 'hollow' || u.bot)) this.publish([]); else this.deadline = 0; }
     if (u.kind === 'hollow' || u.bot) {
       const turn = s.turnNo;
       this.aiT = setTimeout(() => this.runAI(u.id, turn), this.fast ? 0 : u.kind === 'hollow' ? 260 : 520);
     } else {
-      if (!this.noTimer) this.timerT = setTimeout(() => { if (s.active === u.id) this.act(u.pid, { type: 'end' }); }, Math.max(0, this.deadline - Date.now()));
+      if (!this.noTimer) this.timerT = setTimeout(() => { if (s.active === u.id) { this.publish([{ e: 'timeout', id: u.id }]); this.act(u.pid, { type: 'end' }); } }, Math.max(0, this.deadline - Date.now()));
       else this.deadline = 0;
     }
   }

@@ -1,7 +1,7 @@
 // Chess Complex — authoritative rules engine. Pure data in, events out.
 import {
   SIZE, PIECES, ABILITIES, EVOLVE, EVOLVE_COST, MAX_HONE, honeCost, STAT_GAIN,
-  PLAYER_COLORS, HOLLOW_STATS, ATTUNE,
+  PLAYER_COLORS, HOLLOW_STATS, ATTUNE, MODES,
 } from './data.js';
 
 const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -69,60 +69,66 @@ export const honed = (u) => (u.hone[u.piece] || 0) > 0;
 // ---------- creation ----------
 const SPAWNS = [[1, 1], [14, 14], [14, 1], [1, 14], [7, 1], [8, 14], [1, 8], [14, 7]];
 
-export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0) {
+export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts = {}) {
+  const modeId = MODES[opts.mode] ? opts.mode : 'royale', M = MODES[modeId];
   const s = {
     seed, v: 0, round: 1, roundTurns: 0, turnNo: 0, over: false, winner: null,
     tiles: [], units: [], items: [], storm: { ring: 0, crack: false }, event: null, meteors: [], bloodMoon: 0, lastEvent: null,
     active: null, turn: null, crownSpawned: false, log: [], nextId: 1, firstBlood: false,
+    mode: modeId, rules: { first: M.storm.first, every: M.storm.every, crown: M.crown, events: M.events, turnMs: M.turnMs }, arena: M.arena || null,
   };
   for (let i = 0; i < SIZE * SIZE; i++) s.tiles.push({ t: 'floor' });
+  const A = s.arena;
+  const inArena = (x, y) => !A || (x >= A.x0 && x <= A.x1 && y >= A.y0 && y <= A.y1);
+  if (A) { for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (!inArena(x, y)) s.tiles[y * SIZE + x] = { t: 'out' }; s.storm.ring = A.x0; }
+  const sc = A ? 0.4 : 1; // content scale for small arenas
 
-  const spawnOrder = SPAWNS.slice();
+  const spawnOrder = A ? [[A.x0 + 1, A.y0 + 1], [A.x1 - 1, A.y1 - 1]] : SPAWNS.slice();
   for (let i = spawnOrder.length - 1; i > 0; i--) { const j = ri(s, i + 1); [spawnOrder[i], spawnOrder[j]] = [spawnOrder[j], spawnOrder[i]]; }
   const reserved = new Set();
   const reserve = (x, y, r) => { for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) reserved.add((y + dy) * SIZE + x + dx); };
   spawnOrder.forEach(([x, y]) => reserve(x, y, 1));
   reserve(7, 7, 1); reserve(8, 8, 1);
-  const free = (x, y) => inB(x, y) && !reserved.has(y * SIZE + x) && s.tiles[y * SIZE + x].t === 'floor';
+  const free = (x, y) => inB(x, y) && inArena(x, y) && !reserved.has(y * SIZE + x) && s.tiles[y * SIZE + x].t === 'floor';
   const randFree = (minRing = 1) => {
-    for (let k = 0; k < 400; k++) { const x = ri(s, SIZE), y = ri(s, SIZE); if (ringOf(x, y) >= minRing && free(x, y) && !s.items.some((it) => it.x === x && it.y === y)) return [x, y]; }
+    for (let k = 0; k < 400; k++) { const x = ri(s, SIZE), y = ri(s, SIZE); if (ringOf(x, y) >= minRing + (A ? A.x0 : 0) && free(x, y) && !s.items.some((it) => it.x === x && it.y === y) && !s.units.some((u) => u.x === x && u.y === y)) return [x, y]; }
     return null;
   };
   const set = (x, y, t, extra = {}) => { s.tiles[y * SIZE + x] = { t, ...extra }; };
 
   // shrines in each quadrant
-  [[4, 4], [11, 4], [4, 11], [11, 11]].forEach(([x, y]) => { set(x, y, 'shrine', { cd: 0 }); reserved.add(y * SIZE + x); });
+  (A ? [[A.x0 + 2, A.y1 - 2], [A.x1 - 2, A.y0 + 2]] : [[4, 4], [11, 4], [4, 11], [11, 11]]).forEach(([x, y]) => { set(x, y, 'shrine', { cd: 0 }); reserved.add(y * SIZE + x); });
   // wall clusters
-  for (let c = 0; c < 11; c++) {
+  for (let c = 0; c < Math.round(11 * sc); c++) {
     const p = randFree(2); if (!p) continue;
     let [x, y] = p; const len = 2 + ri(s, 3); const d = ORTH[ri(s, 4)];
     for (let i = 0; i < len; i++) { if (free(x, y)) set(x, y, 'wall'); x += d[0]; y += d[1]; if (rand(s) < 0.3) { const t = ORTH[ri(s, 4)]; x += t[0]; y += t[1]; } }
   }
-  for (let i = 0; i < 16; i++) { const p = randFree(1); if (p) set(p[0], p[1], 'rubble', { hp: 2 }); }
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < Math.round(16 * sc); i++) { const p = randFree(1); if (p) set(p[0], p[1], 'rubble', { hp: 2 }); }
+  for (let i = 0; i < Math.round(5 * sc); i++) {
     const p = randFree(1); if (!p) continue;
     let [x, y] = p;
     for (let k = 0; k < 4; k++) { if (free(x, y)) set(x, y, 'bramble'); const d = DIRS8[ri(s, 8)]; x += d[0]; y += d[1]; }
   }
-  for (let i = 0; i < 20; i++) { const p = randFree(1); if (p) set(p[0], p[1], 'crate', { hp: 1 }); }
-  for (let i = 0; i < 12; i++) { const p = randFree(1); if (p) s.items.push({ x: p[0], y: p[1], k: 'shard', n: 1 }); }
+  for (let i = 0; i < Math.round(20 * sc); i++) { const p = randFree(1); if (p) set(p[0], p[1], 'crate', { hp: 1 }); }
+  for (let i = 0; i < Math.round(12 * sc); i++) { const p = randFree(1); if (p) s.items.push({ x: p[0], y: p[1], k: 'shard', n: 1 }); }
 
   players.forEach((p, i) => {
     const [x, y] = spawnOrder[i];
     const u = {
       id: s.nextId++, pid: p.pid, name: p.name, bot: !!p.isBot, kind: 'player', slot: i,
-      color: PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter',
+      color: PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter', title: String(p.title || '').slice(0, 24),
       piece: 'pawn', hone: {}, pts: { ...p.build.pts }, passive: p.build.passive, equips: { ...p.build.equips },
       x, y, hp: 1, gauge: rand(s) * 40, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [],
       alive: true, kills: 0, momentum: 0, mark: null, place: 0, dmgDealt: 0, attune: 0, ult: 0, ults: 0, botLevel: p.botLevel || 'normal', pref: rand(s) < 0.5 ? 'knight' : 'bishop',
     };
-    u.hp = stats(u).maxHp;
+    u.hp = stats(u).maxHp; u.shards = M.startShards || 0;
     s.units.push(u);
   });
 
   // Hollows guard shard caches
-  for (let i = 0; i < 6; i++) {
-    const p = randFree(3); if (!p) continue;
+  for (let i = 0; i < (A ? 2 : 6); i++) {
+    const p = randFree(A ? 2 : 3); if (!p) continue;
     const [x, y] = p;
     const h = {
       id: s.nextId++, kind: 'hollow', name: 'Hollow', piece: 'hollow', x, y, hx: x, hy: y, hp: HOLLOW_STATS.hp,
@@ -340,7 +346,7 @@ export function abilityOptions(s, u, slot) {
           const x = u.x + dx * i, y = u.y + dy * i;
           if (!inB(x, y) || isSolid(s, x, y)) break;
           const v = unitAt(s, x, y);
-          if (v) { const tl = around8(x, y).filter((t) => !(t.x === u.x && t.y === u.y)); o.push({ anchor: pt(x, y), tiles: tl, mult: 1.4, hits: tl.map((t) => unitAt(s, t.x, t.y)).filter((w) => w && w !== u && w !== v).map((w) => w.id).concat([]), kind: 'swap', data: { id: v.id } }); break; }
+          if (v) { const tl = around8(x, y).filter((t) => !(t.x === u.x && t.y === u.y)); o.push({ anchor: pt(x, y), tiles: tl, mult: 1.4, hits: tl.map((t) => unitAt(s, t.x, t.y)).filter((w) => w && w !== u).map((w) => w.id).concat(i === 1 ? [v.id] : []), kind: 'swap', data: { id: v.id } }); break; }
         }
       } break;
     case 'execute':
@@ -351,33 +357,34 @@ export function abilityOptions(s, u, slot) {
 
 // ---------- damage ----------
 function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
-  if (!tgt.alive || mult <= 0) return 0;
+  if (s.over || !tgt.alive || mult <= 0) return 0;
   const a = stats(src), d = stats(tgt);
   let m = mult * (0.9 + rand(s) * 0.2);
   if (src.passive === 'first' && tgt.hp >= d.maxHp) m *= 1.5;
   const crit = rand(s) < 0.1;
   if (crit) m *= 1.5;
   if (s.bloodMoon) m *= 1.3;
+  if (tgt.piece === 'king') m *= 1.1;
   const dmg = Math.max(1, Math.round(a.atk * m * 30 / (30 + d.def * defMul(tgt))));
   tgt.hp -= dmg;
   if (src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + dmg; chargeUlt(src, dmg * 1.1, ev); }
   if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
   ev.push({ e: 'dmg', id: tgt.id, src: src.id, n: dmg, crit });
-  if (reflect && tgt.passive === 'thorns' && src !== tgt && cheb(src, tgt) <= 1 && src.alive) {
+  if (tgt.hp <= 0) kill(s, tgt, src, ev);
+  if (!s.over && tgt.alive && reflect && tgt.passive === 'thorns' && src !== tgt && cheb(src, tgt) <= 1 && src.alive) {
     const r = Math.max(1, Math.round(dmg * 0.2));
     src.hp -= r; ev.push({ e: 'dmg', id: src.id, src: tgt.id, n: r, thorns: true });
     if (src.hp <= 0) kill(s, src, tgt, ev);
   }
-  if (tgt.hp <= 0) kill(s, tgt, src, ev);
   return dmg;
 }
 function chargeUlt(u, n, ev) {
   if (u.kind !== 'player' || !u.alive) return;
-  const was = u.ult || 0; u.ult = Math.min(100, was + n);
+  const was = u.ult || 0; u.ult = Math.min(100, was + (u.piece === 'king' ? n * 0.5 : n));
   if (was < 100 && u.ult >= 100) ev.push({ e: 'ultReady', id: u.id });
 }
 function dealFixed(s, tgt, n, ev, tag) {
-  if (!tgt.alive) return;
+  if (s.over || !tgt.alive) return;
   const dmg = Math.max(1, Math.round(n * (s.bloodMoon ? 1.3 : 1)));
   tgt.hp -= dmg; ev.push({ e: 'dmg', id: tgt.id, n: dmg, [tag]: true });
   if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
@@ -413,7 +420,8 @@ function hitTile(s, src, x, y, ev) {
   }
 }
 function dropNear(s, x, y, item) {
-  const cands = [pt(x, y), ...around8(x, y)].filter((t) => !isSolid(s, t.x, t.y) && !isVoid(s, t.x, t.y));
+  let cands = [pt(x, y), ...around8(x, y)].filter((t) => !isSolid(s, t.x, t.y) && !isVoid(s, t.x, t.y));
+  if (!cands.length) cands = freeTiles(s, 0).slice(0, 1);
   const spot = cands.find((t) => !s.items.some((i) => i.x === t.x && i.y === t.y)) || cands[0] || pt(x, y);
   const same = s.items.find((i) => i.x === spot.x && i.y === spot.y && i.k === item.k && item.k === 'shard');
   if (same) same.n += item.n; else s.items.push({ x: spot.x, y: spot.y, ...item });
@@ -424,7 +432,7 @@ function aoe(s, u, tiles, mult, ev, onHit) {
     const v = unitAt(s, t.x, t.y);
     if (v && v !== u) { dealDamage(s, u, v, mult, ev); if (onHit && v.alive) onHit(v); }
     else if (!v) hitTile(s, u, t.x, t.y, ev);
-    if (!u.alive) return;
+    if (!u.alive || s.over) return;
   }
 }
 
@@ -458,7 +466,7 @@ function kill(s, v, killer, ev, cause = null) {
 // ---------- shards / attunement ----------
 function gainShards(s, u, n, ev) {
   u.shards += n;
-  const before = u.attune || 0, after = Math.min(ATTUNE.max, before + n);
+  const before = u.attune || 0, after = u.piece === 'king' ? before : Math.min(ATTUNE.max, before + n);
   if (after > before) {
     const mx0 = stats(u).maxHp;
     u.attune = after;
@@ -492,7 +500,7 @@ function crown(s, u, ev) {
   const before = stats(u).maxHp;
   st.maxHp = st.hp;
   u.kingFrom = u.piece;
-  u.kingStats = { hp: Math.round(st.maxHp * 1.1) + 10, atk: st.atk + 2, def: st.def + 1, spd: Math.max(6, PIECES[u.piece].spd + u.pts.spd - 3) };
+  u.kingStats = { hp: Math.round(st.maxHp * 1.05) + 5, atk: st.atk + 1, def: st.def + 1, spd: Math.max(6, PIECES[u.piece].spd + u.pts.spd - 3) };
   u.piece = 'king'; u.cd = { sig: 0, eq: 0 }; u.mark = null;
   u.hp += stats(u).maxHp - before;
   ev.push({ e: 'crowned', id: u.id });
@@ -505,7 +513,7 @@ function moveUnit(s, u, x, y, ev, how = 'step') {
   land(s, u, ev);
 }
 function pushUnit(s, src, v, dx, dy, dist, bonus, ev) {
-  for (let i = 0; i < dist; i++) {
+  for (let i = 0; i < dist && !s.over && v.alive; i++) {
     const nx = v.x + dx, ny = v.y + dy;
     const blocker = unitAt(s, nx, ny);
     if (!inB(nx, ny) || isSolid(s, nx, ny) || blocker) {
@@ -590,7 +598,7 @@ export function useAbility(s, u, slot, anchor, ev) {
     case 'rampart':
       s.tiles[o.anchor.y * SIZE + o.anchor.x] = { t: 'rubble', hp: 3, built: true };
       ev.push({ e: 'rampart', x: o.anchor.x, y: o.anchor.y });
-      s.items = s.items.filter((i) => !(i.x === o.anchor.x && i.y === o.anchor.y));
+      { const moved = s.items.filter((i) => i.x === o.anchor.x && i.y === o.anchor.y); s.items = s.items.filter((i) => !moved.includes(i)); for (const it of moved) dropNear(s, o.anchor.x, o.anchor.y, { k: it.k, n: it.n }); }
       break;
     case 'dominion':
       aoe(s, u, o.tiles, 0.3, ev, (v) => { v.gauge -= 30; v.buffs.push({ k: 'spd', v: -3, t: 2 }); });
@@ -634,7 +642,7 @@ function promote(s, u, to, ev) {
   u.shards -= o.cost;
   if (o.type === 'evolve') { u.piece = to; u.cd = { sig: 0, eq: 0 }; u.mark = null; }
   else u.hone[u.piece] = (u.hone[u.piece] || 0) + 1;
-  u.hp += stats(u).maxHp - before;
+  u.hp = Math.max(1, Math.min(stats(u).maxHp, u.hp + stats(u).maxHp - before));
   ev.push({ e: 'promote', id: u.id, piece: u.piece, hone: u.hone[u.piece] || 0, type: o.type });
   s.log.push(o.type === 'evolve' ? `${u.name} evolved into a ${PIECES[to].name}` : `${u.name} honed their ${PIECES[u.piece].name}`);
   return true;
@@ -643,7 +651,7 @@ function promote(s, u, to, ev) {
 // action: {type:'move',x,y} | {type:'ability',slot,x,y} | {type:'promote',to} | {type:'end'}
 export function applyAction(s, pid, a) {
   const ev = [];
-  if (s.over) return { ok: false, ev };
+  if (s.over || !a || typeof a !== 'object') return { ok: false, ev };
   const u = unitById(s, s.active);
   if (!u || u.pid !== pid) return { ok: false, ev };
   let ok = false;
@@ -677,7 +685,7 @@ export function nextTurn(s, ev) {
       for (const u of alive) if (u.gauge >= 100 && (!best || u.gauge > best.gauge || (u.gauge === best.gauge && u.id < best.id))) best = u;
       if (!best) for (const u of alive) u.gauge += effSpd(u);
     }
-    if (!best) return;
+    if (!best) { for (const u of alive) if (!best || u.gauge > best.gauge) best = u; if (!best) return; best.gauge = 100; }
     best.gauge -= 100;
     s.turnNo++;
     if (best.kind === 'player') {
@@ -695,8 +703,8 @@ export function nextTurn(s, ev) {
 function startTurn(s, u, ev) {
   u.buffs = u.buffs.filter((b) => --b.t > 0 || b.t === undefined);
   for (const k of ['sig', 'eq']) if (u.cd[k] > 0) u.cd[k]--;
-  if (u.passive === 'regen') heal(s, u, 3, ev);
-  if (u.piece === 'king') heal(s, u, stats(u).maxHp * 0.03, ev);
+  if (u.passive === 'regen') heal(s, u, 2 + Math.floor((u.attune || 0) / 10), ev);
+  if (u.piece === 'king') heal(s, u, stats(u).maxHp * 0.02, ev);
   if (s.storm.ring >= STORM.maxRing && u.kind === 'player') {
     const d = Math.max(3, Math.round(stats(u).maxHp * 0.06));
     u.hp -= d; ev.push({ e: 'dmg', id: u.id, n: d, storm: true });
@@ -727,7 +735,8 @@ function worldEvents(s, ev) {
     s.meteors = [];
     if (s.over) return;
   }
-  if (r < 3 || r % 3 !== 0) return;
+  const EV = (s.rules && s.rules.events) || 3;
+  if (r < EV || r % EV !== 0) return;
   const pool = ['shardRain', 'meteor', 'bloodMoon', 'supply'].filter((k) => k !== s.lastEvent);
   const kind = pool[ri(s, pool.length)];
   s.lastEvent = kind;
@@ -758,18 +767,19 @@ function onRound(s, ev) {
   if (s.tutorial) return;
   worldEvents(s, ev);
   if (s.over) return;
-  if (s.storm.ring < STORM.maxRing && r >= STORM.firstCrack && (r - STORM.firstCrack) % STORM.every === 0 && !s.storm.crack) {
+  const R = s.rules || { first: STORM.firstCrack, every: STORM.every, crown: CROWN_ROUND };
+  if (s.storm.ring < STORM.maxRing && r >= R.first && (r - R.first) % R.every === 0 && !s.storm.crack) {
     s.storm.crack = true;
     ev.push({ e: 'storm', phase: 'crack', ring: s.storm.ring });
-  } else if (s.storm.crack && (r - STORM.firstCrack) % STORM.every === 1) {
+  } else if (s.storm.crack && (R.every === 1 || (r - R.first) % R.every === 1)) {
     s.storm.crack = false; s.storm.ring++;
     s.items = s.items.filter((i) => i.k === 'crown' || !isVoid(s, i.x, i.y));
-    for (const it of s.items) if (it.k === 'crown' && isVoid(s, it.x, it.y)) { it.x = 7; it.y = 7; }
+    for (const it of s.items) if (it.k === 'crown' && isVoid(s, it.x, it.y)) { const f = freeTiles(s, s.storm.ring); const c = f.find((t) => !unitAt(s, t.x, t.y)) || pt(7, 7); it.x = c.x; it.y = c.y; }
     ev.push({ e: 'storm', phase: 'collapse', ring: s.storm.ring });
   }
-  if (!s.crownSpawned && r >= CROWN_ROUND) {
+  if (!s.crownSpawned && r >= R.crown) {
     s.crownSpawned = true;
-    const spots = [pt(7, 7), pt(8, 8), pt(7, 8), pt(8, 7), ...around8(7, 7), ...around8(8, 8)];
+    const ft = freeTiles(s, Math.max(3, s.storm.ring + 2)); const spots = ft.length ? [ft[ri(s, ft.length)]] : [pt(7, 7)];
     const spot = spots.find((p) => !isSolid(s, p.x, p.y) && !unitAt(s, p.x, p.y)) || pt(7, 7);
     if (isSolid(s, spot.x, spot.y)) s.tiles[spot.y * SIZE + spot.x] = { t: 'floor' };
     s.items.push({ x: spot.x, y: spot.y, k: 'crown', n: 1 });

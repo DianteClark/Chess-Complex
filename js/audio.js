@@ -9,6 +9,7 @@ export function getCtx() {
   if (!ac) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
     ac = new AC();
     master = ac.createDynamicsCompressor(); master.threshold.value = -12; master.ratio.value = 4; master.connect(ac.destination);
     sfxBus = ac.createGain(); sfxBus.connect(master);
@@ -20,7 +21,7 @@ export function getCtx() {
     verb.buffer = buf; const vg = ac.createGain(); vg.gain.value = 0.22; verb.connect(vg); vg.connect(master);
     applyVolumes();
   }
-  if (ac.state === 'suspended') ac.resume();
+  if (ac.state !== 'running') ac.resume().catch(() => {});
   return ac;
 }
 export const buses = () => ({ ac, sfxBus, musicBus, verb });
@@ -42,11 +43,13 @@ function tone(f, d, { type = 'sine', v = 0.3, slide = 0, at = 0, attack = 0.005,
   o.connect(g); out.connect(sfxBus); if (rev) { const r = a.createGain(); r.gain.value = rev; out.connect(r); r.connect(verb); }
   o.start(t); o.stop(t + d + 0.02);
 }
+const NOISE = new Map();
 function noise(d, { v = 0.3, f = 1200, q = 1, at = 0, type = 'lowpass', sweep = 0, rev = 0 } = {}) {
   const a = getCtx(); if (!a || settings.sfx === 0) return;
   const t = a.currentTime + at;
-  const len = Math.floor(a.sampleRate * d), buf = a.createBuffer(1, len, a.sampleRate), data = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.5);
+  const key = Math.round(d * 20);
+  let buf = NOISE.get(key);
+  if (!buf) { const len = Math.max(1, Math.floor(a.sampleRate * key / 20)); buf = a.createBuffer(1, len, a.sampleRate); const data = buf.getChannelData(0); for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.5); NOISE.set(key, buf); }
   const src = a.createBufferSource(); src.buffer = buf;
   const fl = a.createBiquadFilter(); fl.type = type; fl.frequency.setValueAtTime(f, t); fl.Q.value = q;
   if (sweep) fl.frequency.exponentialRampToValueAtTime(Math.max(40, f * sweep), t + d);
@@ -113,6 +116,8 @@ const KILL_SFX = {
   inferno: () => { noise(0.9, { v: 0.5, f: 1200, type: 'bandpass', sweep: 0.3, rev: 0.4 }); tone(80, 0.6, { v: 0.4, slide: 0.5 }); },
   lightning: () => { noise(0.08, { v: 0.8, f: 8000, type: 'highpass' }); noise(1.2, { v: 0.6, f: 300, at: 0.05, rev: 0.5 }); },
   voidrift: () => { tone(200, 0.55, { type: 'sawtooth', v: 0.1, slide: 4, rev: 0.4 }); noise(0.4, { v: 0.5, f: 600, at: 0.55, rev: 0.5 }); tone(50, 0.5, { v: 0.4, at: 0.55, slide: 0.5 }); },
+  coronation: () => { tone(1200, 0.45, { type: 'sine', v: 0.06, slide: 0.4, rev: 0.4 }); chord([523, 659, 784, 1047, 1319], 0.8, { type: 'triangle', v: 0.1, roll: 0.05, at: 0.45, rev: 0.7 }); noise(0.5, { v: 0.4, f: 900, at: 0.45, rev: 0.4 }); },
+  starfall: () => { noise(0.5, { v: 0.3, f: 3000, type: 'bandpass', sweep: 0.15, rev: 0.4 }); noise(0.6, { v: 0.5, f: 500, at: 0.5, rev: 0.5 }); },
   midas: () => { chord([1047, 1319, 1568], 0.4, { type: 'triangle', v: 0.08, roll: 0.04, rev: 0.4 }); for (let i = 0; i < 10; i++) tone(1600 + Math.random() * 800, 0.06, { type: 'triangle', v: 0.05, at: 0.4 + i * 0.04 }); },
 };
 export function playNamed(n) {
@@ -120,3 +125,5 @@ export function playNamed(n) {
   if (n.startsWith('kill:')) { (KILL_SFX[n.slice(5)] || KILL_SFX.shatter)(); tone(70, 0.5, { v: 0.4, slide: 0.4 }); return; }
   if (sfx[n]) sfx[n]();
 }
+
+document.addEventListener('visibilitychange', () => { if (!ac) return; if (document.hidden) ac.suspend().catch(() => {}); else ac.resume().catch(() => {}); });

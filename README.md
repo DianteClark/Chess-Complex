@@ -17,18 +17,14 @@ A turn-based chess battle royale for up to 8 players. Everyone starts as a Pawn 
 - **Progression:** XP and levels with titles from Recruit to Legend; every level-up pays out Marks.
 - **Juice:** hit-stop, slow-motion eliminations, camera punches, lunging attacks, per-ability VFX, shattering pieces, collapsing storm tiles, damage previews with KO markers, kill streak callouts, emotes, haptics and a generative soundtrack that intensifies as the match closes in.
 
-## v1.3 highlights
-- **Tutorial:** five guided lessons with the Grandmaster (First Steps, Combat, Evolution, Ultimates, The Board) plus a Graduation match. Each pays Marks the first time.
-- **Codex:** every piece, attack, signature, equippable and ultimate with shape diagrams generated from the real rules engine, plus builds, board rules and example combos.
-- **Secret discoveries:** ten hidden combos to find in real matches. Hints only, no answers.
-- **Hold any action button** in a match to see that ability's shape and details.
+## What's in 2.0
+- **Four modes:** Battle Royale, Blitz, Duel and a seeded Daily Challenge.
+- **Crown Path:** a free 30-tier season track with exclusive cosmetics and titles. **Trophies:** 21 achievements.
+- **Learning:** an interactive tutorial, a Codex with shape diagrams generated from the rules engine, a danger-zone overlay, post-match recaps and secret combo discoveries.
+- **Accessibility and comfort:** graphics quality, reduced motion, one-tap attacks, colorblind colours, larger text, backup codes.
+- **Installable:** add it to your Home Screen for a full-screen app that works offline in solo.
 
-## v1.2 highlights
-- **Shard Attunement:** every shard you collect permanently boosts HP, ATK and DEF (and SPD every 6), up to 30, even after spending. Orbiting crystals show your attunement tier.
-- **Ultimates:** charge by dealing and taking damage, then unleash a cinematic piece ultimate (En Passant, Fork, Excommunicate, Castling, Checkmate Nova, Divine Right).
-- **World events** every third round: Shard Rain, Meteor Storm, Blood Moon, Supply Drop.
-- **Daily quests**, career stats, bot difficulty, victory cinematic with fireworks, per-board weather, new cosmetics (Crimson Regalia, Celestial, Astral Sanctum, Starfall).
-- **Installable app:** add to your Home Screen for a full-screen app with its own icon. Works offline for solo play.
+See [CHANGELOG.md](CHANGELOG.md) for everything, and [docs/ROADMAP.md](docs/ROADMAP.md) for the commercial plan.
 
 ## How online play works
 GitHub Pages only serves static files, so matches are peer to peer over WebRTC using [PeerJS](https://peerjs.com). The host's browser runs the authoritative game; the friend code is the host's room ID. If a player disconnects, a bot takes over their piece. A few strict networks (some school or corporate Wi-Fi) block direct peer connections; mobile data or home Wi-Fi usually works.
@@ -45,7 +41,8 @@ Then open http://localhost:8000. Add `?net=local` to test online play between tw
 Balance simulation (bot-only matches):
 
 ```
-node tools/sim.mjs 200
+node tools/sim.mjs 200      # Battle Royale balance stats
+node tools/modesim.mjs      # every mode terminates, average lengths
 ```
 
 ## Project layout
@@ -53,5 +50,7 @@ node tools/sim.mjs 200
 - `js/engine.js` - rules engine, map generation, turn order, storm, AI
 - `js/render.js`, `js/pieces.js` - canvas renderer and vector piece art
 - `js/net.js` - friend-code rooms and the authoritative match host
-- `js/main.js` - menus, loadout, armory, HUD
+- `js/main.js` - menus, loadout, armory, HUD, sessions
+- `js/progression.js` - Crown Path, trophies, career stats, daily challenge seeding
+- `js/tutorial.js`, `js/codex.js` - guided lessons and the Codex
 - `js/audio.js` - synthesised sound effects

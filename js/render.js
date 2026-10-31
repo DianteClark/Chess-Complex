@@ -1,6 +1,7 @@
 // Board renderer: themed tiles, pieces, telegraphs, sequenced combat VFX, camera juice.
 import { SIZE, BOARDS, ABILITIES } from './data.js';
 import { drawPiece, skinOf, PIECE_TOP } from './pieces.js';
+import { hiSprite } from './fx.js';
 import { ringOf, stats, unitById, previewDamage } from './engine.js';
 import { FX } from './fx.js';
 
@@ -25,9 +26,10 @@ export class Renderer {
     this.resize();
     addEventListener('resize', () => this.resize());
   }
+  setQuality(q) { this.quality = q || 'auto'; this.lowQ = q === 'low'; this.ftAvg = 16; this.ftT = 0; this.resize(); }
   setTheme(id) { this.theme = BOARDS[id] || BOARDS.hall; }
   resize() {
-    const dpr = Math.min(2, devicePixelRatio || 1);
+    const dpr = this.lowQ ? 1 : Math.min(2, devicePixelRatio || 1);
     const r = this.c.getBoundingClientRect();
     this.W = r.width || innerWidth; this.H = r.height || innerHeight; this.dpr = dpr;
     this.c.width = Math.round(this.W * dpr); this.c.height = Math.round(this.H * dpr);
@@ -56,12 +58,19 @@ export class Renderer {
   pan(dx, dy) { this.cam.x -= dx / this.z; this.cam.y -= dy / this.z; this.cam.tx = this.cam.x; this.cam.ty = this.cam.y; this.follow = false; }
   overview() { this.cam.tz = this.fitZoom; const b = this.bounds; this.cam.tx = b ? (b.x0 + b.x1 + 1) / 2 : SIZE / 2; this.cam.ty = b ? (b.y0 + b.y1 + 1) / 2 : SIZE / 2; this.zoomSet = true; }
   closeup() { this.cam.tz = this.defaultZoom(); this.follow = true; this.zoomSet = true; }
-  reset() { this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; }
+  reset() { this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; }
 
-  kick(n) { if (this.shakeOn) this.shake = Math.min(16, this.shake + n); }
-  hitstop(t) { this.hs = Math.max(this.hs, t); }
-  slowmo(scale, dur) { this.slow = { scale, dur, t: 0 }; }
-  later(t, fn) { this.timers.push({ at: this.time + t, fn }); }
+  kick(n) { if (this.shakeOn && !this.reduced) this.shake = Math.min(16, this.shake + n); }
+  hitstop(t) { if (!this.reduced) this.hs = Math.max(this.hs, t); }
+  slowmo(scale, dur) { if (!this.reduced) this.slow = { scale, dur, t: 0 }; }
+  later(t, fn) { this.timers.push({ at: (this.base ?? this.time) + t, fn }); }
+  flush() {
+    const due = this.timers.sort((a, b) => a.at - b.at); this.timers = [];
+    const saveBase = this.base; this.base = this.time;
+    for (const t of due) t.fn();
+    this.base = saveBase;
+    for (const d of this.disp.values()) { d.t0 = -9; d.x = d.sx = d.tx; d.y = d.sy = d.ty; d.lunge = null; }
+  }
   sfx(n) { this.hooks.sfx && this.hooks.sfx(n); }
   haptic(p) { this.hooks.haptic && this.hooks.haptic(p); }
   colorOf(id) { const u = this.state && unitById(this.state, id); return u ? u.color : '#fff'; }
@@ -91,6 +100,9 @@ export class Renderer {
     }
     this.state = s;
     if (first) return;
+    if ((this.seqEnd || 0) - this.time > 0.9) this.flush();
+    this.base = Math.max(this.time, this.seqEnd || 0);
+    const now0 = this.base;
     let t = 0; let hits = 0; let lastAb = null;
     for (const e of events) {
       if (e.e === 'move') {
@@ -134,7 +146,7 @@ export class Renderer {
         this.later(t, () => this.onDmg(e, n));
         t += 0.025;
       } else if (e.e === 'death') {
-        const d = this.disp.get(e.id); if (d) d.deathAt = now + t + 0.06;
+        const d = this.disp.get(e.id); if (d) d.deathAt = now0 + t + 0.06;
         this.later(t + 0.06, () => this.onDeath(e));
         t += 0.2;
       } else if (e.e === 'world' && e.kind === 'meteor' && e.phase === 'strike') {
@@ -153,6 +165,8 @@ export class Renderer {
         if (u.alive && !d.moving && (d.tx !== u.x || d.ty !== u.y)) { d.sx = d.x; d.sy = d.y; d.tx = u.x; d.ty = u.y; d.t0 = this.time; d.dur = 0.2; d.how = 'step'; }
       }
     });
+    this.seqEnd = this.base + t + 0.05;
+    this.base = null;
   }
 
   onDmg(e, n) {
@@ -273,6 +287,9 @@ export class Renderer {
 
   frame(realDt) {
     this.real += realDt;
+    if (this.quality === 'auto' && !this.lowQ) { this.ftAvg = (this.ftAvg || 16) * 0.95 + realDt * 1000 * 0.05; this.ftT = (this.ftT || 0) + realDt; if (this.ftT > 4 && this.ftAvg > 27) { this.lowQ = true; this.resize(); } }
+    if (this.reduced) this.punch = 0;
+    this.fx.cap = this.lowQ ? 260 : 600;
     let dt = realDt;
     if (this.hs > 0) { this.hs -= realDt; dt = realDt * 0.04; }
     else if (this.slow) { this.slow.t += realDt; const k = Math.min(1, this.slow.t / this.slow.dur); dt = realDt * lerp(this.slow.scale, 1, k * k); if (k >= 1) this.slow = null; }
@@ -321,9 +338,15 @@ export class Renderer {
     const { x: ctx, W, H, dpr } = this;
     const s = this.state, th = this.theme;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const bg = ctx.createRadialGradient(W / 2, this.CY, 10, W / 2, this.CY, Math.max(W, H) * 0.8);
-    bg.addColorStop(0, th.bg[0]); bg.addColorStop(1, th.bg[1]);
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    const bk = W + 'x' + H + th.name + this.CY;
+    if (!this.bgCache || this.bgCache.k !== bk) {
+      const bg = ctx.createRadialGradient(W / 2, this.CY, 10, W / 2, this.CY, Math.max(W, H) * 0.8);
+      bg.addColorStop(0, th.bg[0]); bg.addColorStop(1, th.bg[1]);
+      const vg0 = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.75);
+      vg0.addColorStop(0, 'rgba(0,0,0,0)'); vg0.addColorStop(1, 'rgba(0,0,0,0.55)');
+      this.bgCache = { k: bk, bg, vg0 };
+    }
+    ctx.fillStyle = this.bgCache.bg; ctx.fillRect(0, 0, W, H);
     if (!s) return;
     if (s.bloodMoon) { const mx = W * 0.8, my = this.pad.t + 70; const g2 = ctx.createRadialGradient(mx, my, 10, mx, my, 160); g2.addColorStop(0, 'rgba(255,60,40,0.55)'); g2.addColorStop(1, 'rgba(255,60,40,0)'); ctx.fillStyle = g2; ctx.fillRect(mx - 160, my - 160, 320, 320); ctx.fillStyle = '#ff5a40'; ctx.beginPath(); ctx.arc(mx, my, 34, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = 'rgba(120,10,10,0.5)'; ctx.beginPath(); ctx.arc(mx + 8, my - 6, 30, 0, Math.PI * 2); ctx.fill(); }
     const z = this.z, T = this.time;
@@ -391,6 +414,7 @@ export class Renderer {
       ctx.strokeStyle = '#ffd76a'; ctx.lineWidth = 0.06; ctx.strokeRect(m.x + 0.08, m.y + 0.08, 0.84, 0.84);
       const ay = m.y - 0.55 - Math.abs(Math.sin(T * 4)) * 0.3;
       ctx.fillStyle = '#ffd76a'; ctx.beginPath(); ctx.moveTo(m.x + 0.3, ay); ctx.lineTo(m.x + 0.7, ay); ctx.lineTo(m.x + 0.5, ay + 0.25); ctx.closePath(); ctx.fill();
+      if (m.label) { ctx.font = '700 0.2px "Chakra Petch", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; const w = ctx.measureText(m.label).width + 0.14; ctx.fillStyle = 'rgba(10,9,15,0.9)'; ctx.fillRect(m.x + 0.5 - w / 2, ay - 0.3, w, 0.26); ctx.fillStyle = '#ffe3a1'; ctx.fillText(m.label, m.x + 0.5, ay - 0.06); }
     }
     if (s.meteors && s.meteors.length) {
       for (const m of s.meteors) {
@@ -417,9 +441,12 @@ export class Renderer {
       if (d.drop && this.time < d.drop.t0) continue;
       draws.push({ y: d.y + 0.6, fn: () => this.drawUnit(u, d, T) });
     }
+    this.labelQ = [];
     draws.sort((a, b) => a.y - b.y).forEach((d) => d.fn());
+    for (const f of this.labelQ) f();
+    this.labelQ = [];
 
-    this.drawWeather(ctx, T);
+    if (!this.lowQ) this.drawWeather(ctx, T);
     this.fx.drawAbove(ctx);
     ctx.restore();
 
@@ -427,7 +454,7 @@ export class Renderer {
     this.drawScreenText(ox, oy);
 
     // screen flash / vignettes
-    if (this.fx.screenFlash > 0.01) { ctx.globalAlpha = this.fx.screenFlash * 0.7; ctx.fillStyle = this.fx.flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    if (this.fx.screenFlash > 0.01 && !this.reduced) { ctx.globalAlpha = this.fx.screenFlash * 0.7; ctx.fillStyle = this.fx.flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
     const me = this.myId && unitById(s, this.myId);
     let red = 0;
     if (me && me.alive) {
@@ -436,8 +463,8 @@ export class Renderer {
       if (ringOf(me.x, me.y) < s.storm.ring || (s.storm.crack && ringOf(me.x, me.y) === s.storm.ring)) red = Math.max(red, 0.3 + 0.15 * Math.sin(this.real * 8));
     }
     red = Math.max(red, this.hurt * 0.45);
-    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.75);
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, red > 0 ? `rgba(120,0,10,${0.45 + red})` : 'rgba(0,0,0,0.55)');
+    let vg = this.bgCache.vg0;
+    if (red > 0) { vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(120,0,10,${0.45 + red})`); }
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
     if (this.cine) this.drawCine(ctx, W, H);
     if (this.slow) { ctx.globalAlpha = 0.25 * (1 - this.slow.t / this.slow.dur); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H * 0.08); ctx.fillRect(0, H * 0.92, W, H * 0.08); ctx.globalAlpha = 1; }
@@ -511,8 +538,8 @@ export class Renderer {
         const x = m.x + Math.sin(m.p * 0.9) * 0.9, y = m.y + Math.cos(m.p * 0.6) * 0.9 + (SIZE - m.y) * 0;
         const blink = Math.max(0, Math.sin(m.p * 2.5 + m.x));
         ctx.globalAlpha = blink * 0.9;
-        const g = ctx.createRadialGradient(x, y, 0, x, y, 0.25); g.addColorStop(0, 'rgba(220,255,140,0.9)'); g.addColorStop(1, 'rgba(220,255,140,0)');
-        ctx.fillStyle = g; ctx.fillRect(x - 0.25, y - 0.25, 0.5, 0.5);
+        ctx.fillStyle = 'rgba(220,255,140,0.25)'; ctx.beginPath(); ctx.arc(x, y, 0.16, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(240,255,190,0.95)'; ctx.beginPath(); ctx.arc(x, y, 0.045, 0, Math.PI * 2); ctx.fill();
       } else if (w === 'stars') {
         ctx.globalAlpha = a * 0.7; ctx.fillStyle = '#e8f6ff'; ctx.fillRect(m.x, m.y, m.s, m.s);
       } else {
@@ -527,7 +554,7 @@ export class Renderer {
     const inA = Math.min(1, k * 6), outA = k > 0.8 ? (1 - k) / 0.2 : 1, a = inA * outA;
     ctx.globalAlpha = 0.45 * a; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a; ctx.fillRect(0, 0, W, H * 0.1 * inA); ctx.fillRect(0, H - H * 0.1 * inA, W, H * 0.1 * inA);
-    const by = H * 0.3, bh = Math.min(110, H * 0.13);
+    const by = this.pad.t + 30, bh = Math.min(110, H * 0.13);
     const slide = (1 - Math.min(1, k * 4)) * W;
     ctx.save(); ctx.translate(slide, 0);
     ctx.globalAlpha = 0.85 * a; ctx.fillStyle = c.color;
@@ -722,7 +749,14 @@ export class Renderer {
     ctx.translate(cx, base - d.lift + bob + dropY);
     ctx.scale(0.92 * pop * (1 + sq - stretch * 0.5), 0.92 * pop * (1 - sq + stretch));
     if (u.kind === 'hollow') ctx.translate(0, Math.sin(T * 3 + u.id) * 0.04);
-    drawPiece(ctx, u.piece, u.skin, { flash: this.hitFlash.get(u.id) || (dying ? 1 : 0), alpha: 1, t: T, outline: mine ? 'rgba(255,255,255,0.22)' : null });
+    const fl = this.hitFlash.get(u.id) || (dying ? 1 : 0);
+    if (sk.wire || sk.fx === 'aurora' || sk.fx === 'star' || sk.fx === 'glint') drawPiece(ctx, u.piece, u.skin, { flash: fl, alpha: 1, t: T, outline: mine ? 'rgba(255,255,255,0.22)' : null });
+    else {
+      const sp = hiSprite(u.piece, u.skin), S = 1 / 160;
+      if (mine) { ctx.globalAlpha = 0.22; ctx.drawImage(hiSprite(u.piece, u.skin, 'white'), -96 * S * 1.06, -224 * S * 1.03, 192 * S * 1.06, 240 * S * 1.03); ctx.globalAlpha = 1; }
+      ctx.drawImage(sp, -96 * S, -224 * S, 192 * S, 240 * S);
+      if (fl > 0) { ctx.globalAlpha = Math.min(1, fl); ctx.drawImage(hiSprite(u.piece, u.skin, 'white'), -96 * S, -224 * S, 192 * S, 240 * S); ctx.globalAlpha = 1; }
+    }
     ctx.restore();
     if (Math.random() < 0.07 && u.kind === 'player' && sk.fx !== 'dust') {
       const col = sk.fx === 'ember' ? '#ff8a3d' : sk.fx === 'frost' ? '#d6f7ff' : sk.fx === 'leaf' ? '#8de37a' : sk.fx === 'spark' ? '#00f0ff' : sk.fx === 'star' ? '#d6a6ff' : '#ffe9a8';
@@ -746,8 +780,8 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
     if (u.kind === 'player' && (u.ult || 0) >= 100 && !dying && Math.random() < 0.18) this.fx.parts.push({ x: cx + (Math.random() - 0.5) * 0.5, y: base - Math.random() * 0.9, vx: 0, vy: -0.6, g: -0.2, life: 0.7, t: 0, color: '#ffd24d', size: 0.03, kind: 'spark', rot: 0, vr: 0 });
-    // HP bar + name
-    if (!dying && !(dropY < -0.5)) {
+    // HP bar + name (deferred so labels sit above everything)
+    if (!dying && !(dropY < -0.5)) (this.labelQ ||= []).push(() => {
       const top = base + (PIECE_TOP[u.piece] || -1) * 0.92 - 0.14 - d.lift;
       const mx = stats(u).maxHp, r = Math.max(0, Math.min(1, d.hp / mx)), gr = Math.max(0, Math.min(1, d.ghost / mx));
       const w = 0.72, bx = cx - w / 2;
@@ -771,11 +805,12 @@ export class Renderer {
         const ay = top - (this.z > 34 ? 0.45 : 0.25) - Math.abs(Math.sin(T * 4)) * 0.12 - (u.piece === 'king' ? 0.2 : 0);
         ctx.fillStyle = '#ffe3a1'; ctx.beginPath(); ctx.moveTo(cx - 0.12, ay - 0.1); ctx.lineTo(cx + 0.12, ay - 0.1); ctx.lineTo(cx, ay + 0.04); ctx.closePath(); ctx.fill();
       }
-    }
+    });
   }
 
   drawOverlay(T) {
-    const ov = this.overlay; if (!ov) return;
+    const ov = this.overlay ? { ...this.overlay } : (this.danger ? {} : null); if (!ov) return;
+    if (this.danger) ov.danger = this.danger;
     const ctx = this.x;
     const pulse = 0.5 + 0.5 * Math.sin(T * 5);
     if (ov.moves) for (const m of ov.moves) {
@@ -784,6 +819,7 @@ export class Renderer {
       ctx.strokeStyle = 'rgba(127,224,255,0.75)'; ctx.lineWidth = 0.03; ctx.strokeRect(m.x + 0.1, m.y + 0.1, 0.8, 0.8);
       ctx.fillStyle = 'rgba(200,240,255,0.9)'; ctx.beginPath(); ctx.arc(m.x + 0.5, m.y + 0.5, 0.06 + wave * 0.03, 0, Math.PI * 2); ctx.fill();
     }
+    if (ov.danger) for (const t of ov.danger) { ctx.fillStyle = 'rgba(255,60,80,0.16)'; ctx.fillRect(t.x + 0.03, t.y + 0.03, 0.94, 0.94); ctx.strokeStyle = 'rgba(255,90,100,0.35)'; ctx.lineWidth = 0.02; ctx.beginPath(); ctx.moveTo(t.x + 0.1, t.y + 0.9); ctx.lineTo(t.x + 0.9, t.y + 0.1); ctx.moveTo(t.x + 0.1, t.y + 0.5); ctx.lineTo(t.x + 0.5, t.y + 0.1); ctx.moveTo(t.x + 0.5, t.y + 0.9); ctx.lineTo(t.x + 0.9, t.y + 0.5); ctx.stroke(); }
     if (ov.hover) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.05; this.corners(ov.hover.x + 0.05, ov.hover.y + 0.05, 0.9); }
     if (ov.opts) {
       for (const o of ov.opts) {

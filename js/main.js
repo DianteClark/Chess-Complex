@@ -1,5 +1,6 @@
 // Chess Complex — app shell: menus, loadout, armory, sessions, in-game HUD, progression.
-import { PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES } from './data.js';
+import { PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES, MODES, SEASON, SEASON_REWARDS, ACHIEVEMENTS } from './data.js';
+import { ensureProgress, seasonTier, seasonProgress, rewardLabel, addSeasonXp, checkAchievements, recordMatch, dailySeed, dailyScore, achievementValue } from './progression.js';
 import { legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM, createTutorial, ARENA, isVoid, isCracked } from './engine.js';
 import { LESSONS, Tutorial } from './tutorial.js';
 import { renderCodex, diagram } from './codex.js';
@@ -7,6 +8,7 @@ import { Renderer } from './render.js';
 import { pieceIcon, drawPiece } from './pieces.js';
 import { FX } from './fx.js';
 import { sfx, playNamed, unlockAudio, settings, saveSettings, haptic } from './audio.js';
+Object.assign(settings, Object.assign({ motion: !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches), onetap: false, quality: 'auto', cb: false, bigtext: false }, settings));
 import { music } from './music.js';
 import { GameHost, openServer, openClient, makeCode } from './net.js';
 
@@ -29,7 +31,10 @@ function defaultProfile() {
 }
 let profile = defaultProfile();
 try { const raw = localStorage.getItem(PKEY); if (raw) { const d = defaultProfile(); profile = { ...d, ...JSON.parse(raw) }; for (const k of ['ownedBoards', 'ownedFinishers', 'owned', 'tutorial', 'discovered']) if (!Array.isArray(profile[k])) profile[k] = d[k]; } } catch {}
+ensureProgress(profile);
+if (!profile.mode || !MODES[profile.mode]) profile.mode = 'royale';
 const save = () => { try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch {} };
+const CB_COLORS = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7', '#FFFFFF'];
 const ptsUsed = () => Object.values(profile.build.pts).reduce((a, b) => a + b, 0);
 
 // ---------- daily quests ----------
@@ -58,8 +63,9 @@ function applyQuests(ms) {
   return done;
 }
 function renderQuests() {
-  renderProfile();
   const list = dailyQuests();
+  profile.quests.seen = profile.quests.date; save();
+  renderProfile();
   $('#quest-list').innerHTML = list.map((q) => { const Q = QUESTS[q.id]; return `<div class="quest ${q.done ? 'done' : ''}"><b>${Q.text}</b><div class="rw"><i class="mark-ico"></i>${Q.reward}</div><div class="qbar"><i style="width:${(q.prog / Q.goal) * 100}%"></i></div><span class="qp">${q.prog} / ${Q.goal}</span></div>`; }).join('');
   const now = new Date(), mid = new Date(now); mid.setHours(24, 0, 0, 0);
   const hrs = Math.floor((mid - now) / 3600000), mins = Math.floor(((mid - now) % 3600000) / 60000);
@@ -71,8 +77,10 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 function uiFlash() { const f = $('#ui-flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
 function renderProfile() {
   $('#marks-title').textContent = profile.marks; $('#marks-armory').textContent = profile.marks; $('#marks-quests').textContent = profile.marks;
-  $('#q-badge').textContent = dailyQuests().filter((q) => !q.done).length || '';
+  $('#q-badge').textContent = profile.quests && profile.quests.seen === profile.quests.date ? '' : dailyQuests().filter((q) => !q.done).length || '';
   $('#t-badge').textContent = profile.tutorial.length ? '' : 'NEW';
+  $('#p-badge').textContent = seasonTier(profile) > (profile.season.seen || 0) ? '!' : '';
+  ['#marks-play', '#marks-path'].forEach((k) => { const el = $(k); if (el) el.textContent = profile.marks; });
   let np = $('#new-player');
   if (!profile.tutorial.length && !profile.games) { if (!np) { np = document.createElement('div'); np.id = 'new-player'; np.className = 'new-player'; np.dataset.go = 'tutorial'; np.textContent = 'New here? Learn the ropes'; $('.logo-line').after(np); } }
   else if (np) np.remove();
@@ -103,7 +111,10 @@ function bgInit() {
   addEventListener('pointermove', (e) => { mx = e.clientX / innerWidth - 0.5; my = e.clientY / innerHeight - 0.5; });
   const loop = (now) => {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    if (bg.on) {
+    bg.acc = (bg.acc || 0) + dt;
+    const modalUp = !!document.querySelector('.modal.global:not(.hidden)');
+    if (bg.on && !modalUp && bg.acc >= 1 / 30) {
+      const dt2 = bg.acc; bg.acc = 0;
       const W = c.width, H = c.height;
       const g = x.createRadialGradient(W / 2, H * 0.4, 10, W / 2, H / 2, Math.max(W, H) * 0.7);
       g.addColorStop(0, '#1d1830'); g.addColorStop(0.6, '#0e0c16'); g.addColorStop(1, '#060509');
@@ -115,7 +126,7 @@ function bgInit() {
       const hg = x.createLinearGradient(0, hz - 60, 0, hz + 40); hg.addColorStop(0, 'rgba(214,176,92,0)'); hg.addColorStop(0.6, 'rgba(214,176,92,0.12)'); hg.addColorStop(1, 'rgba(214,176,92,0)');
       x.fillStyle = hg; x.fillRect(0, hz - 60, W, 100);
       for (const p of bg.parts) {
-        p.y -= p.v * dt; p.ph += dt;
+        p.y -= p.v * dt2; p.ph += dt2;
         if (p.y < -0.2) Object.assign(p, spawn());
         x.setTransform(bg.d, 0, 0, bg.d, 0, 0);
         x.globalAlpha = p.a;
@@ -139,8 +150,11 @@ function go(name) {
   bg.on = name !== 'game';
   if (name === 'loadout') renderLoadout();
   if (name === 'armory') renderArmory();
-  if (name === 'solo') renderSoloMini();
+  if (name === 'play') renderPlay();
+  if (name === 'path') renderPath();
+  if (name === 'trophies') renderTrophies();
   if (name === 'host') startHostLobby();
+  if (name === 'title') { const a = checkAchievements(profile); if (a.length) { save(); setTimeout(() => toast(`Trophy unlocked: ${a[0].name}`), 400); } }
   if (name === 'title') renderProfile();
   if (name === 'quests') renderQuests();
   if (name === 'tutorial') renderLessons();
@@ -196,7 +210,7 @@ function renderArmory() {
   const hints = { pieces: 'Piece sets change how your pieces look to everyone.', boards: 'Boards change the arena you see.', finishers: 'Finishers play when you eliminate someone. Everyone sees them.' };
   $('#armory-hint').textContent = hints[armoryTab];
   const tag = (price) => `<div class="price-tag"><i class="mark-ico"></i>${price}</div>`;
-  const btn = (kind, k, owned, eq, price) => eq ? `<button class="btn small" disabled>Equipped</button>` : owned ? `<button class="btn small" data-equip-${kind}="${k}">Equip</button>` : `<button class="btn small gold" data-buy-${kind}="${k}" ${profile.marks < price ? 'disabled' : ''}>Unlock ${price}</button>`;
+  const btn = (kind, k, owned, eq, price) => eq ? `<button class="btn small" disabled>Equipped</button>` : owned ? `<button class="btn small" data-equip-${kind}="${k}">Equip</button>` : price == null ? `<button class="btn small" disabled>Crown Path reward</button>` : `<button class="btn small gold" data-buy-${kind}="${k}" ${profile.marks < price ? 'disabled' : ''}>Unlock ${price}</button>`;
   armoryPreviews.list = [];
   if (armoryTab === 'pieces') {
     $('#skins').innerHTML = Object.entries(SKINS).map(([k, s]) => {
@@ -264,6 +278,7 @@ function onArmoryClick(e) {
   const buy = (list, ownedKey, eqKey, k, label) => {
     const price = list[k].price;
     if (profile.marks < price) { sfx.error(); return; }
+    if (!b.classList.contains('confirm-buy')) { $$('.confirm-buy').forEach((x) => { x.classList.remove('confirm-buy'); x.textContent = x.dataset.lbl; }); b.dataset.lbl = b.textContent; b.textContent = `Confirm ${price}?`; b.classList.add('confirm-buy'); sfx.select(); return; }
     profile.marks -= price; profile[ownedKey].push(k); profile[eqKey] = k; save(); sfx.buy(); uiFlash(); haptic([20, 30, 40]);
     toast(`${label} unlocked`); renderArmory();
     const card = $(`[data-card="${k}"]`); if (card) card.classList.add('unlocked-anim');
@@ -276,10 +291,65 @@ function onArmoryClick(e) {
   else if (d.equipFin) { profile.finisher = d.equipFin; save(); sfx.select(); renderArmory(); }
 }
 
+function renderPlay() {
+  const ICON = { royale: ['king', 'gilded'], blitz: ['knight', 'ember'], duel: ['rook', 'glacier'], daily: ['queen', 'celestial'] };
+  const dailyDone = profile.daily.date === today();
+  $('#modes').innerHTML = Object.entries(MODES).map(([k, m]) => `<button class="mode ${profile.mode === k ? 'on' : ''}" data-mode="${k}"><img class="mi" src="${pieceIcon(ICON[k][0], ICON[k][1], null, 74)}" alt=""><b>${m.name}</b><p>${m.desc}</p>${k === 'daily' && !dailyDone ? '<span class="chip">NEW</span>' : ''}</button>`).join('');
+  const M = profile.mode;
+  $('#opt-bots').classList.toggle('hidden', M === 'duel' || M === 'daily');
+  $('#opt-diff').classList.toggle('hidden', M === 'daily');
+  $('#opt-daily').classList.toggle('hidden', M !== 'daily');
+  $('#btn-host').classList.toggle('hidden', M === 'daily');
+  $('#btn-solo').textContent = M === 'daily' ? 'Start Challenge' : M === 'duel' ? 'Duel a Bot' : 'Play vs Bots';
+  if (M === 'daily') {
+    const L = dailyLoadout();
+    $('#opt-daily').innerHTML = `<b>Today's loadout: ${PRESETS[L.preset].name} - ${PASSIVES[L.passive].name}</b><p>Everyone plays the same map, the same build, against 7 Hard bots. Score = placement + eliminations + damage.</p><div class="best"><div><b>${profile.daily.date === today() ? profile.daily.best : 0}</b><span>Today's best</span></div><div><b>${profile.daily.days.length}</b><span>Days played</span></div></div>`;
+  }
+  renderSoloMini();
+}
+function dailyLoadout() {
+  const seed = dailySeed(today()); const keys = Object.keys(PRESETS); const preset = keys[seed % keys.length];
+  const equips = {}; PIECE_ORDER.forEach((pc, i) => { equips[pc] = PIECES[pc].equips[(seed >> (i * 2)) % 3]; });
+  return { preset, pts: { ...PRESETS[preset].pts }, passive: PRESETS[preset].passive, equips, seed };
+}
 function renderSoloMini() {
   const b = profile.build;
   $$('#seg-diff button').forEach((x) => x.classList.toggle('on', x.dataset.diff === profile.botLevel));
   $('#solo-loadout').innerHTML = `<img src="${pieceIcon('pawn', profile.skin, '#d6b05c', 64)}" alt=""><div class="lm-t"><b>${esc(profile.name)}</b><span>${b.preset ? PRESETS[b.preset].name : 'Custom'} build - ${PASSIVES[b.passive].name} - ${SKINS[profile.skin].name} - ${FINISHERS[profile.finisher].name}</span></div>`;
+}
+
+// ---------- crown path ----------
+function rewardThumb(r) {
+  if (r.skin) return `<img src="${pieceIcon('queen', r.skin, null, 52)}" alt="">`;
+  if (r.board) return `<span style="width:100%;height:100%;background:linear-gradient(135deg, ${BOARDS[r.board].light} 50%, ${BOARDS[r.board].dark} 50%)"></span>`;
+  if (r.finisher) return `<img src="${pieceIcon('king', 'gilded', '#ffd24d', 52)}" alt="">`;
+  if (r.title) return `<span class="ttl">T</span>`;
+  return `<i class="mark-ico"></i>`;
+}
+function renderPath() {
+  renderProfile();
+  const tier = seasonTier(profile);
+  $('#season-name').textContent = SEASON.name;
+  $('#season-tier').textContent = tier;
+  $('#season-tier-label').textContent = tier >= SEASON.tiers ? 'Path complete' : `Tier ${tier} - next: Tier ${tier + 1}`;
+  $('#season-bar').style.width = (tier >= SEASON.tiers ? 100 : seasonProgress(profile) * 100) + '%';
+  $('#season-xp').textContent = tier >= SEASON.tiers ? 'Every reward claimed' : `${profile.season.xp % SEASON.tierXp} / ${SEASON.tierXp} XP`;
+  $('#season-track').innerHTML = Array.from({ length: SEASON.tiers }, (_, i) => {
+    const t = i + 1, r = SEASON_REWARDS[t], L = rewardLabel(r), big = !!(r.skin || r.board || r.finisher);
+    return `<div class="tier ${t <= tier ? 'got' : 'locked'} ${big ? 'big' : ''} ${t === tier + 1 ? 'next' : ''}" ${t === tier + 1 ? 'id="tier-next"' : ''}><div class="tn">${t}</div><div class="rw">${rewardThumb(r)}</div><div><b>${L.name}</b><span>${L.kind}${big ? ' - Season exclusive' : ''}</span></div></div>`;
+  }).join('');
+  profile.season.seen = tier; save(); renderProfile();
+  setTimeout(() => { const n = $('#tier-next'); if (n) n.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 300);
+}
+function renderTrophies() {
+  checkAchievements(profile); save();
+  const ids = Object.keys(ACHIEVEMENTS);
+  $('#ach-count').textContent = `${profile.achievements.length}/${ids.length}`;
+  $('#ach-list').innerHTML = ids.map((id) => { const a = ACHIEVEMENTS[id], done = profile.achievements.includes(id), v = Math.min(a.goal, achievementValue(profile, a)); return `<div class="ach ${done ? 'done' : ''}"><div class="ai"><svg><use href="#i-trophy"/></svg></div><div><b>${a.name}</b><p>${a.desc}</p>${done ? '' : `<div class="qbar"><i style="width:${(v / a.goal) * 100}%"></i></div>`}</div><div class="rw"><i class="mark-ico"></i>${a.reward}</div></div>`; }).join('');
+  $('#title-count').textContent = `${profile.titles.length} unlocked`;
+  $('#title-list').innerHTML = [`<button class="${!profile.title ? 'on' : ''}" data-title="">None</button>`, ...profile.titles.map((t) => `<button class="${profile.title === t ? 'on' : ''}" data-title="${esc(t)}">${esc(t)}</button>`)].join('') + (profile.titles.length ? '' : '<p class="hint" style="margin:6px 0 0">Earn titles from trophies and the Crown Path.</p>');
+  const st = profile.stats;
+  $('#career2').innerHTML = `<div><b>${st.games}</b><span>Games</span></div><div><b>${st.wins}</b><span>Wins</span></div><div><b>${st.kills}</b><span>KOs</span></div><div><b>${st.bestStreak}</b><span>Best streak</span></div>`;
 }
 
 // ---------- tutorial ----------
@@ -365,14 +435,15 @@ function botPlayer(i, used) {
   const name = names[Math.floor(Math.random() * names.length)] || 'Bot' + i;
   const keys = Object.keys(PRESETS), p = PRESETS[keys[Math.floor(Math.random() * keys.length)]];
   const equips = {}; for (const pc of PIECE_ORDER) { const list = PIECES[pc].equips; equips[pc] = list[Math.floor(Math.random() * list.length)]; }
-  const skins = Object.keys(SKINS), fins = Object.keys(FINISHERS);
+  const skins = Object.keys(SKINS).filter((k) => k !== profile.skin), fins = Object.keys(FINISHERS);
   return { pid: 'bot' + i + Math.random().toString(36).slice(2, 6), name, isBot: true, botLevel: profile.botLevel || 'normal', skin: skins[Math.floor(Math.random() * skins.length)], finisher: fins[Math.floor(Math.random() * fins.length)], build: { pts: { ...p.pts }, passive: p.passive, equips } };
 }
-const me = () => ({ pid: 'me', name: profile.name || 'Player', skin: profile.skin, finisher: profile.finisher, build: { pts: { ...profile.build.pts }, passive: profile.build.passive, equips: { ...profile.build.equips } } });
+const me = () => ({ pid: 'me', name: profile.name || 'Player', title: profile.title, skin: profile.skin, finisher: profile.finisher, build: { pts: { ...profile.build.pts }, passive: profile.build.passive, equips: { ...profile.build.equips } } });
 
 // ---------- sessions ----------
 let session = null;
 function endSession() {
+  if (tutorial) tutorial.dead = true;
   tutorial = null; $('#coach').classList.add('hidden'); coachUI && coachUI.glow && coachUI.glow(null);
   if (!session) return;
   try { session.host && session.host.stop(); } catch {}
@@ -398,14 +469,21 @@ function botChatter(sess, m) {
   }
 }
 
-function startSolo(bots = null) {
+function startSolo(bots = null, modeArg = null) {
   endSession();
-  const n = bots ?? +$('#in-bots').value;
+  const mode = modeArg || profile.mode || 'royale';
+  let n = bots ?? +$('#in-bots').value;
+  if (mode === 'duel') n = 1;
+  if (mode === 'daily') n = 7;
   const players = [me()];
+  let seed;
+  const keepLvl = profile.botLevel;
+  if (mode === 'daily') { const L = dailyLoadout(); players[0].build = { pts: L.pts, passive: L.passive, equips: L.equips }; seed = L.seed; profile.botLevel = 'hard'; }
   for (let i = 0; i < n; i++) players.push(botPlayer(i, players.map((p) => p.name)));
-  const sess = { mode: 'solo', myPid: 'me', bots: n };
+  profile.botLevel = keepLvl;
+  const sess = { mode: 'solo', myPid: 'me', bots: n, gameMode: mode, hard: mode === 'daily' || profile.botLevel === 'hard' };
   session = sess;
-  sess.host = new GameHost(players, (m) => { game.onMsg(m); botChatter(sess, m); });
+  sess.host = new GameHost(players, (m) => { game.onMsg(m); botChatter(sess, m); }, { mode, seed, noTimer: mode !== 'blitz' });
   sess.send = (a) => sess.host.act('me', a);
   sess.emote = (k) => hostEmote(sess, 'me', k);
   game.enter();
@@ -413,23 +491,24 @@ function startSolo(bots = null) {
 }
 
 function lobbyHTML(players, host) {
-  return players.map((p, i) => `<li style="--c:${PLAYER_COLORS[i]}"><img src="${pieceIcon('pawn', p.skin, null, 34)}" alt=""><b>${esc(p.name)}</b><em>${p.pid === 'me' ? 'Host' : p.isBot ? 'Bot' : 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}">Remove</button>` : ''}</li>`).join('');
+  return players.map((p, i) => `<li style="--c:${(settings.cb ? CB_COLORS : PLAYER_COLORS)[i]}"><img src="${pieceIcon('pawn', p.skin, null, 34)}" alt=""><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${p.pid === 'me' ? 'Host' : p.isBot ? 'Bot' : 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}">Remove</button>` : ''}</li>`).join('');
 }
 function startHostLobby() {
-  if (session && session.mode === 'host' && session.rematch) { session.rematch = false; session.renderLobby(); return; }
+  if (session && session.mode === 'host' && session.rematch) { session.rematch = false; session.players = session.players.filter((p) => p.isBot || p.pid === 'me' || session.conns.has(p.pid)); session.renderLobby(); return; }
   endSession();
   if (!window.Peer && !location.search.includes('net=local')) { $('#host-status').textContent = 'Online play could not load. Check your connection and reload.'; $('#host-status').classList.add('err'); return; }
   const code = makeCode();
-  session = { mode: 'host', myPid: 'me', code, players: [me()], conns: new Map(), started: false };
+  const gm = profile.mode === 'daily' ? 'royale' : profile.mode;
+  session = { mode: 'host', myPid: 'me', code, players: [me()], conns: new Map(), started: false, gameMode: gm, maxP: MODES[gm].players[1] };
   $('#host-code').textContent = code;
   $('#host-status').textContent = 'Opening room...'; $('#host-status').classList.remove('err');
   const sess = session;
   const renderLobby = () => {
     $('#host-lobby').innerHTML = lobbyHTML(sess.players, true);
-    $('#lobby-count').textContent = `${sess.players.length}/${MAX_PLAYERS}`;
+    $('#lobby-count').textContent = `${MODES[sess.gameMode].short} - ${sess.players.length}/${sess.maxP}`;
     $('#btn-start-host').disabled = sess.players.length < 2;
-    const pub = sess.players.map(({ pid, name, skin, isBot }) => ({ pid, name, skin, isBot }));
-    for (const c of sess.conns.values()) c.send({ t: 'lobby', players: pub, code });
+    const pub = sess.players.map(({ pid, name, skin, isBot, title }) => ({ pid, name, skin, isBot, title }));
+    for (const c of sess.conns.values()) c.send({ t: 'lobby', players: pub, code, mode: sess.gameMode });
   };
   sess.renderLobby = renderLobby;
   sess.emote = (k) => hostEmote(sess, 'me', k);
@@ -437,22 +516,23 @@ function startHostLobby() {
     onReady: () => { if (session !== sess) return; $('#host-status').textContent = 'Room open. Share the code with friends.'; sfx.select(); },
     onError: (t) => {
       if (session !== sess) return;
-      if (t === 'unavailable-id') { session = null; startHostLobby(); return; }
+      if (t === 'unavailable-id') { try { sess.server.close(); } catch {} session = null; startHostLobby(); return; }
       if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(t)) { $('#host-status').textContent = 'Lost connection to the matchmaking server. Go back and try again.'; $('#host-status').classList.add('err'); }
     },
     onConn: (conn) => {
       conn.onData((m) => {
         if (!m || typeof m !== 'object') return;
         if (m.t === 'join') {
-          if (sess.started || sess.players.length >= MAX_PLAYERS) { conn.send({ t: 'full' }); return; }
+          if (conn.pid) return;
+          if (sess.started || sess.players.length >= sess.maxP) { conn.send({ t: 'full' }); return; }
           const pid = 'c' + Math.random().toString(36).slice(2, 8);
           conn.pid = pid; sess.conns.set(pid, conn);
           const b = m.build || {};
           const equips = {}; for (const pc of PIECE_ORDER) equips[pc] = PIECES[pc].equips.includes(b.equips && b.equips[pc]) ? b.equips[pc] : PIECES[pc].equips[0];
-          sess.players.push({ pid, name: String(m.name || 'Player').replace(/[<>]/g, '').slice(0, 14), skin: SKINS[m.skin] ? m.skin : 'ivory', finisher: FINISHERS[m.finisher] ? m.finisher : 'shatter', build: { pts: sanitizePts(b.pts), passive: PASSIVES[b.passive] ? b.passive : 'regen', equips } });
+          sess.players.push({ pid, title: String(m.title || '').replace(/[<>]/g, '').slice(0, 24), name: String(m.name || 'Player').replace(/[<>]/g, '').slice(0, 14), skin: SKINS[m.skin] ? m.skin : 'ivory', finisher: FINISHERS[m.finisher] ? m.finisher : 'shatter', build: { pts: sanitizePts(b.pts), passive: PASSIVES[b.passive] ? b.passive : 'regen', equips } });
           conn.send({ t: 'welcome', pid });
           sfx.select(); renderLobby();
-        } else if (m.t === 'act' && sess.host && conn.pid) sess.host.act(conn.pid, m.a);
+        } else if (m.t === 'act' && sess.host && conn.pid && m.a && typeof m.a === 'object') { try { sess.host.act(conn.pid, m.a); } catch (err) { console.warn('bad action', err); } }
         else if (m.t === 'emote' && conn.pid) hostEmote(sess, conn.pid, m.k);
       });
       conn.onClose(() => {
@@ -471,7 +551,7 @@ function sanitizePts(p) {
   return out;
 }
 function hostAddBot() {
-  if (!session || session.mode !== 'host' || session.players.length >= MAX_PLAYERS) { sfx.error(); return; }
+  if (!session || session.mode !== 'host' || session.players.length >= session.maxP) { sfx.error(); return; }
   session.players.push(botPlayer(session.players.length, session.players.map((p) => p.name))); sfx.tap(); session.renderLobby();
 }
 function startHost() {
@@ -479,7 +559,7 @@ function startHost() {
   sess.started = true;
   sess.players = sess.players.filter((p) => p.isBot || p.pid === 'me' || sess.conns.has(p.pid));
   sess.players[0] = { ...me() };
-  sess.host = new GameHost(sess.players, (m) => { hostEmit(sess, m); botChatter(sess, m); });
+  sess.host = new GameHost(sess.players, (m) => { hostEmit(sess, m); botChatter(sess, m); }, { mode: sess.gameMode });
   sess.send = (a) => sess.host.act('me', a);
   for (const c of sess.conns.values()) c.send({ t: 'start', pid: c.pid });
   game.enter();
@@ -496,7 +576,7 @@ function joinGame() {
   const sess = { mode: 'client', myPid: null, code };
   session = sess;
   sess.client = openClient(code, {
-    onOpen: () => { st.textContent = 'Connected. Joining lobby...'; sess.client.send({ t: 'join', name: profile.name, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
+    onOpen: () => { st.textContent = 'Connected. Joining lobby...'; sess.client.send({ t: 'join', name: profile.name, title: profile.title, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
     onData: (m) => {
       if (session !== sess) return;
       if (m.t === 'welcome') { sess.myPid = m.pid; st.textContent = 'In the lobby.'; sfx.select(); }
@@ -544,7 +624,7 @@ const game = {
     $('#h-actions').addEventListener('click', (e) => { const b = e.target.closest('.act'); if (!b) return; if (this.suppress) { this.suppress = false; return; } this.onAction(b.dataset.slot); });
     const lp = (el, slotOf) => {
       let t = null;
-      el.addEventListener('pointerdown', (e) => { const slot = slotOf(e); if (!slot || slot === 'end' || slot === 'promote') return; t = setTimeout(() => { this.suppress = true; this.showAbInfo(slot); }, 420); });
+      el.addEventListener('pointerdown', (e) => { this.suppress = false; const slot = slotOf(e); if (!slot || slot === 'end' || slot === 'promote') return; t = setTimeout(() => { this.suppress = true; this.showAbInfo(slot); }, 420); });
       const end = () => { clearTimeout(t); if (!$('#abinfo').classList.contains('hidden')) setTimeout(() => $('#abinfo').classList.add('hidden'), 60); };
       el.addEventListener('pointerup', end); el.addEventListener('pointerleave', end); el.addEventListener('pointercancel', end);
       el.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -556,11 +636,16 @@ const game = {
       session.send({ type: 'promote', to: b.dataset.to }); $('#m-promote').classList.add('hidden');
     });
     $('#emote-menu').innerHTML = Object.entries(EMOTES).map(([k, t]) => `<button data-emote="${k}">${t}</button>`).join('');
+    $('#h-portrait').parentElement.addEventListener('click', () => { const u = this.me; if (u) { this.r.follow = true; this.r.closeup(); this.r.focus(u.x, u.y); sfx.tap(); } });
     $('#ult-btn').addEventListener('click', () => { if (this.suppress) { this.suppress = false; return; } this.onAction('ult'); });
     $('#emote-menu').addEventListener('click', (e) => { const b = e.target.closest('[data-emote]'); if (!b || !session || !session.emote) return; session.emote(b.dataset.emote); $('#emote-menu').classList.add('hidden'); sfx.tap(); });
   },
+  after(fn, ms) { const g = this.gen; return setTimeout(() => { if (g === this.gen) fn(); }, ms); },
   enter() {
-    this.ms = { kills: 0, hollows: 0, ults: 0, crown: false, rook: false, queen: false };
+    this.gen = (this.gen || 0) + 1;
+    this.ms = { kills: 0, hollows: 0, ults: 0, crown: false, rook: false, queen: false }; this.minHp = 1; this.taken = {}; this.since = {}; this.killedBy = null; this.danger = false; this.r.danger = null; $('#btn-danger').classList.remove('on');
+    this.r.reduced = settings.motion; this.r.setQuality(settings.quality);
+    document.body.classList.toggle('bigtext', !!settings.bigtext);
     this.s = null; this.mode = 'move'; this.preview = null; this.lastTurnNo = -1; this.resultsShown = false; this.lastHp = null; this.lastAlive = 99;
     $('#s-game').classList.remove('tut');
     this.r.reset(); this.r.setBounds(null); this.r.setTheme(profile.board); this.turnVault = false;
@@ -575,7 +660,9 @@ const game = {
     const coach = $('#coach');
     const top = coach.classList.contains('hidden') ? $('.hud-top').getBoundingClientRect().bottom : coach.getBoundingClientRect().bottom;
     const bot = $('.hud-bottom').getBoundingClientRect();
-    this.r.setPad(top + 4, Math.max(0, innerHeight - bot.top - 10));
+    const ub = $('#ult-btn').getBoundingClientRect();
+    const lowest = Math.min(bot.top, ub.top > 0 ? ub.top : bot.top);
+    this.r.setPad(top + 4, Math.max(0, innerHeight - lowest - 4));
     $('#s-game').style.setProperty('--hb', Math.round(innerHeight - bot.top) + 'px');
   },
   get me() { return this.s && session ? this.s.units.find((u) => u.pid === session.myPid) : null; },
@@ -586,11 +673,14 @@ const game = {
     if (m.t !== 'state') return;
     const first = !this.s;
     this.s = m.state;
+    if (settings.cb) for (const u of this.s.units) if (u.kind === 'player') u.color = CB_COLORS[u.slot % 8];
+    { const mu = this.s.units.find((u) => session && u.pid === session.myPid); if (mu && mu.alive) this.minHp = Math.min(this.minHp ?? 1, mu.hp / stats(mu).maxHp); }
     this.deadline = Date.now() + m.dl;
     const mine = this.me;
     this.r.myId = mine ? mine.id : null;
     this.r.setState(this.s, m.ev, first);
-    if (first) { this.r.startIntro(this.s, this.r.myId); setTimeout(() => this.fitPad(), 50); }
+    if (first && this.s.arena) this.r.setBounds(this.s.arena);
+    if (first) { this.r.startIntro(this.s, this.r.myId); this.after(() => this.fitPad(), 50); }
     this.handleEvents(m.ev, first);
     if (this.s.turnNo !== this.lastTurnNo) {
       this.lastTurnNo = this.s.turnNo; this.mode = 'move'; this.preview = null;
@@ -606,21 +696,24 @@ const game = {
     // music intensity
     const alive = alivePlayers(this.s).length;
     const lvl = this.s.over ? 1 : alive <= 2 ? 3 : (this.s.storm.ring > 0 || this.s.storm.crack || alive <= 4) ? 2 : 1;
-    music.set(lvl, lvl === 3 ? 'final' : 'fight');
-    if (alive === 2 && this.lastAlive > 2 && !this.s.over) setTimeout(() => this.banner('Final Two', 'Only one walks away', 'red'), 900);
+    if (!this.resultsShown) music.set(lvl, lvl === 3 ? 'final' : 'fight');
+    if (alive === 2 && this.lastAlive > 2 && !this.s.over) this.after(() => this.banner('Final Two', 'Only one walks away', 'red'), 900);
     this.lastAlive = alive;
     this.refresh();
   },
   handleEvents(ev, first) {
     const s = this.s, myId = this.r.myId;
     const tut = session && session.mode === 'tutorial';
-    if (first) { if (!tut) setTimeout(() => this.banner('Round 1', 'Last piece standing wins', ''), 1500); return; }
+    if (first) { if (!tut) this.after(() => this.banner('Round 1', 'Last piece standing wins', ''), 1500); return; }
     if (!tut) this.checkDiscoveries(ev);
     for (const e of ev) {
-      if (e.e === 'turn' && e.id === myId) setTimeout(() => { if (!tut) this.banner('Your Turn', '', ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
-      if (e.e === 'storm') setTimeout(() => e.phase === 'crack' ? this.banner('The Storm Gathers', 'The outer ring collapses next round', 'red') : this.banner('Collapse', s.storm.ring >= STORM.maxRing ? 'Sudden death - everyone burns' : 'Stay inside the ring', 'red'), 200);
+      if (e.e === 'dmg' && e.id === myId) { const src = e.storm ? 'The storm' : e.meteor ? 'Meteors' : (unitById(s, e.src) || {}).name || 'Unknown'; this.taken[src] = (this.taken[src] || 0) + e.n; this.since[src] = (this.since[src] || 0) + e.n; }
+      if (e.e === 'timeout' && e.id === myId) { toast('Time ran out - turn skipped'); sfx.error(); }
+      if (e.e === 'turn' && e.id === myId) { const lines = Object.entries(this.since).sort((a, b) => b[1] - a[1]); if (lines.length) this.after(() => this.feed(`<span class="x">Since your last turn:</span> ${lines.map(([n, v]) => `<b>${esc(n)}</b> -${v}`).join(', ')}`), 600); this.since = {}; const mu = unitById(s, myId); if (mu) { this.r.follow = true; this.after(() => this.r.focus(mu.x, mu.y), 350); } }
+      if (e.e === 'turn' && e.id === myId) this.after(() => { if (!tut) this.banner('Your Turn', '', ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
+      if (e.e === 'storm') this.after(() => e.phase === 'crack' ? this.banner('The Storm Gathers', 'The outer ring collapses next round', 'red') : this.banner('Collapse', s.storm.ring >= STORM.maxRing ? 'Sudden death - everyone burns' : 'Stay inside the ring', 'red'), 200);
       if (e.e === 'crownSpawn') this.banner('The Crown', 'Has appeared at the centre', '');
-      if (e.e === 'world' && !(e.kind === 'meteor' && e.phase === 'strike')) { const W = WORLD_EVENTS[e.kind]; setTimeout(() => this.banner(W.name, W.desc, e.kind === 'meteor' || e.kind === 'bloodMoon' ? 'red' : 'cyan'), 300); }
+      if (e.e === 'world' && !(e.kind === 'meteor' && e.phase === 'strike')) { const W = WORLD_EVENTS[e.kind]; this.after(() => this.banner(W.name, W.desc, e.kind === 'meteor' || e.kind === 'bloodMoon' ? 'red' : 'cyan'), 300); }
       if (e.e === 'ability' && e.id === myId && e.slot === 'ult') this.ms.ults++;
       if (e.e === 'crowned' && e.id === myId) this.ms.crown = true;
       if (e.e === 'promote' && e.id === myId && e.piece === 'rook') this.ms.rook = true;
@@ -628,15 +721,15 @@ const game = {
       if (e.e === 'attune' && e.id === myId) { const p = $('#h-attune'); p.classList.remove('bump'); void p.offsetWidth; p.classList.add('bump'); }
       if (e.e === 'death' && e.by === myId) { const v = unitById(s, e.id); if (v && v.kind === 'hollow') this.ms.hollows++; else if (v) this.ms.kills++; }
       if (e.e === 'crowned') { const u = unitById(s, e.id); this.banner(u.id === myId ? 'You Are King' : 'A New King', u.id === myId ? 'Everyone is coming for you' : `${u.name} wears the Crown`, ''); }
-      if (e.e === 'promote' && e.id === myId) setTimeout(() => this.banner(e.type === 'evolve' ? PIECES[e.piece].name : 'Honed', e.type === 'evolve' ? 'Evolution complete' : `${PIECES[e.piece].name} level ${e.hone}`, 'cyan'), 300);
+      if (e.e === 'promote' && e.id === myId) this.after(() => this.banner(e.type === 'evolve' ? PIECES[e.piece].name : 'Honed', e.type === 'evolve' ? 'Evolution complete' : `${PIECES[e.piece].name} level ${e.hone}`, 'cyan'), 300);
       if (e.e === 'death') {
         const v = unitById(s, e.id); if (!v || v.kind !== 'player') continue;
         const k = e.by ? unitById(s, e.by) : null;
         const ico = (u) => `<img src="${pieceIcon(u.piece, u.skin, null, 18)}" alt="">`;
-        setTimeout(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : 'fell to the storm'}</span>`), 400);
-        if (e.id === myId && !s.over) { this.killedBy = k; setTimeout(() => this.showDead(), 1700); }
+        this.after(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : 'fell to the storm'}</span>`), 400);
+        if (e.id === myId && !s.over) { this.killedBy = k; this.after(() => this.showDead(), 1700); }
       }
-      if (e.e === 'over') setTimeout(() => this.showResults(), 4800);
+      if (e.e === 'over') this.after(() => this.showResults(), 4800);
     }
   },
   checkDiscoveries(ev) {
@@ -713,9 +806,30 @@ const game = {
     if (!canUse(this.s, u, this.mode)) return [];
     return abilityOptions(this.s, u, this.mode);
   },
+  computeDanger() {
+    const s = this.s, me = this.me; if (!s || !me) return null;
+    const set = new Map();
+    for (const v of s.units) {
+      if (!v.alive || v.id === me.id) continue;
+      if (v.kind === 'hollow' && v.dummy) continue;
+      const save = { x: v.x, y: v.y };
+      const spots = [save, ...legalMoves(s, v)];
+      for (const p of spots) {
+        v.x = p.x; v.y = p.y;
+        for (const slot of v.kind === 'hollow' ? ['atk'] : ['atk', 'sig', 'eq']) {
+          if (slot !== 'atk' && v.cd && v.cd[slot] > 0) continue;
+          let opts = []; try { opts = abilityOptions(s, v, slot); } catch {}
+          for (const o of opts) if (o.mult > 0) for (const t of o.tiles) set.set(t.y * 16 + t.x, t);
+        }
+      }
+      v.x = save.x; v.y = save.y;
+    }
+    return [...set.values()];
+  },
   refresh() {
     const s = this.s; if (!s) return;
     const u = this.me;
+    this.r.danger = this.danger ? this.computeDanger() : null;
     if (this.myTurn()) {
       if (this.mode === 'move') this.r.overlay = canMove(s, u) ? { moves: legalMoves(s, u), from: { x: u.x, y: u.y } } : null;
       else { const opts = this.options(); if (this.preview) this.preview = opts.find((o) => o.anchor.x === this.preview.anchor.x && o.anchor.y === this.preview.anchor.y) || null; this.r.overlay = { opts, preview: this.preview }; }
@@ -727,12 +841,13 @@ const game = {
     $('#h-round').textContent = `Round ${s.round}`;
     const st = $('#h-storm');
     if (s.storm.ring >= STORM.maxRing) { st.textContent = 'Sudden death'; st.classList.add('hot'); }
-    else if (s.storm.crack) { st.textContent = 'Collapse next round'; st.classList.add('hot'); }
-    else { let next = STORM.firstCrack; while (next <= s.round) next += STORM.every; st.textContent = `Storm in ${next - s.round}`; st.classList.toggle('hot', next - s.round <= 1); }
+    else if (s.storm.crack) { st.textContent = 'Collapse!'; st.classList.add('hot'); }
+    else { const R = s.rules || { first: STORM.firstCrack, every: STORM.every }; let next = R.first; while (next <= s.round) next += R.every; st.textContent = `Storm ${next - s.round}`; st.classList.toggle('hot', next - s.round <= 1); }
     $('#h-alive').textContent = `${alivePlayers(s).length} left`;
     const order = predictOrder(s, 7);
     const oh = order.map((id) => { const v = unitById(s, id); if (!v) return ''; return `<div class="o ${u && v.id === u.id ? 'me' : ''}" style="--c:${v.kind === 'player' ? v.color : '#555'}"><img src="${pieceIcon(v.piece, v.skin, null, 36)}" alt=""></div>`; }).join('');
-    if ($('#h-order').dataset.k !== order.join(',')) { $('#h-order').innerHTML = oh; $('#h-order').dataset.k = order.join(','); }
+    const ok = order.map((id) => { const v = unitById(s, id); return v ? id + v.piece + v.skin + v.color : id; }).join(',');
+    if ($('#h-order').dataset.k !== ok) { $('#h-order').innerHTML = oh; $('#h-order').dataset.k = ok; }
     if (!u) return;
     const stt = stats(u);
     $('#h-portrait').src = pieceIcon(u.piece, u.skin, u.color, 56); $('#h-portrait').style.setProperty('--c', u.color);
@@ -758,7 +873,7 @@ const game = {
     $('#h-attune').textContent = `ATT ${u.attune || 0}`;
     const ub = $('#ult-btn'), up = Math.min(100, Math.round(u.ult || 0));
     $('#ult-fg').style.strokeDashoffset = 176 * (1 - up / 100);
-    $('#ult-pct').textContent = up >= 100 ? ABILITIES[slotAbility(u, 'ult')].name.split(' ')[0] : up + '%';
+    $('#ult-pct').textContent = up >= 100 ? 'READY' : up + '%';
     ub.classList.toggle('ready', up >= 100 && u.alive);
     ub.classList.toggle('on', this.myTurn() && this.mode === 'ult');
     ub.classList.toggle('hidden-ult', !u.alive);
@@ -805,7 +920,7 @@ const game = {
     const a = unitById(this.s, this.s.active);
     const human = a && a.kind === 'player' && !a.bot;
     const left = Math.max(0, this.deadline - Date.now());
-    t.style.transform = `scaleX(${human ? left / TURN_MS : 0})`;
+    t.style.transform = `scaleX(${human ? left / ((this.s.rules && this.s.rules.turnMs) || TURN_MS) : 0})`;
     t.classList.toggle('low', left < 8000);
     if (this.myTurn() && left < 5000 && Math.floor(left / 1000) !== this.lastTick) { this.lastTick = Math.floor(left / 1000); sfx.warn(); }
   },
@@ -841,7 +956,7 @@ const game = {
         if (canMove(this.s, u) && legalMoves(this.s, u).some((m) => m.x === t.x && m.y === t.y)) { session.send({ type: 'move', x: t.x, y: t.y }); return; }
       } else {
         const o = this.optAt(t);
-        if (o) { if (mouse || (this.preview && this.preview.anchor.x === o.anchor.x && this.preview.anchor.y === o.anchor.y)) this.exec(o); else { this.preview = o; sfx.tap(); this.refresh(); } return; }
+        if (o) { if (mouse || settings.onetap || (this.preview && this.preview.anchor.x === o.anchor.x && this.preview.anchor.y === o.anchor.y)) this.exec(o); else { this.preview = o; sfx.tap(); this.refresh(); } return; }
         if (this.preview) { this.preview = null; this.refresh(); return; }
       }
     }
@@ -860,8 +975,8 @@ const game = {
     clearTimeout(this.inspT);
     if (!v) { box.classList.add('hidden'); return; }
     const st = stats(v);
-    const extra = v.kind === 'hollow' ? 'Guards a shard cache. Drops 2 shards.' : `${PASSIVES[v.passive].name} - ${v.shards} shard${v.shards === 1 ? '' : 's'} - Attune ${v.attune || 0} - Ult ${Math.round(v.ult || 0)}% - ${v.kills} KO`;
-    box.innerHTML = `<img src="${pieceIcon(v.piece, v.skin, v.color, 46)}" alt=""><div><b style="color:${v.kind === 'player' ? v.color : '#bbb'}">${esc(v.name)}${v.piece === 'king' ? ' - King' : v.kind === 'player' ? ' - ' + PIECES[v.piece].name : ''}</b><span>HP ${v.hp}/${st.maxHp} - ATK ${st.atk} - DEF ${st.def} - SPD ${st.spd}</span><span>${extra}</span></div>`;
+    const extra = v.dummy ? 'A training dummy. It will not fight back.' : v.kind === 'hollow' ? 'Guards a shard cache. Drops 2 shards.' : `${PASSIVES[v.passive].name} - ${v.shards} shard${v.shards === 1 ? '' : 's'} - Attune ${v.attune || 0} - Ult ${Math.round(v.ult || 0)}% - ${v.kills} KO`;
+    box.innerHTML = `<img src="${pieceIcon(v.piece, v.skin, v.color, 46)}" alt=""><div>${v.title ? `<span style="color:var(--gold);font-size:10px;letter-spacing:.12em;text-transform:uppercase">${esc(v.title)}</span>` : ''}<b style="color:${v.kind === 'player' ? v.color : '#bbb'}">${esc(v.name)}${v.piece === 'king' ? ' - King' : v.kind === 'player' ? ' - ' + PIECES[v.piece].name : ''}</b><span>HP ${v.hp}/${st.maxHp} - ATK ${st.atk} - DEF ${st.def} - SPD ${st.spd}</span><span>${extra}</span></div>`;
     box.classList.remove('hidden'); sfx.tap();
     this.inspT = setTimeout(() => box.classList.add('hidden'), 3200);
   },
@@ -893,23 +1008,32 @@ const game = {
     const place = u.alive ? (s.over ? 1 : alivePlayers(s).length) : u.place;
     const total = s.units.filter((v) => v.kind === 'player').length;
     const win = place === 1 && s.over;
-    $('#r-title').textContent = win ? 'Checkmate' : aborted ? 'Match Ended' : place <= 3 ? 'So Close' : 'Defeated';
+    $('#r-title').textContent = win ? 'Checkmate' : aborted ? (u.alive && !s.over ? 'Forfeit' : 'Match Ended') : place <= 3 ? 'So Close' : 'Defeated';
     $('#r-place').textContent = `Placed ${place} of ${total}`;
     $('#r-stats').innerHTML = `<div><b id="rs-k">0</b><span>Eliminations</span></div><div><b id="rs-d">0</b><span>Damage</span></div><div><b>${PIECES[u.piece].name}</b><span>Final piece</span></div>`;
     setTimeout(() => { countUp($('#rs-k'), 0, u.kills, 600); countUp($('#rs-d'), 0, u.dmgDealt || 0, 900); }, 400);
     let earned = 0, xpGain = 0, levels = 0;
     const startLvl = profile.level, startXp = profile.xp;
+    const quit = aborted && u.alive && !s.over;
+    if (quit && session && session.mode !== 'client') { try { if (session.mode === 'host') session.host.setBot('me'); else session.host.stop(); } catch {} }
+    if (quit) { profile.played = [...profile.played.slice(-30), matchKey]; if (session && session.mode === 'client') { profile.marks += 15; earned = 15; } save(); this.seasonGain = []; this.achGain = []; this.dailyScore = null; }
     if (!profile.played.includes(matchKey)) {
       earned = 20 + u.kills * 15 + Math.max(0, total - place) * 8 + (win ? 60 : 0);
       xpGain = 40 + u.kills * 30 + Math.max(0, total - place) * 15 + Math.round((u.dmgDealt || 0) / 6) + (win ? 100 : 0);
-      profile.marks += earned; profile.games++; profile.kills += u.kills; if (win) profile.wins++; if (this.ms.crown) profile.crowns = (profile.crowns || 0) + 1;
+      profile.marks += earned;
+      const gmode = (session && session.gameMode) || s.mode || 'royale';
+      recordMatch(profile, { kills: u.kills, hollows: this.ms.hollows, ults: this.ms.ults, shards: u.attune || 0, crown: this.ms.crown, queen: this.ms.queen, win, hard: !!(session && session.hard), minHpRatio: this.minHp ?? 0, mode: gmode });
+      this.seasonGain = addSeasonXp(profile, xpGain);
+      if (gmode === 'daily') { const sc = dailyScore(place, u.kills, u.dmgDealt || 0, total); const t = today(); if (profile.daily.date !== t) { profile.daily.date = t; profile.daily.best = 0; } this.dailyNew = sc > profile.daily.best; this.dailyScore = sc; profile.daily.best = Math.max(profile.daily.best, sc); if (!profile.daily.days.includes(t)) profile.daily.days = [...profile.daily.days.slice(-60), t]; profile.stats.dailyDays = profile.daily.days.length; }
+      else this.dailyScore = null;
       profile.bestAttune = Math.max(profile.bestAttune || 0, u.attune || 0);
       const qd = applyQuests({ ...this.ms, kills: this.ms.kills, shards: u.attune || 0, dmg: u.dmgDealt || 0, place, win });
       this.questsDone = qd; earned += qd.reduce((a, q) => a + q.reward, 0);
       profile.xp += xpGain;
       while (profile.xp >= xpForLevel(profile.level)) { profile.xp -= xpForLevel(profile.level); profile.level++; levels++; profile.marks += 50; earned += 50; }
+      this.achGain = checkAchievements(profile);
       profile.played = [...profile.played.slice(-30), matchKey]; save();
-    }
+    } else { this.seasonGain = []; this.achGain = []; this.dailyScore = null; }
     $('#r-lvl').textContent = startLvl;
     $('#r-xptext').textContent = xpGain ? `+${xpGain} XP` : '';
     const bar = $('#r-xpbar'); bar.style.transition = 'none'; bar.style.width = (startXp / xpForLevel(startLvl)) * 100 + '%';
@@ -921,21 +1045,30 @@ const game = {
         setTimeout(() => { bar.style.transition = 'none'; bar.style.width = '0%'; $('#r-lvl').textContent = profile.level; void bar.offsetWidth; bar.style.transition = ''; bar.style.width = (profile.xp / xpForLevel(profile.level)) * 100 + '%'; $('#r-levelup').textContent = `Level ${profile.level} - ${titleFor(profile.level)}`; $('#r-levelup').classList.remove('hidden'); sfx.levelup(); uiFlash(); haptic([30, 50, 30, 50, 90]); }, 1250);
       } else bar.style.width = (profile.xp / xpForLevel(profile.level)) * 100 + '%';
     }, 700);
+    const tk = Object.entries(this.taken || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const rc = $('#r-recap');
+    if (!win && tk.length) { rc.innerHTML = `${this.killedBy ? `Eliminated by <b>${esc(this.killedBy.name)}</b>${this.killedBy.piece ? ` (${PIECES[this.killedBy.piece] ? PIECES[this.killedBy.piece].name : ''})` : ''}. ` : u.alive ? '' : 'The board claimed you. '}Damage taken: ${tk.map(([n, v]) => `<b>${esc(n)}</b> ${v}`).join(', ')}.`; rc.classList.remove('hidden'); }
+    else rc.classList.add('hidden');
     $('#r-quests').innerHTML = (this.questsDone || []).map((q, i) => `<div style="animation-delay:${1 + i * 0.15}s"><span>Quest complete: ${q.text}</span><b>+${q.reward}</b></div>`).join('');
     if (this.questsDone && this.questsDone.length) setTimeout(() => sfx.quest(), 1100);
     this.questsDone = [];
+    const unlocks = [...(this.seasonGain || []).map((g) => { const L = rewardLabel(g); return `<div class="r-unlock" style="animation-delay:1.3s"><span>Crown Path tier ${g.tier}: ${L.name}</span><b>${L.kind}</b></div>`; }), ...(this.achGain || []).map((a) => `<div class="r-unlock" style="animation-delay:1.5s"><span>Trophy: ${a.name}</span><b>+${a.reward}</b></div>`)];
+    const tier = seasonTier(profile);
+    $('#r-quests').insertAdjacentHTML('beforeend', `<div class="r-season" style="animation:rise .4s 1.1s both">Crown Path - Tier ${tier}${tier < SEASON.tiers ? ` (${profile.season.xp % SEASON.tierXp}/${SEASON.tierXp})` : ''}<div class="xpbar"><i style="width:${tier >= SEASON.tiers ? 100 : seasonProgress(profile) * 100}%"></i></div></div>` + unlocks.join(''));
+    if (this.dailyScore != null) $('#r-quests').insertAdjacentHTML('afterbegin', `<div class="r-unlock"><span>Daily score: ${this.dailyScore}${this.dailyNew ? ' - new best!' : ''}</span><b>Best ${profile.daily.best}</b></div>`);
+    if (unlocks.length) setTimeout(() => { sfx.buy(); uiFlash(); }, 1400);
     const winner = s.units.find((v) => v.id === s.winner);
     if (winner && !win) $('#r-place').innerHTML = `Placed ${place} of ${total} <div class="r-winner"><img src="${pieceIcon(winner.piece, winner.skin, winner.color, 54)}" alt=""><div><span>WINNER</span><b style="color:${winner.color}">${esc(winner.name)}</b></div></div>`;
     $('#r-marks').innerHTML = earned ? `<i class="mark-ico"></i>+<span id="rm">0</span> Marks` : '';
     if (earned) setTimeout(() => countUp($('#rm'), 0, earned, 1000, true), 900);
     const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 0 : a.place) - (b.alive ? 0 : b.place));
-    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${v.alive ? 1 : v.place}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}</span><em>${v.kills} KO</em></li>`).join('');
+    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${v.alive ? 1 : v.place}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
     $('#btn-rematch').classList.toggle('hidden', session && session.mode === 'client');
     $('#m-results').classList.remove('hidden');
     music.set(0, 'menu');
     if (win) { sfx.win(); confetti(); haptic([50, 50, 50, 50, 150]); } else sfx.lose();
     if (win && u.alive && u.hp / stats(u).maxHp < 0.1) setTimeout(() => discover('clutch'), 1500);
-    if (session && session.graduation && !profile.tutorial.includes('graduation')) { profile.tutorial.push('graduation'); profile.marks += 100; save(); setTimeout(() => toast('Graduated! +100 Marks'), 1200); }
+    if (!quit && session && session.graduation && !profile.tutorial.includes('graduation')) { profile.tutorial.push('graduation'); profile.marks += 100; save(); setTimeout(() => toast('Graduated! +100 Marks'), 1200); }
   },
   bindInput() {
     const c = $('#board');
@@ -972,7 +1105,8 @@ const game = {
     c.addEventListener('pointerup', up); c.addEventListener('pointercancel', (e) => { pts.delete(e.pointerId); drag = true; });
     c.addEventListener('wheel', (e) => { e.preventDefault(); const rect = c.getBoundingClientRect(); this.r.zoomBy(e.deltaY < 0 ? 1.12 : 0.89, e.clientX - rect.left, e.clientY - rect.top); }, { passive: false });
     addEventListener('keydown', (e) => {
-      if (screen !== 'game' || e.target.tagName === 'INPUT') return;
+      if (screen !== 'game' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
       const map = { '1': 'move', '2': 'atk', '3': 'sig', '4': 'eq', p: 'promote', e: 'end', ' ': 'end' };
       if (e.key === 'Escape') { this.preview = null; this.mode = 'move'; this.refresh(); }
       else if (map[e.key.toLowerCase()]) { e.preventDefault(); this.onAction(map[e.key.toLowerCase()]); }
@@ -1001,6 +1135,8 @@ function confetti() {
 // ---------- settings ----------
 function openSettings() {
   $('#set-music').value = settings.music; $('#set-sfx').value = settings.sfx;
+  $('#set-motion').checked = !!settings.motion; $('#set-onetap').checked = !!settings.onetap; $('#set-cb').checked = !!settings.cb; $('#set-bigtext').checked = !!settings.bigtext;
+  $$('#set-quality button').forEach((b) => b.classList.toggle('on', b.dataset.q === settings.quality));
   $('#set-shake').checked = settings.shake; $('#set-haptics').checked = settings.haptics;
   $('#m-settings').classList.remove('hidden');
 }
@@ -1008,6 +1144,17 @@ $('#set-music').addEventListener('input', (e) => { settings.music = +e.target.va
 $('#set-sfx').addEventListener('input', (e) => { settings.sfx = +e.target.value; saveSettings(); });
 $('#set-sfx').addEventListener('change', () => sfx.select());
 $('#set-shake').addEventListener('change', (e) => { settings.shake = e.target.checked; saveSettings(); game.r.shakeOn = settings.shake; });
+$('#set-motion').addEventListener('change', (e) => { settings.motion = e.target.checked; saveSettings(); game.r.reduced = settings.motion; document.body.classList.toggle('reduced', settings.motion); });
+$('#set-onetap').addEventListener('change', (e) => { settings.onetap = e.target.checked; saveSettings(); });
+$('#set-cb').addEventListener('change', (e) => { settings.cb = e.target.checked; saveSettings(); });
+$('#set-bigtext').addEventListener('change', (e) => { settings.bigtext = e.target.checked; saveSettings(); document.body.classList.toggle('bigtext', settings.bigtext); });
+$('#set-quality').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); game.r.setQuality(settings.quality); $$('#set-quality button').forEach((x) => x.classList.toggle('on', x === b)); sfx.tap(); });
+function info(title, html) { $('#info-title').textContent = title; $('#info-body').innerHTML = html; $('#m-info').classList.remove('hidden'); }
+const WHATS_NEW = `<h4>Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
+<h4>Progression</h4><ul><li><b>Crown Path</b>: a free 30-tier season track with exclusive cosmetics and titles.</li><li><b>Trophies</b>: 21 achievements, each with Marks and a title.</li><li>Pick a title to show in lobbies and results.</li></ul>
+<h4>Balance</h4><ul><li>Heavy is the Head: the King no longer attunes, charges ultimates at half speed and takes 10% more damage. The Crown appears at a random safe spot.</li><li>Tank preset reworked. Regen scales with attunement.</li></ul>
+<h4>Comfort</h4><ul><li>Graphics quality, reduced motion, one-tap attacks, colorblind colors, larger text.</li><li>Profile backup codes.</li></ul>
+<h4>Fixes</h4><ul><li>Hollows no longer spawn stacked. The Crown can no longer be lost under a Rampart or inside a chest. Evolving can no longer leave you at negative HP. Thorns and pushes no longer change the result after the match ends. Lobby join exploit closed.</li></ul>`;
 $('#set-haptics').addEventListener('change', (e) => { settings.haptics = e.target.checked; saveSettings(); haptic(30); });
 
 // ---------- wiring ----------
@@ -1023,13 +1170,20 @@ document.addEventListener('click', (e) => {
   switch (act) {
     case 'settings': openSettings(); sfx.tap(); break;
     case 'close-settings': $('#m-settings').classList.add('hidden'); sfx.tap(); break;
-    case 'start-solo': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startSolo(); break;
+    case 'close-info': $('#m-info').classList.add('hidden'); sfx.tap(); break;
+    case 'whatsnew': e.preventDefault(); info('What\'s New in 2.0', WHATS_NEW); break;
+    case 'credits': e.preventDefault(); info('Credits', `<p><b>Chess Complex</b><br>Created by Diante Clark.</p><p>Built with plain HTML, Canvas and the Web Audio API. Every sound and piece of art is generated in code.</p><p>Fonts: Cinzel and Chakra Petch (SIL Open Font License). Online play uses PeerJS (MIT).</p>`); break;
+    case 'export-profile': { const code = btoa(unescape(encodeURIComponent(JSON.stringify(profile)))); copy(code, 'Backup code copied'); info('Backup Code', `<p>Keep this somewhere safe. Paste it into Restore Backup on any device.</p><textarea readonly>${code}</textarea>`); break; }
+    case 'import-profile': info('Restore Backup', `<p>Paste a backup code. This replaces your current progress.</p><textarea id="import-code"></textarea><button class="btn wide gold" data-act="do-import">Restore</button>`); break;
+    case 'do-import': try { const d = JSON.parse(decodeURIComponent(escape(atob($('#import-code').value.trim())))); if (!d || typeof d !== 'object' || !d.build) throw 0; profile = { ...defaultProfile(), ...d }; ensureProgress(profile); save(); renderProfile(); $('#m-info').classList.add('hidden'); toast('Progress restored'); sfx.buy(); } catch { toast('That code did not work'); sfx.error(); } break;
+    case 'start-solo': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startSolo(null, profile.mode); break;
     case 'copy-code': copy(session && session.code, 'Code copied'); break;
     case 'copy-link': copy(session && `${location.origin}${location.pathname}?join=${session.code}`, 'Invite link copied'); break;
     case 'add-bot': hostAddBot(); break;
-    case 'fill-bots': while (session && session.players && session.players.length < MAX_PLAYERS) hostAddBot(); break;
+    case 'fill-bots': while (session && session.players && session.players.length < session.maxP) hostAddBot(); break;
     case 'start-host': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startHost(); break;
     case 'join': joinGame(); break;
+    case 'danger': game.danger = !game.danger; $('#btn-danger').classList.toggle('on', game.danger); game.refresh(); sfx.tap(); if (game.danger) toast('Red tiles: where enemies can hit next turn'); break;
     case 'zoom': if (game.r.cam.tz > game.r.fitZoom * 1.05) game.r.overview(); else game.r.closeup(); sfx.tap(); break;
     case 'menu': $('#m-menu').classList.remove('hidden'); sfx.tap(); break;
     case 'close-menu': $('#m-menu').classList.add('hidden'); break;
@@ -1043,7 +1197,7 @@ document.addEventListener('click', (e) => {
     case 'next-lesson': startLesson(b.dataset.next); break;
     case 'to-tutorial': endSession(); go('tutorial'); break;
     case 'rematch':
-      if (!session || session.mode === 'solo' || !session) { const n = session ? session.bots : 7; matchKey = 'm' + Date.now(); startSolo(n); }
+      if (!session || session.mode === 'solo') { const n = session ? session.bots : 7; const gm = session ? session.gameMode : profile.mode; matchKey = 'm' + Date.now(); startSolo(n, gm); }
       else if (session.mode === 'host') { try { session.host.stop(); } catch {} session.host = null; session.started = false; session.rematch = true; go('host'); }
       break;
   }
@@ -1071,12 +1225,17 @@ $('#lesson-list').addEventListener('click', (e) => { const b = e.target.closest(
 $('#codex-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-ctab]'); if (!b) return; codexTab = b.dataset.ctab; sfx.tap(); renderCodexTab(); });
 $('#coach-next').addEventListener('click', () => { sfx.select(); if (tutorial) tutorial.next(); });
 $('#coach-text').addEventListener('click', () => { clearInterval(coachUI.tw); $('#coach-text').textContent = coachUI.full || ''; });
+$('#modes').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (!b) return; profile.mode = b.dataset.mode; save(); sfx.select(); renderPlay(); });
+$('#title-list').addEventListener('click', (e) => { const b = e.target.closest('[data-title]'); if (!b) return; profile.title = b.dataset.title; save(); sfx.select(); renderTrophies(); });
 $('#seg-diff').addEventListener('click', (e) => { const b = e.target.closest('[data-diff]'); if (!b) return; profile.botLevel = b.dataset.diff; save(); sfx.select(); renderSoloMini(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; const open = [...document.querySelectorAll('.modal:not(.hidden)')].pop(); if (open && open.id !== 'm-results' && open.id !== 'm-lesson') open.classList.add('hidden'); });
 addEventListener('pagehide', () => endSession());
 bgInit();
 game.init();
 renderProfile();
+document.body.classList.toggle('bigtext', !!settings.bigtext); document.body.classList.toggle('reduced', !!settings.motion);
+setTimeout(() => { $('#splash').classList.add('out'); if (profile.seenVersion !== '2.0' && (profile.games || profile.tutorial.length)) { info('What\'s New in 2.0', WHATS_NEW); } profile.seenVersion = '2.0'; save(); }, 700);
 const q = new URLSearchParams(location.search);
 if (q.get('join')) { go('join'); $('#in-code').value = q.get('join').toUpperCase().slice(0, 5); }
 window.__cc = { game, profile, get session() { return session; }, startSolo };

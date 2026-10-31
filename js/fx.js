@@ -24,6 +24,19 @@ export function pieceSprite(piece, skin, tint = null) {
   return c;
 }
 
+// High-res static sprites for the board renderer (160 px per tile).
+const hiCache = new Map();
+export function hiSprite(piece, skin, tint = null) {
+  const key = piece + '|' + skin + '|' + tint;
+  let c = hiCache.get(key); if (c) return c;
+  c = document.createElement('canvas'); c.width = 192; c.height = 240;
+  const x = c.getContext('2d');
+  x.translate(96, 224); x.scale(160, 160);
+  drawPiece(x, piece, skin, {});
+  if (tint) { x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-atop'; x.fillStyle = tint === 'white' ? '#ffffff' : tint; x.fillRect(0, 0, 192, 240); }
+  hiCache.set(key, c);
+  return c;
+}
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class FX {
@@ -31,7 +44,7 @@ export class FX {
   reset() {
     this.parts = []; this.shards = []; this.rings = []; this.beams = []; this.bolts = []; this.flashes = [];
     this.meteors = []; this.fireworks = []; this.shocks = []; this.falls = []; this.pillars = []; this.decals = []; this.slashes = []; this.projs = []; this.implodes = []; this.glyphs = [];
-    this.screenFlash = 0; this.flashColor = '#ffffff'; this.time = 0; this.pending = [];
+    this.screenFlash = 0; this.flashColor = '#ffffff'; this.time = 0; this.pending = []; this.crowns = [];
   }
   after(t, fn) { this.pending.push({ at: this.time + t, fn }); }
 
@@ -120,6 +133,18 @@ export class FX {
           this.ring(x, y, '#ffd24d', 2.4, 0.6); this.flash(0.25, '#ffe7a0');
         });
         break;
+      case 'coronation': {
+        this.crowns = this.crowns || [];
+        this.crowns.push({ x, y: y - 1.0, t: 0, life: 0.45 });
+        this.after(0.45, () => {
+          this.flash(0.6, '#fff1c4'); this.pillar(x, y, '#ffd24d', 1.2, 1.2, 8);
+          this.shatterSprite(pieceSprite(piece, skin, 'gold'), x, y, 1.2);
+          this.burst(x, y - 0.4, '#ffd24d', 40, 5, 'coin'); this.burst(x, y - 0.5, '#fff6d0', 30, 6);
+          this.ring(x, y, '#ffd24d', 4, 0.8, 0.16); this.ring(x, y, '#ffffff', 2.6, 0.6, 0.1, 0.1);
+          this.shock(x, y - 0.3, 'rgba(255,220,120,0.55)', 2.2, 0.45); this.impactKick = (this.impactKick || 0) + 10;
+        });
+        break;
+      }
       case 'starfall':
         this.meteor(x, y - 0.3, 0, '#9df3ff', () => {
           this.flash(0.5, '#d8f6ff'); this.shatterSprite(base, x, y, 1.4);
@@ -220,12 +245,14 @@ export class FX {
     }
     const step = (a) => a.filter((p) => (p.t += dt) < p.life);
     this.parts = this.parts.filter((p) => p.t < p.life);
+    if (this.parts.length > (this.cap || 900)) this.parts.splice(0, this.parts.length - (this.cap || 900));
     this.shards = this.shards.filter((s) => s.t < s.life);
     this.rings = step(this.rings); this.beams = step(this.beams); this.bolts = step(this.bolts); this.flashes = step(this.flashes);
     this.shocks = step(this.shocks); this.falls = step(this.falls); this.pillars = step(this.pillars); this.decals = step(this.decals);
     this.slashes = step(this.slashes); this.projs = step(this.projs); this.implodes = step(this.implodes); this.glyphs = step(this.glyphs);
     for (const m of this.meteors) { m.t += dt; if (!m.done && m.t >= m.life) { m.done = true; this.shock(m.x, m.y + 0.2, 'rgba(255,170,90,0.55)', 1.8, 0.4); this.burst(m.x, m.y, m.color, 26, 4.5); this.burst(m.x, m.y, '#3a2a24', 16, 1.5, 'dust'); this.decal(m.x, m.y + 0.1, 'rgba(20,10,6,0.7)', 0.55, 10); this.ring(m.x, m.y + 0.3, '#ffd27a', 2.6, 0.5, 0.1); if (m.onHit) m.onHit(); this.impactKick = (this.impactKick || 0) + 8; } }
     this.meteors = this.meteors.filter((m) => m.t < m.life + 0.05);
+    if (this.crowns) { for (const c of this.crowns) c.t += dt; this.crowns = this.crowns.filter((c) => c.t < c.life + 0.05); }
     this.screenFlash = Math.max(0, this.screenFlash - dt * 3);
   }
 
@@ -263,6 +290,16 @@ export class FX {
   }
   drawAbove(ctx) {
     const T = this.time;
+    if (this.crowns) {
+      for (const c of this.crowns) {
+        c.t += 0; const k = Math.min(1, c.t / c.life), yy = c.y - (1 - k * k) * 6;
+        ctx.save(); ctx.translate(c.x, yy); ctx.scale(0.9, 0.9);
+        ctx.shadowColor = '#ffd24d'; ctx.shadowBlur = 16;
+        ctx.fillStyle = '#ffd24d'; ctx.strokeStyle = '#7a5208'; ctx.lineWidth = 0.03;
+        ctx.beginPath(); ctx.moveTo(-0.32, 0.16); ctx.lineTo(-0.36, -0.2); ctx.lineTo(-0.16, -0.03); ctx.lineTo(0, -0.28); ctx.lineTo(0.16, -0.03); ctx.lineTo(0.36, -0.2); ctx.lineTo(0.32, 0.16); ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
+        ctx.restore();
+      }
+    }
     for (const m of this.meteors) {
       if (m.t < 0) continue;
       const k = Math.min(1, m.t / m.life);

@@ -27,7 +27,7 @@ export const honeCost = (h) => 4 + h * 2;
 export const ABILITIES = {
   // basic attacks
   pawnStrike:  { name: 'Strike',        cd: 0, desc: 'Hit one diagonally adjacent tile.' },
-  tstrike:     { name: 'T-Strike',      cd: 0, desc: 'T-shaped blow: the tile ahead plus a 3-wide crossbar behind it.' },
+  tstrike:     { name: 'T-Strike',      cd: 0, desc: 'T-shaped blow: the tile ahead plus a 3-wide crossbar just beyond it.' },
   ray:         { name: 'Piercing Ray',  cd: 0, desc: 'Diagonal beam, 3 tiles. Pierces every piece in the line.' },
   slam:        { name: 'Slam',          cd: 0, desc: 'Crushes the 3-wide row directly in front.' },
   starburst:   { name: 'Starburst',     cd: 0, desc: 'Explodes on every tile around the Queen.' },
@@ -82,7 +82,7 @@ export const STAT_GAIN = { hp: 7, atk: 2, def: 1.5, spd: 1 };
 export const PRESETS = {
   bruiser:  { name: 'Bruiser',  pts: { hp: 3, atk: 5, def: 2, spd: 0 }, passive: 'thorns',    blurb: 'Hits hard, takes a punch.' },
   scout:    { name: 'Scout',    pts: { hp: 2, atk: 3, def: 0, spd: 5 }, passive: 'scavenger', blurb: 'First to the loot, first to evolve.' },
-  tank:     { name: 'Tank',     pts: { hp: 5, atk: 0, def: 5, spd: 0 }, passive: 'regen',     blurb: 'Outlast everyone.' },
+  tank:     { name: 'Tank',     pts: { hp: 4, atk: 2, def: 4, spd: 0 }, passive: 'regen',     blurb: 'Outlast everyone.' },
   assassin: { name: 'Assassin', pts: { hp: 0, atk: 6, def: 0, spd: 4 }, passive: 'first',     blurb: 'Delete anyone at full health.' },
 };
 
@@ -146,7 +146,6 @@ export const QUESTS = {
   win:      { text: 'Win a match', goal: 1, reward: 150 },
   kills:    { text: 'Eliminate 3 players', goal: 3, reward: 100 },
   rook:     { text: 'Evolve into a Rook', goal: 1, reward: 80 },
-  queen:    { text: 'Evolve into a Queen', goal: 1, reward: 150 },
   crown:    { text: 'Claim the Crown', goal: 1, reward: 120 },
   shards:   { text: 'Collect 15 shards in one match', goal: 15, reward: 100, best: true },
   top3:     { text: 'Finish in the top 3', goal: 1, reward: 80 },
@@ -180,4 +179,57 @@ export const DISCOVERIES = {
   ascended:   { name: 'Ascended', hint: 'Collect everything.', desc: 'Reach Attunement 30.' },
   clutch:     { name: 'Clutch', hint: 'Win with your last breath.', desc: 'Win a match below 10% HP.' },
   hostile:    { name: 'Hostile Takeover', hint: 'Trade places with destiny.', desc: 'Transpose an enemy into the storm\'s cracked ring or the void.' },
+};
+
+// ---------- 2.0: modes ----------
+export const MODES = {
+  royale: { name: 'Battle Royale', short: 'Royale', desc: 'The full experience. Up to 8 pieces, one survivor.', players: [2, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 0, events: 3 },
+  blitz:  { name: 'Blitz', short: 'Blitz', desc: 'Five-minute chaos. Faster storm, 15 second turns, everyone starts with 2 shards.', players: [2, 8], storm: { first: 3, every: 2 }, crown: 5, turnMs: 15000, startShards: 2, events: 2 },
+  duel:   { name: 'Duel', short: 'Duel', desc: 'One on one in a tight 10x10 arena. Pure skill.', players: [2, 2], storm: { first: 6, every: 3 }, crown: 6, turnMs: 30000, startShards: 1, events: 4, arena: { x0: 3, y0: 3, x1: 12, y1: 12 } },
+  daily:  { name: 'Daily Challenge', short: 'Daily', desc: 'Same map, same loadout for everyone today. Seven Hard bots. Chase your best score.', players: [8, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 0, events: 3 },
+};
+
+// ---------- 2.0: season ----------
+export const SEASON = { id: 1, name: 'Season 1: The Opening', tierXp: 250, tiers: 30 };
+export const SEASON_REWARDS = (() => {
+  const r = {};
+  for (let t = 1; t <= 30; t++) r[t] = { marks: t % 5 === 0 ? 150 : t % 2 ? 40 : 60 };
+  r[4] = { title: 'Opening Theory' };
+  r[8] = { skin: 'arcane' };
+  r[12] = { title: 'Tactician' };
+  r[15] = { board: 'throne' };
+  r[18] = { title: 'Endgame Specialist' };
+  r[22] = { skin: 'sovereign' };
+  r[26] = { title: 'Season One Legend' };
+  r[30] = { finisher: 'coronation' };
+  return r;
+})();
+SKINS.arcane = { name: 'Arcane', price: null, season: 1, body: ['#7ff7e8', '#3a1060'], rim: '#e8fffb', glow: '#ff5af0', line: '#12052a', fx: 'spark' };
+SKINS.sovereign = { name: 'Sovereign', price: null, season: 1, body: ['#3a3a44', '#050507'], rim: '#ffd76a', glow: '#ffcf4a', line: '#ffd76a', fx: 'glint' };
+BOARDS.throne = { weather: 'embers', name: 'Throne Room', price: null, season: 1, light: '#4a1820', dark: '#33101a', vein: 'rgba(255,210,120,0.08)', frame: '#ffd76a', grid: 'rgba(255,210,120,0.14)', wallTop: ['#6a2a30', '#4a1a22'], wallFront: '#2a0c12', bg: ['#3a0c14', '#060203'], mote: '#ffd76a' };
+FINISHERS.coronation = { name: 'Coronation', price: null, season: 1, desc: 'A golden crown slams down, then the victim bursts into light.' };
+
+// ---------- 2.0: achievements ----------
+export const ACHIEVEMENTS = {
+  first_win:  { name: 'First Victory', desc: 'Win a match.', stat: 'wins', goal: 1, reward: 100 },
+  wins10:     { name: 'Seasoned', desc: 'Win 10 matches.', stat: 'wins', goal: 10, reward: 300 },
+  wins50:     { name: 'Grandmaster', desc: 'Win 50 matches.', stat: 'wins', goal: 50, reward: 1000 },
+  games25:    { name: 'Regular', desc: 'Play 25 matches.', stat: 'games', goal: 25, reward: 150 },
+  kills50:    { name: 'Hunter', desc: 'Eliminate 50 players.', stat: 'kills', goal: 50, reward: 200 },
+  kills250:   { name: 'Executioner', desc: 'Eliminate 250 players.', stat: 'kills', goal: 250, reward: 600 },
+  queens:     { name: 'Promotion', desc: 'Evolve into a Queen.', stat: 'queens', goal: 1, reward: 100 },
+  crowns5:    { name: 'Usurper', desc: 'Claim the Crown 5 times.', stat: 'crowns', goal: 5, reward: 200 },
+  shards200:  { name: 'Crystal Hoarder', desc: 'Collect 200 shards.', stat: 'shardsTotal', goal: 200, reward: 200 },
+  ults25:     { name: 'Showstopper', desc: 'Use 25 ultimates.', stat: 'ults', goal: 25, reward: 150 },
+  hollows25:  { name: 'Ghostbuster', desc: 'Defeat 25 Hollows.', stat: 'hollows', goal: 25, reward: 100 },
+  streak3:    { name: 'On a Roll', desc: 'Win 3 matches in a row.', stat: 'bestStreak', goal: 3, reward: 300 },
+  hard_win:   { name: 'No Mercy', desc: 'Win against Hard bots.', stat: 'hardWins', goal: 1, reward: 250 },
+  flawless:   { name: 'Untouchable', desc: 'Win without dropping below 50% HP.', stat: 'flawless', goal: 1, reward: 300 },
+  blitz_win:  { name: 'Speed Chess', desc: 'Win a Blitz match.', stat: 'blitzWins', goal: 1, reward: 150 },
+  duel_win5:  { name: 'Duelist', desc: 'Win 5 Duels.', stat: 'duelWins', goal: 5, reward: 200 },
+  daily3:     { name: 'Daily Devotion', desc: 'Play the Daily Challenge on 3 different days.', stat: 'dailyDays', goal: 3, reward: 150 },
+  discover5:  { name: 'Theorist', desc: 'Find 5 secret combos.', stat: 'discoveries', goal: 5, reward: 200 },
+  tutorial:   { name: 'Graduate', desc: 'Complete the tutorial.', stat: 'tutorialDone', goal: 1, reward: 50 },
+  level10:    { name: 'Veteran', desc: 'Reach level 10.', stat: 'level', goal: 10, reward: 200 },
+  collector:  { name: 'Collector', desc: 'Own 12 cosmetics.', stat: 'cosmetics', goal: 12, reward: 250 },
 };

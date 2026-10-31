@@ -75,7 +75,7 @@ export function renderCodex(tab, el, profile) {
     el.innerHTML = ORDER.map((pc) => {
       const P = PIECES[pc];
       const cost = pc === 'pawn' ? 'Starting piece' : pc === 'king' ? 'Claim the Crown' : `Evolve: ${EVOLVE_COST[P.tier]} shards`;
-      const stats = pc === 'king' ? 'Your stats x1.1 HP, +2 ATK, +1 DEF, slower. Heals 3% per turn.' : `HP ${P.hp} - ATK ${P.atk} - DEF ${P.def} - SPD ${P.spd}`;
+      const stats = pc === 'king' ? 'Your stats x1.1 HP, +2 ATK, +1 DEF, slower. Heals 3% per turn.' : `Base: HP ${P.hp} - ATK ${P.atk} - DEF ${P.def} - SPD ${P.spd} (your build adds on top)`;
       const rows = [abilityRow(pc, P.attack, 'atk', skin), abilityRow(pc, P.sig, 'sig', skin), ...P.equips.map((e) => abilityRow(pc, e, 'eq', skin)), abilityRow(pc, P.ult, 'ult', skin)].join('');
       return `<details class="cx-piece" ${pc === 'pawn' ? 'open' : ''}><summary><img src="${pieceIcon(pc, skin, null, 56)}" alt=""><div><b>${P.name}</b><span>${cost}</span></div><i class="chev"></i></summary>
         <div class="cx-body"><div class="cx-move"><img src="${diagram(pc, 'move', 96, skin)}" alt=""><div><b>Movement</b><p>${P.moveDesc}</p><em>${stats}</em></div></div>${rows}</div></details>`;

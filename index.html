@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0a10">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -31,6 +31,11 @@
     <symbol id="i-promo" viewBox="0 0 24 24"><path d="M3 18l2-10 4.5 4L12 5l2.5 7L19 8l2 10zM4 20h16v2H4z"/></symbol>
     <symbol id="i-end" viewBox="0 0 24 24"><path d="M6 2h12v5l-4 5 4 5v5H6v-5l4-5-4-5zm2 2v2.3L12 11l4-4.7V4z"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4z"/></symbol>
+    <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M7 3h10v2h4v3a5 5 0 0 1-5 5h-.3A5 5 0 0 1 13 15.9V18h3v3H8v-3h3v-2.1A5 5 0 0 1 8.3 13H8a5 5 0 0 1-5-5V5h4zm0 4H5v1a3 3 0 0 0 2 2.8zm10 0v3.8A3 3 0 0 0 19 8V7z"/></symbol>
+    <symbol id="i-scroll" viewBox="0 0 24 24"><path d="M6 3h11a3 3 0 0 1 3 3v2h-3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-1h3V6a3 3 0 0 0 0-3zm3 5v2h6V8zm0 4v2h6v-2z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 4h6a3 3 0 0 1 2 .8A3 3 0 0 1 14 4h6v15h-6a2 2 0 0 0-2 2 2 2 0 0 0-2-2H4z"/></symbol>
+    <symbol id="i-codex" viewBox="0 0 24 24"><path d="M4 3h14l2 2v16H6l-2-2zm4 4v2h8V7zm0 4v2h8v-2zm0 4v2h5v-2z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm-1 14v2h2v-2zm1-10a4 4 0 0 0-4 4h2a2 2 0 1 1 3 1.7c-1.2.7-2 1.5-2 3.3h2c0-1 .4-1.4 1.2-1.9A4 4 0 0 0 12 6z"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 5.5v-3l-2.4-.6-.8-1.8 1.3-2.1-2.1-2.1-2.1 1.3-1.8-.8L13.5 2h-3l-.6 2.4-1.8.8L6 3.9 3.9 6l1.3 2.1-.8 1.8L2 10.5v3l2.4.6.8 1.8L3.9 18 6 20.1l2.1-1.3 1.8.8.6 2.4h3l.6-2.4 1.8-.8 2.1 1.3 2.1-2.1-1.3-2.1.8-1.8z"/></symbol>
   </defs>
 </svg>
@@ -43,20 +48,17 @@
       <h1 class="logo"><span class="logo-a">CHESS</span><span class="logo-b">COMPLEX</span></h1>
       <div class="logo-line"></div>
       <nav class="menu">
-        <button class="btn big gold shine" data-go="solo">Play Solo</button>
-        <button class="btn big" data-go="host">Host Online</button>
-        <button class="btn big" data-go="join">Join With Code</button>
-        <div class="row2">
-          <button class="btn" data-go="loadout">Loadout</button>
-          <button class="btn" data-go="armory">Armory</button>
-        </div>
-        <div class="row2">
-          <button class="btn small learn-btn" data-go="tutorial">Tutorial <i class="badge new" id="t-badge"></i></button>
-          <button class="btn small" data-go="codex">Codex</button>
-        </div>
-        <div class="row2">
-          <button class="btn small quest-btn" data-go="quests">Daily Quests <i class="badge" id="q-badge"></i></button>
-          <button class="btn small" data-go="howto">How to Play</button>
+        <button class="btn big gold shine" data-go="play">Play</button>
+        <button class="btn" data-go="join">Join With Code</button>
+        <div class="tiles">
+          <button class="tile" data-go="loadout"><svg><use href="#i-sig"/></svg><span>Loadout</span></button>
+          <button class="tile" data-go="armory"><svg><use href="#i-eq"/></svg><span>Armory</span></button>
+          <button class="tile path" data-go="path"><svg><use href="#i-promo"/></svg><span>Crown Path</span><i class="badge" id="p-badge"></i></button>
+          <button class="tile" data-go="trophies"><svg><use href="#i-trophy"/></svg><span>Trophies</span></button>
+          <button class="tile" data-go="quests"><svg><use href="#i-scroll"/></svg><span>Quests</span><i class="badge" id="q-badge"></i></button>
+          <button class="tile learn" data-go="tutorial"><svg><use href="#i-book"/></svg><span>Tutorial</span><i class="badge new" id="t-badge"></i></button>
+          <button class="tile" data-go="codex"><svg><use href="#i-codex"/></svg><span>Codex</span></button>
+          <button class="tile" data-go="howto"><svg><use href="#i-help"/></svg><span>Guide</span></button>
         </div>
       </nav>
     </div>
@@ -68,7 +70,7 @@
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v1.3</div>
+    <div class="version">v2.0</div>
   </section>
 
   <!-- LOADOUT -->
@@ -115,20 +117,25 @@
     </div>
   </section>
 
-  <!-- SOLO -->
-  <section class="screen" id="s-solo">
-    <header class="bar"><button class="back" data-go="title">Back</button><h2>Solo</h2><div></div></header>
+  <!-- PLAY -->
+  <section class="screen" id="s-play">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Play</h2><div class="marks"><i class="mark-ico"></i><b id="marks-play">0</b></div></header>
     <div class="scroll">
-      <div class="panel">
+      <div class="modes" id="modes"></div>
+      <div class="panel" id="opt-bots">
         <div class="lbl">Opponents <span class="pts" id="bot-n">7</span></div>
         <input type="range" id="in-bots" min="1" max="7" value="7">
       </div>
-      <div class="panel">
+      <div class="panel" id="opt-diff">
         <div class="lbl">Bot Difficulty</div>
         <div class="seg" id="seg-diff"><button data-diff="easy">Easy</button><button data-diff="normal">Normal</button><button data-diff="hard">Hard</button></div>
       </div>
+      <div class="panel daily-panel hidden" id="opt-daily"></div>
       <div class="panel loadout-mini" id="solo-loadout"></div>
-      <button class="btn big gold wide shine" data-act="start-solo">Enter the Board</button>
+      <div class="row2 play-btns">
+        <button class="btn big gold shine" data-act="start-solo" id="btn-solo">Play vs Bots</button>
+        <button class="btn big" data-go="host" id="btn-host">Host Online</button>
+      </div>
     </div>
   </section>
 
@@ -190,6 +197,32 @@
     <div class="scroll" id="codex-body"></div>
   </section>
 
+  <!-- CROWN PATH -->
+  <section class="screen" id="s-path">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Crown Path</h2><div class="marks"><i class="mark-ico"></i><b id="marks-path">0</b></div></header>
+    <div class="scroll">
+      <div class="season-head"><div class="sh-name" id="season-name"></div><div class="sh-tier"><span class="lvl" id="season-tier">0</span><div><b id="season-tier-label"></b><div class="xpbar big"><i id="season-bar"></i></div><em id="season-xp"></em></div></div><p class="hint">Earn season XP from every match. All 30 tiers are free.</p></div>
+      <div class="track" id="season-track"></div>
+    </div>
+  </section>
+
+  <!-- TROPHIES -->
+  <section class="screen" id="s-trophies">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Trophies</h2><div></div></header>
+    <div class="scroll">
+      <div class="panel">
+        <div class="lbl">Title <span class="pts" id="title-count"></span></div>
+        <div class="titles" id="title-list"></div>
+      </div>
+      <div class="lbl" style="padding: 0 4px">Achievements <span class="pts" id="ach-count"></span></div>
+      <div id="ach-list"></div>
+      <div class="panel" style="margin-top:12px">
+        <div class="lbl">Career</div>
+        <div class="career" id="career2"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- QUESTS -->
   <section class="screen" id="s-quests">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Quests</h2><div class="marks"><i class="mark-ico"></i><b id="marks-quests">0</b></div></header>
@@ -231,6 +264,7 @@
       <div class="order" id="h-order"></div>
       <div class="hud-btns">
         <div class="pill" id="h-alive"></div>
+        <button class="icon-btn" data-act="danger" id="btn-danger" aria-label="Show danger zones"><svg viewBox="0 0 24 24" class="stroke"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg></button>
         <button class="icon-btn" data-act="zoom" aria-label="Toggle overview"><svg viewBox="0 0 24 24" class="stroke"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 12h16M12 4v16"/></svg></button>
         <button class="icon-btn" data-act="menu" aria-label="Menu"><svg viewBox="0 0 24 24" class="stroke"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button>
       </div>
@@ -272,14 +306,14 @@
       <div class="tip" id="h-tip"></div>
     </div>
 
-    <div class="modal hidden" id="m-promote">
+    <div role="dialog" aria-modal="true" class="modal hidden" id="m-promote">
       <div class="modal-box">
         <h3>Promotion</h3>
         <div class="promo-opts" id="promo-opts"></div>
         <button class="btn ghost wide" data-act="close-promote">Not yet</button>
       </div>
     </div>
-    <div class="modal hidden" id="m-lesson">
+    <div role="dialog" aria-modal="true" class="modal hidden" id="m-lesson">
       <div class="modal-box results">
         <div class="r-title">Lesson Complete</div>
         <div class="r-place" id="lesson-name"></div>
@@ -288,7 +322,7 @@
         <button class="btn wide" data-act="to-tutorial">Lessons</button>
       </div>
     </div>
-    <div class="modal hidden" id="m-menu">
+    <div role="dialog" aria-modal="true" class="modal hidden" id="m-menu">
       <div class="modal-box">
         <h3>Paused</h3>
         <p class="hint center">The match keeps running for everyone else.</p>
@@ -297,7 +331,7 @@
         <button class="btn wide danger" data-act="forfeit">Leave Match</button>
       </div>
     </div>
-    <div class="modal hidden" id="m-dead">
+    <div role="dialog" aria-modal="true" class="modal hidden" id="m-dead">
       <div class="modal-box">
         <h3 class="red">Eliminated</h3>
         <div class="big-place" id="dead-place"></div>
@@ -306,7 +340,7 @@
         <button class="btn wide gold" data-act="results">See Results</button>
       </div>
     </div>
-    <div class="modal hidden" id="m-results">
+    <div role="dialog" aria-modal="true" class="modal hidden" id="m-results">
       <canvas id="confetti"></canvas>
       <div class="modal-box results">
         <div class="r-title" id="r-title"></div>
@@ -314,6 +348,7 @@
         <div class="r-stats" id="r-stats"></div>
         <div class="r-xp"><div class="r-xp-top"><span class="lvl small" id="r-lvl">1</span><span id="r-xptext"></span></div><div class="xpbar big"><i id="r-xpbar"></i></div><div class="r-levelup hidden" id="r-levelup">Level Up</div></div>
         <div class="r-marks" id="r-marks"></div>
+        <div class="r-recap hidden" id="r-recap"></div>
         <div class="r-quests" id="r-quests"></div>
         <ol class="r-board" id="r-board"></ol>
         <div class="row2"><button class="btn big wide" data-act="to-title">Menu</button><button class="btn big gold wide shine" data-act="rematch" id="btn-rematch">Play Again</button></div>
@@ -323,16 +358,35 @@
 </div>
 
 <!-- SETTINGS (global) -->
-<div class="modal hidden global" id="m-settings">
+<div role="dialog" aria-modal="true" class="modal hidden global" id="m-settings">
   <div class="modal-box">
     <h3>Settings</h3>
+    <div class="set-sec">Audio</div>
     <div class="setting"><span>Music</span><input type="range" min="0" max="1" step="0.05" id="set-music"></div>
     <div class="setting"><span>Sound Effects</span><input type="range" min="0" max="1" step="0.05" id="set-sfx"></div>
+    <div class="set-sec">Feel</div>
     <label class="setting toggle"><span>Screen Shake</span><input type="checkbox" id="set-shake"><i></i></label>
     <label class="setting toggle"><span>Vibration</span><input type="checkbox" id="set-haptics"><i></i></label>
+    <label class="setting toggle"><span>Reduced Motion<small>No slow-mo, flashes or camera punches</small></span><input type="checkbox" id="set-motion"><i></i></label>
+    <label class="setting toggle"><span>One-Tap Attacks<small>Skip the preview tap</small></span><input type="checkbox" id="set-onetap"><i></i></label>
+    <div class="set-sec">Display</div>
+    <div class="setting"><span>Graphics</span><div class="seg small" id="set-quality"><button data-q="auto">Auto</button><button data-q="high">High</button><button data-q="low">Low</button></div></div>
+    <label class="setting toggle"><span>Colorblind Colors</span><input type="checkbox" id="set-cb"><i></i></label>
+    <label class="setting toggle"><span>Larger Text</span><input type="checkbox" id="set-bigtext"><i></i></label>
+    <div class="set-sec">Profile</div>
+    <div class="row2"><button class="btn small" data-act="export-profile">Copy Backup Code</button><button class="btn small" data-act="import-profile">Restore Backup</button></div>
+    <div class="set-links"><a href="privacy.html" target="_blank" rel="noopener">Privacy</a><a href="#" data-act="credits">Credits</a><a href="#" data-act="whatsnew">What's New</a></div>
     <button class="btn wide" data-act="close-settings">Done</button>
   </div>
 </div>
+<div role="dialog" aria-modal="true" class="modal hidden global" id="m-info">
+  <div class="modal-box">
+    <h3 id="info-title"></h3>
+    <div class="info-body" id="info-body"></div>
+    <button class="btn wide gold" data-act="close-info">Got it</button>
+  </div>
+</div>
+<div class="splash" id="splash"><img src="icons/icon-192.png" alt=""><div class="sp-name">CHESS COMPLEX</div><div class="sp-bar"><i></i></div></div>
 <div class="toast" id="toast"></div>
 <div class="flash" id="ui-flash"></div>
 <script type="module" src="js/main.js"></script>
