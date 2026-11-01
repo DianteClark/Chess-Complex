@@ -17,6 +17,11 @@ A turn-based chess battle royale for up to 8 players. Everyone starts as a Pawn 
 - **Progression:** XP and levels with titles from Recruit to Legend; every level-up pays out Marks.
 - **Juice:** hit-stop, slow-motion eliminations, camera punches, lunging attacks, per-ability VFX, shattering pieces, collapsing storm tiles, damage previews with KO markers, kill streak callouts, emotes, haptics and a generative soundtrack that intensifies as the match closes in.
 
+## What's in 10.0
+- **Four new modes:** King of the Hill, Chaos, Gauntlet and Mirror Match, plus new world events, hazards, Siege enemies and a third boss.
+- **A sequel-grade presentation:** new piece art, lit 3D-feeling boards with weather, rebuilt effects and 11 new finishers, an adaptive soundtrack, new sound design, and a Director that keeps every callout in its own lane.
+- **A rebuilt Store and Season 3:** Mythic rarity, 25 piece sets, 13 boards, 14 trails, Collections, a 40-tier Crown Path, daily streaks and a Profile screen.
+
 ## What's in 5.0
 - **Squads:** teams of two with no friendly fire, a Bond bonus for sticking together, and revives from a fallen teammate's soul.
 - **Siege:** co-op for 1-4 players against eight waves of hunting Hollows, with Colossus bosses on waves 4 and 8.

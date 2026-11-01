@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><title>A4 piece contact sheet</title>
+<style>body{background:#15121d;color:#ddd;font:12px system-ui;margin:10px}h3{margin:14px 0 4px;font-weight:600}
+.row{display:flex;align-items:flex-end;gap:2px;flex-wrap:nowrap}.big canvas{background:radial-gradient(#2b2638,#1a1724)}.sm{display:flex;gap:6px;align-items:center;margin-left:12px}
+.sm img{width:32px;height:32px}.lbl{width:110px;flex:none}</style></head><body>
+<div id="out"></div>
+<script type="module">
+import { drawPiece, pieceIcon, materialOf } from '../js/pieces.js';
+import { SKINS } from '../js/data.js';
+const q = new URLSearchParams(location.search);
+const PIECES = (q.get('pieces') || 'pawn,knight,bishop,rook,queen,king,hollow,colossus').split(',');
+let skins = q.get('skins') ? q.get('skins').split(',') : Object.keys(SKINS);
+const big = +(q.get('big') || 160), t = +(q.get('t') || 0), live = q.has('t'); // ?t=<sec> draws live (queued, stand-ins first); default: synchronous final sprites
+const res = q.get('res') ? +q.get('res') : undefined; // force a sprite resolution (e.g. res=512 for the hero tier)
+const out = document.getElementById('out');
+for (const s of skins) {
+  const m = materialOf(s);
+  const row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = `<div class="lbl"><b>${s}</b><br>${m.type}${m.pat ? ' / ' + m.pat : ''}${m.anim ? '<br>anim ' + m.anim : ''}</div>`;
+  const bigWrap = document.createElement('div'); bigWrap.className = 'row big';
+  for (const p of PIECES) {
+    const c = document.createElement('canvas'); const dpr = 1; c.width = big * dpr; c.height = big * 1.15 * dpr; c.style.width = big + 'px'; c.style.height = big * 1.15 + 'px';
+    const x = c.getContext('2d'); x.translate(big / 2, big * 1.05); const sc = big * 0.78; x.scale(sc, sc);
+    drawPiece(x, p, p === 'hollow' || p === 'colossus' ? (s === skins[0] ? 'hollow' : s) : s, live ? { t, res } : { res });
+    bigWrap.appendChild(c);
+  }
+  row.appendChild(bigWrap);
+  const sm = document.createElement('div'); sm.className = 'sm';
+  for (const p of PIECES) { const i = new Image(); i.src = pieceIcon(p, s, null, 32); sm.appendChild(i); }
+  row.appendChild(sm);
+  out.appendChild(row);
+  await new Promise((r) => setTimeout(r, 0));
+}
+document.title = 'done';
+</script></body></html>

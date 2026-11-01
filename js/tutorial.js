@@ -19,6 +19,7 @@ function helpers(ctl) {
     dummies() { return ctl.host.s.units.filter((u) => u.dummy && u.alive); },
     ev: (ev, f) => ev.some(f),
     t: ctl.track,
+    pub() { setTimeout(() => { if (!ctl.dead) ctl.host.publish([]); }, 0); },
   };
   return c;
 }
@@ -52,7 +53,8 @@ export const LESSONS = [
     id: 'evolve', name: 'Evolution', blurb: 'Promoting, the Knight, free actions and AOE shapes.',
     start(c) { c.clear(); c.reset('pawn', 6, 8); c.me.shards = 3; },
     steps: [
-      { say: 'You are carrying shards. Two is enough to evolve. Tap Promote and choose the Knight. Promoting never costs your action.', obj: 'Evolve into a Knight', glow: '[data-slot=promote]', setup: (c) => { c.me.shards = Math.max(3, c.me.shards); c.fresh(); }, check: (c) => c.me.piece === 'knight' },
+      { say: 'You are carrying shards. Two is enough to evolve. Tap Promote and choose the Knight. Promoting never costs your action.', obj: 'Evolve into a Knight', glow: '[data-slot=promote]', setup: (c) => { c.me.shards = Math.max(3, c.me.shards); c.fresh(); },
+        check: (c) => { if (c.me.piece === 'bishop' || c.me.piece === 'rook') { c.reset('pawn', c.me.x, c.me.y); c.me.shards = 3; c.fresh(); c.pub(); } return c.me.piece === 'knight'; } }, // wrong pick: back to Pawn to try again
       { say: 'Knights jump in an L and ignore anything in the way. Their Signature, Vault, is a free action that grants a second jump.', next: true },
       { say: 'Use Vault, then make two jumps this turn.', obj: 'Vault, then jump twice', glow: '[data-slot=sig]', setup: (c) => { c.me.cd.sig = 0; c.fresh(); }, check: (c) => c.t.vaulted && c.t.moves >= 2 },
       { say: 'The Knight\'s attack, T-Strike, hits the tile ahead plus a 3-wide crossbar just beyond it. Line it up and hit both dummies at once.', obj: 'Hit 2 dummies with one T-Strike', glow: '[data-slot=atk]',
@@ -89,7 +91,26 @@ export const LESSONS = [
         setup: (c) => { c.clear(); c.reset('knight', 7, 9); c.tile(7, 8, 'chest', { hp: 2 }); c.fresh(); }, mark: () => [{ x: 7, y: 8 }], check: (c, ev) => c.ev(ev, (e) => e.e === 'chest' && e.broke) },
       { say: 'On round 7 the Crown appears at the centre. Claim it to become the King: tougher and self-healing, but slow. Everyone will hunt you. Go on, take it.', obj: 'Claim the Crown',
         setup: (c) => { c.clear(); c.reset('knight', 6, 9); c.item(7, 7, 'crown'); c.fresh(); }, mark: () => [{ x: 7, y: 7 }], check: (c) => c.me.piece === 'king' },
-      { say: 'That is everything I can teach. Real mastery comes from experimenting. The Codex lists every skill, and some combos are still waiting to be discovered. Prove yourself in the Graduation match.', next: true },
+      { say: 'That is the core of it. One more lesson covers the newest dangers on the board, or jump straight into the Graduation match.', next: true },
+    ],
+  },
+  {
+    id: 'frontier', name: 'New Ground', blurb: 'Geysers, crumbling floors, the Throne and the new Hollows.',
+    start(c) { c.clear(); c.reset('knight', 7, 8); },
+    steps: [
+      { say: 'Some boards roll a hazard theme. This is a geyser vent, and the steam means it erupts at the end of the round: it scalds the vent and the four tiles beside it, and throws whoever stands on it. You are standing on it. Jump clear.', obj: 'Get clear of the geyser',
+        setup: (c) => { c.clear(); c.reset('knight', 7, 8); c.tile(7, 8, 'geyser', { ph: 2 }); c.fresh(); }, mark: () => [{ x: 7, y: 8, label: 'Geyser' }],
+        check: (c) => Math.abs(c.me.x - 7) + Math.abs(c.me.y - 8) > 1 },
+      { say: 'Cracked floor holds the first step and gives way under the second, leaving a pit. Conveyor tracks carry anything on them one tile at the end of every round. Use both to put enemies where you want them.',
+        setup: (c) => { c.clear(); c.reset('knight', 6, 9); c.tile(8, 9, 'crumble', { hp: 2 }); c.tile(9, 9, 'crumble', { hp: 1 }); for (let x = 5; x <= 9; x++) c.tile(x, 6, 'conveyor', { dx: 1, dy: 0 }); c.fresh(); },
+        mark: () => [{ x: 9, y: 9, label: 'Cracked' }, { x: 7, y: 6, label: 'Conveyor' }], next: true },
+      { say: 'In King of the Hill the golden Throne sits at the centre. Start your turn on it for 2 points, or 1 if an enemy shares it. First to 10 wins. Step onto the Throne.', obj: 'Step onto the Throne',
+        setup: (c) => { c.clear(); c.reset('pawn', 5, 10); for (let y = 6; y <= 9; y++) for (let x = 6; x <= 9; x++) c.tile(x, y, 'throne'); c.fresh(); },
+        mark: () => [{ x: 6, y: 9 }], check: (c) => { const t = c.s.tiles[c.me.y * 16 + c.me.x]; return !!t && t.t === 'throne'; } },
+      { say: 'In Siege and the Gauntlet, new Hollows hunt you: fast Stalkers, Hexers that shoot from range, Splitters that burst into Mites, and Brutes behind a shield. Shields soak damage until they break. Break this one.', obj: 'Break the shield', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'),
+        setup: (c) => { c.clear(); c.reset('knight', 7, 10); const d = c.dummy(7, 9, 60); d.shield = 10; d.shieldMax = 10; d.role = 'brute'; d.name = 'Brute'; c.fresh(); },
+        mark: (c) => c.dummies().map((d) => ({ x: d.x, y: d.y })), check: (c, ev) => c.ev(ev, (e) => e.e === 'shieldBreak') },
+      { say: 'Watch the banners for the new world events too: Eclipse hides distant pieces, Earthquakes reshape walls, Mana Surge charges every ultimate, the Royal Decree puts a bounty on the leader, War Drums speed everyone up, and the Restless Dead rise to hunt. The Codex has it all. Now prove yourself in the Graduation match.', next: true },
     ],
   },
 ];

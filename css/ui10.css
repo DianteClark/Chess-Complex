@@ -1,0 +1,201 @@
+/* A1 10.0 Director: lanes, callouts, turn handoff, feed, hints, HUD juice.
+   Lane positions come from js/announcer.js (layout()) as CSS variables on #s-game:
+   --lane-top, --lane-feed, --lane-row, --lane-hero, --lane-hero-h, --lane-hint, --lane-side */
+
+#s-game { --lane-top: calc(100px + var(--st, 0px)); --lane-feed: calc(134px + var(--st, 0px)); --lane-row: 24px; --lane-hero: 232px; --lane-hero-h: 110px; --lane-hint: 280px; --lane-side: 0px; }
+
+/* legacy message nodes are replaced by the Director */
+#s-game #h-banner, #s-game #h-streak, #s-game #discovery { display: none !important; }
+
+/* ---------------------------------------------------------------- hero lane */
+.dh { position: absolute; left: 0; right: var(--lane-side); top: var(--lane-hero); height: var(--lane-hero-h); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); place-items: center; pointer-events: none; z-index: 5; opacity: 0; visibility: hidden; --ac: #ffd24d; --life: 1.8s; contain: layout style; }
+.dh.show, .dh.out, .dh.cut { visibility: visible; }
+.dh.show { animation: dhLife var(--life) linear both; }
+.dh.out { animation: dhOut .18s ease-in both; }
+.dh.cut { animation: none; opacity: 0; visibility: hidden; }
+@keyframes dhLife { 0% { opacity: 0; } 7% { opacity: 1; } 86% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes dhOut { from { opacity: 1; } to { opacity: 0; } }
+
+.dh-plate { position: absolute; left: 0; right: 0; top: 50%; height: 74%; transform: translateY(-50%); overflow: hidden;
+  background: linear-gradient(90deg, rgba(6,5,10,0) 0%, rgba(8,6,14,.80) 16%, rgba(8,6,14,.80) 84%, rgba(6,5,10,0) 100%); }
+.dh-plate::before, .dh-plate::after { content: ''; position: absolute; left: 14%; right: 14%; height: 1px; background: linear-gradient(90deg, transparent, var(--ac), transparent); transform: scaleX(0); }
+.dh-plate::before { top: 0; } .dh-plate::after { bottom: 0; }
+.dh.show .dh-plate { animation: dhPlate var(--life) cubic-bezier(.2,.8,.2,1) both; }
+.dh.show .dh-plate::before, .dh.show .dh-plate::after { animation: dhRule var(--life) cubic-bezier(.2,.8,.2,1) both; }
+@keyframes dhPlate { 0% { clip-path: inset(48% 0 48% 0); } 9% { clip-path: inset(0 0 0 0); } 100% { clip-path: inset(0 0 0 0); } }
+@keyframes dhRule { 0% { transform: scaleX(0); } 14% { transform: scaleX(1); } 100% { transform: scaleX(1); } }
+.dh-sweep { position: absolute; top: 0; bottom: 0; width: 34%; left: -40%; background: linear-gradient(100deg, transparent, rgba(255,255,255,.10) 45%, rgba(255,255,255,.22) 50%, rgba(255,255,255,.10) 55%, transparent); }
+.dh.show .dh-sweep { animation: dhSweep 1.1s .18s cubic-bezier(.4,0,.2,1) both; }
+@keyframes dhSweep { to { left: 110%; } }
+
+.dh-in { position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: calc(100% - 24px); text-align: center; }
+.dh-kick { font-family: var(--ui); font-weight: 700; font-size: 10.5px; letter-spacing: .42em; padding-left: .42em; text-transform: uppercase; color: var(--ac); line-height: 1; margin-bottom: 5px; text-shadow: 0 1px 2px #000; }
+.dh-kick:empty { display: none; }
+.dh-title { font-family: var(--display); font-weight: 900; line-height: 1; white-space: nowrap; letter-spacing: .06em; font-size: var(--tpx, 36px); }
+.dh-title span { display: inline-block; color: #fff6dc; text-shadow: 0 2px 0 rgba(0,0,0,.65), 0 0 18px color-mix(in srgb, var(--ac) 70%, transparent); }
+.dh-sub { margin-top: 6px; font-family: var(--ui); font-weight: 700; font-size: 11.5px; letter-spacing: .26em; padding-left: .26em; text-transform: uppercase; color: #eee7fa; line-height: 1.2; max-width: min(100%, 520px); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; text-shadow: 0 1px 2px #000; }
+.dh-sub:empty { display: none; }
+.dh-sub b { color: var(--ac); }
+.dh-tags { display: flex; gap: 6px; margin-top: 6px; }
+.dh-tags:empty { display: none; }
+.dh-tags em { font-style: normal; font-family: var(--ui); font-weight: 800; font-size: 9.5px; letter-spacing: .2em; text-transform: uppercase; padding: 2px 7px 2px 8px; color: #120d05; background: var(--ac); clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%); }
+.dh.show .dh-tags em { animation: dhTag .35s .25s cubic-bezier(.2,1.4,.4,1) both; }
+.dh.show .dh-tags em:nth-child(2) { animation-delay: .32s; } .dh.show .dh-tags em:nth-child(3) { animation-delay: .39s; }
+@keyframes dhTag { from { opacity: 0; transform: translateY(6px) scale(.8); } }
+
+/* tier 1: information (round, storm, world events, evolution) - calm, letterspaced reveal */
+.dh.t1 .dh-title span { color: color-mix(in srgb, var(--ac) 35%, #fff8e6); }
+.dh.t1.show .dh-title span { animation: dhT1 var(--life) cubic-bezier(.16,1,.3,1) both; }
+@keyframes dhT1 { 0% { opacity: 0; letter-spacing: .42em; filter: blur(4px); } 16% { opacity: 1; letter-spacing: .06em; filter: blur(0); } 100% { letter-spacing: .09em; } }
+.dh.t1.show .dh-sub, .dh.t1.show .dh-kick { animation: dhRise .5s .12s both; }
+@keyframes dhRise { from { opacity: 0; transform: translateY(5px); } }
+
+/* tier 2: kills and team moments - angled slash in the player's colour, punch-in */
+.dh.t2 .dh-plate { height: 82%; background: linear-gradient(90deg, rgba(6,5,10,0) 0%, rgba(8,6,14,.86) 12%, rgba(8,6,14,.86) 88%, rgba(6,5,10,0) 100%); }
+.dh.t2 .dh-plate::before, .dh.t2 .dh-plate::after { height: 2px; left: 8%; right: 8%; }
+.dh.t2 .dh-in::before { content: ''; position: absolute; z-index: -1; left: 50%; top: 50%; width: 120%; height: 64%; transform: translate(-50%, -50%) skewX(-18deg); background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ac) 38%, transparent) 30%, color-mix(in srgb, var(--ac) 38%, transparent) 70%, transparent); }
+.dh.t2 .dh-title span { background: linear-gradient(180deg, #ffffff 15%, color-mix(in srgb, var(--ac) 55%, #fff4d0) 60%, var(--ac) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 2px 0 rgba(0,0,0,.7)) drop-shadow(0 0 12px color-mix(in srgb, var(--ac) 60%, transparent)); }
+.dh.t2.show .dh-title span { animation: dhPunch .42s cubic-bezier(.2,1.5,.35,1) both; }
+.dh.t2.show .dh-in::before { animation: dhSlash .4s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes dhPunch { 0% { opacity: 0; transform: scale(1.9) skewX(-10deg); } 60% { opacity: 1; transform: scale(.96) skewX(-4deg); } 100% { transform: scale(1) skewX(-4deg); } }
+@keyframes dhSlash { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* tier 3: the big ones (Massacre, Regicide, Rampage+, boss waves, You Are King) */
+.dh.t3 .dh-plate { height: 92%; background: linear-gradient(90deg, rgba(6,5,10,0) 0%, rgba(10,6,16,.9) 8%, rgba(10,6,16,.9) 92%, rgba(6,5,10,0) 100%); box-shadow: inset 0 0 40px color-mix(in srgb, var(--ac) 30%, transparent); }
+.dh.t3 .dh-plate::before, .dh.t3 .dh-plate::after { height: 3px; left: 0; right: 0; box-shadow: 0 0 12px var(--ac); }
+.dh.t3 .dh-title span { background: linear-gradient(180deg, #fff 10%, #ffe9a8 45%, var(--ac) 80%, color-mix(in srgb, var(--ac) 60%, #000) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(-2px 0 0 rgba(255,60,90,.55)) drop-shadow(2px 0 0 rgba(80,220,255,.5)) drop-shadow(0 3px 0 rgba(0,0,0,.8)) drop-shadow(0 0 22px var(--ac)); }
+.dh.t3.show .dh-title span { animation: dhSlam .55s cubic-bezier(.2,1.6,.3,1) both; }
+.dh.t3.show { animation: dhLife var(--life) linear both, dhShake .4s .12s both; }
+.dh.t3 .dh-kick { font-size: 11.5px; }
+.dh-ring { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; border: 2px solid var(--ac); opacity: 0; }
+.dh.t3.show .dh-ring { animation: dhRing .7s .1s cubic-bezier(.1,.7,.3,1) both; }
+@keyframes dhSlam { 0% { opacity: 0; transform: scale(2.6); filter: blur(6px); } 45% { opacity: 1; transform: scale(.92); filter: blur(0); } 70% { transform: scale(1.04); } 100% { transform: scale(1); } }
+@keyframes dhShake { 0%, 100% { transform: none; } 20% { transform: translate(-4px, 2px); } 40% { transform: translate(4px, -2px); } 60% { transform: translate(-2px, 1px); } 80% { transform: translate(2px, 0); } }
+@keyframes dhRing { 0% { opacity: .9; transform: scale(.4); } 100% { opacity: 0; transform: scale(9, 2.4); } }
+
+/* discovery: cyan glass */
+.dh.disc { --ac: #7fe0ff; }
+.dh.disc .dh-title span { color: #fff; text-shadow: 0 0 22px rgba(127,224,255,.9), 0 3px 0 #0b2a3a; }
+.dh.disc.show .dh-title span { animation: dhT1 var(--life) cubic-bezier(.16,1,.3,1) both; }
+.dh.disc .dh-sub { text-transform: none; letter-spacing: .02em; font-weight: 500; color: #d8fbff; white-space: normal; max-width: 300px; }
+
+/* merged upgrade (First Blood becomes Shutdown): quick re-punch */
+.dh.bump .dh-title span { animation: dhBump .35s cubic-bezier(.2,1.6,.4,1) !important; }
+@keyframes dhBump { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
+
+/* tones for banners */
+.dh.tone-red { --ac: #ff5a6a; } .dh.tone-cyan { --ac: #7fe0ff; } .dh.tone-violet { --ac: #b98cff; }
+
+/* reduced motion: fade only */
+.dh.calm .dh-title span, .dh.calm .dh-in::before, .dh.calm .dh-plate, .dh.calm .dh-plate::before, .dh.calm .dh-plate::after, .dh.calm .dh-ring, .dh.calm .dh-sweep, .dh.calm .dh-tags em, .dh.calm .dh-sub, .dh.calm .dh-kick { animation: none !important; transform: none; }
+.dh.calm .dh-plate::before, .dh.calm .dh-plate::after { transform: none; }
+.dh.calm.show { animation: dhLife var(--life) linear both !important; }
+
+/* ---------------------------------------------------------------- top lane: turn handoff + event chip */
+.dt { position: absolute; top: var(--lane-top); left: 0; right: var(--lane-side); margin: 0 auto; width: max-content; max-width: calc(100% - 140px); height: 28px; display: flex; align-items: center; gap: 10px; padding: 0 22px; pointer-events: none; z-index: 5; opacity: 0; visibility: hidden; --ac: #ffd24d;
+  background: linear-gradient(180deg, rgba(48,38,14,.95), rgba(18,14,6,.95)); clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 12px 100%, 0 50%); overflow: hidden; }
+.dt::before { content: ''; position: absolute; inset: 0; clip-path: inherit; border: 1px solid var(--ac); pointer-events: none; }
+.dt::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; left: -50%; background: linear-gradient(100deg, transparent, rgba(255,240,190,.55), transparent); }
+.dt b { font-family: var(--display); font-weight: 900; font-size: 15px; letter-spacing: .24em; color: #ffe9a8; text-shadow: 0 0 10px rgba(255,210,77,.6); white-space: nowrap; }
+.dt span { font-size: 10px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: #d6c9a4; white-space: nowrap; }
+.dt span:empty { display: none; }
+.dt.show { visibility: visible; animation: dtLife 1.5s cubic-bezier(.2,.8,.2,1) both; }
+.dt.show::after { animation: dhSweep .7s .15s ease-out both; }
+@keyframes dtLife { 0% { opacity: 0; transform: scaleX(.2); } 14% { opacity: 1; transform: scaleX(1.06); } 22% { transform: scaleX(1); } 85% { opacity: 1; } 100% { opacity: 0; transform: translateY(-4px); } }
+.dt.calm.show { animation: dhLife 1.5s linear both; } .dt.calm.show::after { animation: none; }
+
+#s-game #event-chip { top: var(--lane-top); left: calc((100% - var(--lane-side)) / 2); transition: opacity .15s; max-width: calc(100% - var(--lane-side) - 24px); overflow: hidden; text-overflow: ellipsis; }
+#s-game.dir-hold .dt, #s-game.dir-turn #event-chip, #s-game.dir-hold #event-chip { opacity: 0 !important; visibility: hidden; }
+
+/* ---------------------------------------------------------------- feed lane */
+#s-game #h-feed { top: var(--lane-feed); left: calc(8px + env(safe-area-inset-left, 0px)); max-width: min(72vw, calc(100vw - var(--lane-side) - 24px)); gap: 4px; z-index: 4; }
+#s-game.dir-hold #h-feed { visibility: hidden; }
+#s-game #h-feed > div { height: var(--lane-row); box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 8px; white-space: nowrap; overflow: hidden; font-size: 12px; max-width: 100%;
+  background: linear-gradient(90deg, rgba(12,10,18,.92), rgba(12,10,18,.78)); border-left: 2px solid var(--gold, #d6b05c); border-radius: 0 3px 3px 0; animation: dfIn .28s cubic-bezier(.2,.9,.3,1) both;
+  -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); }
+#s-game #h-feed > div > * { flex: none; }
+#s-game #h-feed > div.out { animation: dfOut .25s ease-in forwards; }
+#s-game #h-feed > div.pulse { animation: dfPulse .4s ease-out; }
+#s-game #h-feed img { width: 18px; height: 18px; }
+#s-game #h-feed .fx-n { font-style: normal; font-weight: 800; font-size: 11px; color: #1a1205; background: var(--gold2, #ffd98a); padding: 0 5px; border-radius: 8px; margin-left: 2px; }
+@keyframes dfIn { from { opacity: 0; transform: translateX(-14px); } }
+@keyframes dfOut { to { opacity: 0; transform: translateX(-10px); } }
+@keyframes dfPulse { 40% { background: rgba(80,62,20,.95); } }
+
+/* ---------------------------------------------------------------- hint lane: coach tips + toasts */
+#s-game #gm-tip { top: auto; bottom: var(--lane-hint); left: calc((100% - var(--lane-side)) / 2); transform: translateX(-50%); width: min(380px, calc(100% - var(--lane-side) - 20px)); z-index: 6; animation: hintIn .32s cubic-bezier(.2,1.3,.4,1) both; }
+#s-game #gm-tip.toast { width: auto; max-width: min(380px, calc(100% - var(--lane-side) - 20px)); padding: 8px 14px; border-color: rgba(255,255,255,.18); background: rgba(22,19,32,.96); cursor: default; }
+#s-game #gm-tip.toast p { font-weight: 600; text-align: center; }
+#s-game.dir-hold #gm-tip { visibility: hidden; }
+@keyframes hintIn { from { opacity: 0; transform: translate(-50%, 10px) scale(.96); } }
+
+/* ---------------------------------------------------------------- status slot: lethal, between the emote and ultimate buttons */
+#s-game #lethal { left: calc(58px + env(safe-area-inset-left, 0px)); right: calc(88px + env(safe-area-inset-right, 0px)); width: auto; transform: none; bottom: calc(var(--hb, 190px) + 10px); padding: 6px 9px; font-size: 11px; }
+#s-game #lethal small { display: block; opacity: .8; font-size: 10.5px; margin-top: 1px; }
+
+/* ---------------------------------------------------------------- HUD juice */
+/* HP: damage chip-down (ghost holds, then drains), heal glow */
+#s-game .hpbar em { background: linear-gradient(90deg, #ff4d5e, #ffb36b); opacity: .95; transition: width .5s .42s cubic-bezier(.65,0,.35,1); }
+#s-game .hpbar.hit i { animation: hpFlash .32s ease-out; }
+#s-game .hpbar.heal i { animation: hpHeal .7s ease-out; }
+@keyframes hpFlash { 0% { filter: brightness(2.4) saturate(.3); } 100% { filter: none; } }
+@keyframes hpHeal { 0% { box-shadow: 0 0 0 rgba(92,255,157,0); } 30% { box-shadow: 0 0 16px rgba(92,255,157,.95); filter: brightness(1.5); } 100% { filter: none; } }
+#s-game .hpbar.heal::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(180,255,210,.6), transparent); transform: translateX(-100%); animation: hpSweep .6s ease-out; }
+@keyframes hpSweep { to { transform: translateX(100%); } }
+
+/* shard counter pop + "+N" */
+#s-game #h-shards { display: inline-block; min-width: 1ch; transition: color .3s; }
+#s-game #h-shards.pop { animation: shPop .45s cubic-bezier(.2,1.6,.4,1); color: #d8fbff; text-shadow: 0 0 10px #5fd8ff; }
+@keyframes shPop { 0% { transform: scale(1); } 35% { transform: scale(1.7); } 100% { transform: scale(1); } }
+#s-game .shardbar { position: relative; }
+.sh-gain { position: absolute; left: 14px; top: -6px; font-size: 11px; font-weight: 800; color: #9df3ff; text-shadow: 0 1px 2px #000; pointer-events: none; animation: shGain .9s ease-out forwards; }
+@keyframes shGain { from { opacity: 0; transform: translateY(4px); } 20% { opacity: 1; } to { opacity: 0; transform: translateY(-14px); } }
+
+/* ultimate meter: fill sweep on gain, one-shot burst when it becomes ready */
+#s-game .ult-btn.gain .ur-fg { animation: ultGain .7s ease-out; }
+@keyframes ultGain { 0% { stroke: #fff6cf; filter: drop-shadow(0 0 10px #ffd24d); } 100% { filter: drop-shadow(0 0 4px rgba(214,176,92,.8)); } }
+#s-game .ult-btn .ult-sweep { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; opacity: 0; background: conic-gradient(from 0deg, transparent 0 70%, rgba(255,233,168,.55) 85%, transparent 100%); }
+#s-game .ult-btn.gain .ult-sweep { animation: ultSweep .7s ease-out; }
+@keyframes ultSweep { 0% { opacity: 1; transform: rotate(0); } 100% { opacity: 0; transform: rotate(360deg); } }
+#s-game .ult-btn.burst::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 3px solid #ffe9a8; animation: ultBurst .8s cubic-bezier(.1,.7,.3,1) forwards; pointer-events: none; }
+@keyframes ultBurst { 0% { opacity: 1; transform: scale(.8); } 100% { opacity: 0; transform: scale(2.1); } }
+
+/* cooldown ready flash */
+#s-game .act.cdready { animation: cdFlash .8s ease-out; }
+#s-game .act.cdready::after { content: 'READY'; position: absolute; top: 3px; right: 5px; font-size: 8.5px; font-weight: 800; letter-spacing: .14em; color: #9df3ff; animation: cdTag 1.2s ease-out forwards; }
+#s-game .act.cdready::before { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(157,243,255,.35) 50%, transparent 70%); transform: translateX(-100%); animation: cdSweep .6s ease-out forwards; pointer-events: none; }
+@keyframes cdFlash { 0% { border-color: #9df3ff; box-shadow: 0 0 14px rgba(127,224,255,.6), inset 0 0 12px rgba(127,224,255,.3); } 100% { box-shadow: none; } }
+@keyframes cdTag { 0% { opacity: 0; transform: translateY(3px); } 15% { opacity: 1; transform: none; } 75% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes cdSweep { to { transform: translateX(100%); } }
+
+/* turn handoff on the action bar: a gold line sweeps under the buttons */
+#s-game .actions { position: relative; }
+#s-game .actions.myturn::after { content: ''; position: absolute; left: 0; right: 0; bottom: -3px; height: 2px; background: linear-gradient(90deg, transparent, #ffd24d, transparent); transform: scaleX(0); animation: barSweep .7s .1s cubic-bezier(.2,.8,.2,1) forwards; pointer-events: none; }
+@keyframes barSweep { 0% { transform: scaleX(0); opacity: 1; } 60% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(1); opacity: 0; } }
+
+/* cleaner order strip */
+#s-game .order { gap: 4px; padding: 4px 6px; background: linear-gradient(180deg, rgba(14,12,22,.82), rgba(10,9,15,.7)); border: 1px solid rgba(255,255,255,.07); border-radius: 8px; align-items: flex-end; }
+#s-game .order .o { width: 28px; height: 28px; border-radius: 5px; border-bottom: 0; background: rgba(255,255,255,.035); box-shadow: inset 0 -2px 0 var(--c); overflow: visible; }
+#s-game .order .o img { border-radius: 5px; }
+#s-game .order .o:first-child { width: 36px; height: 36px; background: linear-gradient(180deg, rgba(255,210,77,.22), rgba(255,210,77,.06)); box-shadow: inset 0 -3px 0 var(--c), 0 0 0 1px rgba(255,217,138,.7), 0 0 14px rgba(255,210,77,.3); }
+#s-game .order .o:first-child::before { display: none; }
+#s-game .order .o:not(:first-child) { opacity: .82; }
+#s-game .order .o.me { opacity: 1; }
+#s-game .order .o.me::after { top: -3px; right: -3px; width: 7px; height: 7px; background: #fff; box-shadow: 0 0 6px #fff; }
+#s-game .order .o.ally { box-shadow: inset 0 -2px 0 var(--c), 0 0 0 1px color-mix(in srgb, var(--c) 60%, transparent); }
+#s-game .order .o.foe-hollow img { filter: grayscale(.6) brightness(.8); }
+#s-game .order .o.sep { width: 1px; height: 22px; background: rgba(255,255,255,.12); box-shadow: none; align-self: center; margin: 0 1px; }
+#s-game .order.shift .o:first-child { animation: ordIn .35s cubic-bezier(.2,1.4,.4,1); }
+@keyframes ordIn { from { transform: translateX(14px) scale(.8); opacity: .4; } }
+
+/* ---------------------------------------------------------------- landscape (HUD is a right-hand column) */
+@media (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
+  #s-game #lethal { left: calc(58px + env(safe-area-inset-left, 0px)); right: calc(var(--sidew) + 76px); bottom: calc(10px + var(--sb, 0px)); }
+  .dh-title { font-size: min(var(--tpx, 32px), 38px); }
+  .dh-sub { font-size: 10.5px; margin-top: 4px; }
+  .dh-kick { margin-bottom: 3px; }
+  #s-game #h-feed > div { font-size: 11px; }
+  .dt { height: 26px; } .dt b { font-size: 13px; }
+}
+body.reduced .dt.show::after, body.reduced .dh .dh-sweep { animation: none !important; }
+body.bigtext .dh-sub { font-size: 13px; } body.bigtext .dh-kick { font-size: 12px; }

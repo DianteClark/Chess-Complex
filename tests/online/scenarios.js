@@ -116,7 +116,7 @@ for (const who of ['host', 'client']) for (const sub of ['a-stay', 'b-menu', 'c-
       await expectAdvancing(run, other, 4000, `after ${dl} pressed Menu`);
     }
     else if (!cf) run.check(!ov.modals.includes('m-results'), `${other}: match ended for them when ${dl} pressed Menu (results "${ov.rTitle}", toasts ${JSON.stringify(ov.toasts)})`);
-    else run.check(ov.modals.includes('m-results') && ov.toasts.some((t) => /host/i.test(t)), `${other}: no clear feedback after host confirmed leaving`);
+    else run.check(ov.modals.includes('m-results') && (/\bhost\b/i.test(ov.rTitle || '') || ov.toasts.some((t) => /\bhost\b/i.test(t))), `${other}: no clear feedback after host confirmed leaving`);
     if (who === 'host' && ov.modals.includes('m-results')) run.check(ov.rTitle !== 'Forfeit', `${other}: results say "Forfeit" although the HOST left (client did not forfeit)`);
   } else {
     if (v.rematchVisible) { await tap(dp, '#btn-rematch'); await sleep(1000); v = await view(dp); run.note(`${dl} pressed Play Again -> ${v.screen} [${v.modals}] toasts ${JSON.stringify(v.toasts)}`); }

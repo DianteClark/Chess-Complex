@@ -1,5 +1,34 @@
 # Changelog
 
+## 10.0 (November 2026): the sequel
+Built by ten specialist handlers working in parallel (messaging, music, sound, piece art, world rendering, effects, store and progression, menus, gameplay, QA), coordinated through `docs/V10_BRIEF.md` and `docs/V10_NOTES.md`.
+
+**Gameplay**
+- Four new modes: King of the Hill (hold the central Throne: +2 a turn alone, +1 contested, first to 10), Chaos (two hazards plus a world event every round), Gauntlet (co-op boss rush for 1-4) and Mirror Match (everyone gets the same random build).
+- Six new world events: Eclipse, Earthquake, Mana Surge, Royal Decree (a bounty on the leader), War Drums, Restless Dead.
+- Four new hazards: Geyser Field, Iron Works conveyors, Crumbling Keep, Rift Storm.
+- Siege enemies: Stalker, Hexer, Splitter and Brute, plus a new boss, the Wraith Regent. Bosses enrage in long fights; walled-off hunters relocate.
+- Six new abilities (Phalanx, Outflank, Consecrate, Repel, Bombard, Gravity Well) and two passives (Bastion, Predator). New tutorial lesson and Codex entries.
+- Balance (sims): Royale King wins about 32%, presets 22.5-27.5%.
+
+**Presentation**
+- The Director (`js/announcer.js`): every callout, banner, tip, feed line, toast and ultimate cinematic is scheduled into fixed lanes. Measured overlapping message pairs in bot matches: 348 to 2 (portrait), 1290 to 1 (landscape). Three callout tiers, combined kill badges, a new Your Turn handoff and ultimate cinematic, HUD chip-down, shard pops, ult sweep, cooldown flashes.
+- World (`js/world.js`): 11 tile materials, board slab, redrawn props, dynamic lighting and contact shadows, a storm that tears the floor into the void, weather (rain, ash, aurora, sand, leaves, void, fog, starfield), path previews with ghost pieces, threat outlines, status icons, shield domes, a cinematic camera with an intro fly-over.
+- Pieces: re-sculpted 3D-lit Staunton forms, a jewelled King, a hooded Hollow and the new Colossus, 16 materials and 11 patterns, animated premium sets, lazy incremental sprite building.
+- Effects: pooled particle core, cached glows, lingering floor decals, impact frames; every ability reworked; 11 new finishers (Resignation, Petal Storm, Riptide, Cyclone, Glitch, Grand Finale, Soul Harvest, Phoenix, Judgement, Supernova, Checkmate). Gallery at `tools/vfx.html`.
+- Music: a composition engine with a recurring main theme, 11 themes and stingers, bar-quantised transitions and ducking.
+- Sound: per-category buses with volume sliders, generated reverbs, unique sounds for every ability, finisher and hazard, rarity-tiered reveals and a synthesised announcer voice.
+- Menus: new visual identity, title scene, a one-time sequel reveal, illustrated mode cards, a loadout showroom, cinematic results, lobby seat cards.
+
+**Store and progression**
+- Mythic rarity; 25 piece sets, 13 boards, 14 trails, 6 emote packs, 10 store finishers; 15 Collections with completion rewards; Featured and Deal of the Day; try-on preview and wishlist; a new reveal sequence.
+- Season 3: The Endgame, a free 40-tier Crown Path (older seasons migrate, owned items stay owned).
+- Daily login streak rewards (never shown over invite links), a Profile screen with showcase, 26 new trophies.
+
+**Performance and fixes**
+- First-tap audio stall (about 1.5 s) removed: audio and music start in idle slices; the tap handler now runs in a few ms.
+- Piece sprite and effect caches are bounded; QA harness in `tests/` (engine fuzzer, browser smoke, perf, leak probe, overlap probe, online suite).
+
 ## 5.0 (November 2026)
 **New modes**
 - **Squads:** teams of two (up to four teams). No friendly fire, shared victory, teammates share a colour. Starting a turn within 2 tiles of your teammate grants Bond (+15% DEF). A fallen teammate leaves a soul for 3 rounds: step on it to revive them at 40% HP, or as an enemy shatter it for a shard.

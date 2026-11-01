@@ -18,6 +18,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Cinzel:wght@600;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/game10.css">
+  <link rel="stylesheet" href="css/ui10.css">
+  <link rel="stylesheet" href="css/menus10.css">
+  <link rel="stylesheet" href="css/store10.css">
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" defer></script>
 </head>
 <body>
@@ -39,17 +43,51 @@
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 5.5v-3l-2.4-.6-.8-1.8 1.3-2.1-2.1-2.1-2.1 1.3-1.8-.8L13.5 2h-3l-.6 2.4-1.8.8L6 3.9 3.9 6l1.3 2.1-.8 1.8L2 10.5v3l2.4.6.8 1.8L3.9 18 6 20.1l2.1-1.3 1.8.8.6 2.4h3l.6-2.4 1.8-.8 2.1 1.3 2.1-2.1-1.3-2.1.8-1.8z"/></symbol>
   </defs>
 </svg>
+<!-- A8 10.0 menu icon set -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="m-play" viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z"/></symbol>
+    <symbol id="m-link" viewBox="0 0 24 24"><path d="M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a1 1 0 1 1 1.4 1.4L12 13.4a1 1 0 0 1-1.4 0zM8.5 20a4.5 4.5 0 0 1-3.2-7.7l2.5-2.5a1 1 0 1 1 1.4 1.4l-2.5 2.5a2.5 2.5 0 0 0 3.5 3.5l2.5-2.5a1 1 0 1 1 1.4 1.4l-2.5 2.5A4.5 4.5 0 0 1 8.5 20zm7.7-6.4a1 1 0 0 1-.7-1.7l2.5-2.5a2.5 2.5 0 0 0-3.5-3.5L12 8.4A1 1 0 1 1 10.6 7l2.5-2.5a4.5 4.5 0 0 1 6.4 6.4L17 13.3a1 1 0 0 1-.8.3z"/></symbol>
+    <symbol id="m-users" viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm8 1a3 3 0 1 1 0-6 3 3 0 0 1 0 6zM2 20c0-3.3 3.1-6 7-6s7 2.7 7 6v1H2zm15.5 1v-1c0-1.9-.7-3.6-1.9-4.9.4-.1.9-.1 1.4-.1 2.8 0 5 1.9 5 4.5V21z"/></symbol>
+    <symbol id="m-bot" viewBox="0 0 24 24"><path d="M11 2h2v3h4a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-2l-3 3-3-3H7a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3h4zm-2 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm6 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></symbol>
+    <symbol id="m-plus" viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></symbol>
+    <symbol id="m-copy" viewBox="0 0 24 24"><path d="M8 3h11a2 2 0 0 1 2 2v11h-2V5H8zM5 7h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/></symbol>
+    <symbol id="m-check" viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7z"/></symbol>
+    <symbol id="m-chev" viewBox="0 0 24 24"><path d="M9 5.5 15.5 12 9 18.5 7.6 17.1 12.7 12 7.6 6.9z"/></symbol>
+    <symbol id="m-crown" viewBox="0 0 24 24"><path d="M3 8l4.5 4L12 4l4.5 8L21 8l-2 11H5zm2 12h14v2H5z"/></symbol>
+    <symbol id="m-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></symbol>
+    <symbol id="m-swords" viewBox="0 0 24 24"><path d="M4 3l7 7-1.5 1.5L3 5V3zm16 0h1v2l-9.5 9.5 1.5 1.5-1.5 1.5-1.5-1.5L7 19.5 4.5 17 8 13.5 6.5 12 8 10.5l1.5 1.5zM15.5 13.5 17 12l1.5 1.5L17 15l3.5 3.5-2 2L15 17l-1.5 1.5L12 17z"/></symbol>
+    <symbol id="m-shield" viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"/></symbol>
+    <symbol id="m-heart" viewBox="0 0 24 24"><path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.9A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z"/></symbol>
+    <symbol id="m-sword" viewBox="0 0 24 24"><path d="M19 2h3v3L10.5 16.5l1.5 1.5-1.5 1.5-1.8-1.8L5 21.5 2.5 19l3.8-3.7-1.8-1.8L6 12l1.5 1.5z"/></symbol>
+    <symbol id="m-wing" viewBox="0 0 24 24"><path d="M3 20c2-8 7-14 18-16-1.5 3-3.5 5-6 6 1.5.2 2.8 0 4-.5-2 3.5-5.2 5.5-9 5.5 1 .5 2.2.7 3.5.6C11 18 7.5 19.6 3 20z"/></symbol>
+    <symbol id="m-castle" viewBox="0 0 24 24"><path d="M3 3h3v2h2V3h3v2h2V3h3v2h2V3h3v7l-2 2v8h1v2H3v-2h1v-8l-2-2zm7 11v6h4v-6a2 2 0 0 0-4 0z"/></symbol>
+    <symbol id="m-sun" viewBox="0 0 24 24"><path d="M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm-1-6h2v4h-2zm0 18h2v4h-2zM1 11h4v2H1zm18 0h4v2h-4zM4.2 5.6l1.4-1.4 2.8 2.8L7 8.4zm11.4 11.4 1.4-1.4 2.8 2.8-1.4 1.4zM4.2 18.4l2.8-2.8 1.4 1.4-2.8 2.8zM15.6 7l2.8-2.8 1.4 1.4L17 8.4z"/></symbol>
+    <symbol id="m-spark" viewBox="0 0 24 24"><path d="M12 1l2.2 7.8L22 11l-7.8 2.2L12 21l-2.2-7.8L2 11l7.8-2.2z"/></symbol>
+    <symbol id="m-flag" viewBox="0 0 24 24"><path d="M5 2h2v20H5zm3 1h11l-2.5 4L19 11H8z"/></symbol>
+    <symbol id="m-news" viewBox="0 0 24 24"><path d="M4 4h13v15a1 1 0 0 0 2 0V8h2v11a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V4zm3 3v4h7V7zm0 6v2h7v-2zm0 4v2h7v-2z"/></symbol>
+    <symbol id="m-skull" viewBox="0 0 24 24"><path d="M12 2c5 0 9 3.6 9 8.5 0 2.7-1.2 4.6-3 5.8V20a2 2 0 0 1-2 2h-1v-2h-2v2h-2v-2H9v2H8a2 2 0 0 1-2-2v-3.7c-1.8-1.2-3-3.1-3-5.8C3 5.6 7 2 12 2zm-3.5 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+    <symbol id="m-target" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm0 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+    <symbol id="m-clock" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm-1 5v6l5 3 1-1.7-4-2.4V7z"/></symbol>
+    <symbol id="m-laurel" viewBox="0 0 64 64"><path d="M20 54c-9-5-14-14-14-25 0-6 2-12 5-16l2 1c-3 4-4 9-4 15 0 10 4 18 12 23zM44 54c9-5 14-14 14-25 0-6-2-12-5-16l-2 1c3 4 4 9 4 15 0 10-4 18-12 23z"/><path d="M8 34c-3-3-4-7-3-10 3 1 5 4 5 8zm2 9c-4-2-6-5-6-9 3 0 6 3 7 7zm5 7c-4-1-7-4-8-7 3-1 7 2 8 6zm-6-24c-2-3-2-7 0-10 2 2 3 6 2 9zm3-8c-1-3 0-6 2-9 2 3 2 6 0 9zM56 34c3-3 4-7 3-10-3 1-5 4-5 8zm-2 9c4-2 6-5 6-9-3 0-6 3-7 7zm-5 7c4-1 7-4 8-7-3-1-7 2-8 6zm6-24c2-3 2-7 0-10-2 2-3 6-2 9zm-3-8c1-3 0-6-2-9-2 3-2 6 0 9z"/></symbol>
+  </defs>
+</svg>
 <div id="app">
 
   <!-- TITLE -->
   <section class="screen active" id="s-title">
+    <div class="title-fx" aria-hidden="true"><i class="shaft s1"></i><i class="shaft s2"></i><i class="shaft s3"></i></div>
     <div class="title-wrap">
-      <div class="kicker">A chess battle royale</div>
-      <h1 class="logo"><span class="logo-a">CHESS</span><span class="logo-b">COMPLEX</span></h1>
-      <div class="logo-line"></div>
+      <div class="hero-slot" id="hero-slot" aria-hidden="true"></div>
+      <div class="brand">
+        <div class="crest" aria-hidden="true"><svg viewBox="0 0 120 120"><defs><linearGradient id="crest-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3cf"/><stop offset=".45" stop-color="#f0c25e"/><stop offset="1" stop-color="#8a5a16"/></linearGradient><linearGradient id="crest-s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b2742"/><stop offset="1" stop-color="#0d0b16"/></linearGradient></defs><path d="M60 6 104 22v34c0 28-19 48-44 58C35 104 16 84 16 56V22z" fill="url(#crest-s)" stroke="url(#crest-g)" stroke-width="3"/><path d="M60 14 96 27v29c0 23-15 40-36 49-21-9-36-26-36-49V27z" fill="none" stroke="rgba(240,194,94,.35)" stroke-width="1"/><path d="M38 44l9 8 13-17 13 17 9-8-5 30H43z" fill="url(#crest-g)"/><path d="M43 79h34v6H43z" fill="url(#crest-g)"/><circle cx="60" cy="31" r="3.5" fill="#fff3cf"/></svg></div>
+        <div class="kicker">A chess battle royale</div>
+        <h1 class="logo"><span class="logo-a">CHESS</span><span class="logo-b">COMPLEX</span></h1>
+        <div class="logo-line"><span class="logo-ten" aria-label="Version 10"><b>10</b></span></div>
+      </div>
       <nav class="menu">
-        <button class="btn big gold shine" data-go="play">Play</button>
-        <button class="btn" data-go="join">Join With Code</button>
+        <button class="btn big gold shine play-cta" data-go="play"><svg class="bi"><use href="#m-play"/></svg><span>Play</span></button>
+        <button class="btn join-cta" data-go="join"><svg class="bi"><use href="#m-link"/></svg><span>Join With Code</span></button>
         <div class="tiles">
           <button class="tile" data-go="loadout"><svg><use href="#i-sig"/></svg><span>Loadout</span></button>
           <button class="tile store" data-go="armory"><svg><use href="#i-eq"/></svg><span>Store</span><i class="badge" id="s-badge"></i></button>
@@ -61,24 +99,32 @@
           <button class="tile" data-go="howto"><svg><use href="#i-help"/></svg><span>Guide</span></button>
         </div>
       </nav>
+      <button class="news-card" id="news-card" data-act="whatsnew"><span class="nc-tag"><svg><use href="#m-news"/></svg>What's New</span><b class="nc-head" id="nc-head">Chess Complex 10.0</b><span class="nc-body" id="nc-body">The sequel is here. Tap to see everything new.</span><svg class="nc-go"><use href="#m-chev"/></svg></button>
     </div>
     <div class="corner-tl">
-      <div class="profile-chip">
+      <div class="profile-chip" data-go="profile" role="button" tabindex="0" aria-label="Profile and collection">
         <div class="lvl" id="t-lvl">1</div>
         <div class="pc-body"><b id="t-title">Recruit</b><div class="xpbar"><i id="t-xp"></i></div></div>
       </div>
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v5.0</div>
+    <div class="version">v10.0</div>
   </section>
 
   <!-- LOADOUT -->
   <section class="screen" id="s-loadout">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Loadout</h2><div></div></header>
-    <div class="scroll">
+    <div class="scroll lo-scroll">
+      <div class="showroom" id="showroom">
+        <canvas id="sr-canvas" aria-hidden="true"></canvas>
+        <div class="sr-head"><small id="sr-kicker">Your build</small><b id="sr-name">Pawn</b></div>
+        <div class="sr-bars" id="sr-bars"></div>
+        <div class="sr-pick" id="sr-pick" role="tablist" aria-label="Preview piece"></div>
+      </div>
+      <div class="lo-main">
       <div class="panel">
-        <label class="lbl">Name</label>
+        <label class="lbl" for="in-name">Name</label>
         <input id="in-name" maxlength="14" autocomplete="off" spellcheck="false">
       </div>
       <div class="panel">
@@ -100,6 +146,7 @@
         <p class="hint">Choose one active ability for each piece. It unlocks when you evolve.</p>
         <div id="equips"></div>
       </div>
+      </div>
     </div>
   </section>
 
@@ -108,24 +155,27 @@
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Store</h2><div class="marks"><i class="mark-ico"></i><b id="marks-armory">0</b></div></header>
     <div class="tabs" id="armory-tabs">
       <button class="tab on" data-tab="featured">Featured</button>
-      <button class="tab" data-tab="bundles">Bundles</button>
+      <button class="tab" data-tab="collections">Collections</button>
       <button class="tab" data-tab="pieces">Pieces</button>
       <button class="tab" data-tab="boards">Boards</button>
       <button class="tab" data-tab="finishers">Finishers</button>
       <button class="tab" data-tab="trails">Trails</button>
       <button class="tab" data-tab="emotes">Emotes</button>
+      <button class="tab" data-tab="wishlist">Wishlist</button>
     </div>
     <div class="scroll">
-      <p class="hint center" id="armory-hint">Earn Marks every match. Spend them here.</p>
-      <div class="skins" id="skins"></div>
+      <div class="hint center" id="armory-hint">Earn Marks every match. Spend them here.</div>
+      <div class="store-body" id="skins"></div>
     </div>
   </section>
 
   <!-- PLAY -->
   <section class="screen" id="s-play">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Play</h2><div class="marks"><i class="mark-ico"></i><b id="marks-play">0</b></div></header>
-    <div class="scroll">
+    <div class="scroll play-scroll">
       <div class="modes" id="modes"></div>
+      <div class="mode-detail" id="mode-detail"></div>
+      <div class="play-opts">
       <div class="panel" id="opt-bots">
         <div class="lbl">Opponents <span class="pts" id="bot-n">7</span></div>
         <input type="range" id="in-bots" min="1" max="7" value="7">
@@ -135,10 +185,13 @@
         <div class="seg" id="seg-diff"><button data-diff="easy">Easy</button><button data-diff="normal">Normal</button><button data-diff="hard">Hard</button></div>
       </div>
       <div class="panel daily-panel hidden" id="opt-daily"></div>
-      <div class="panel loadout-mini" id="solo-loadout"></div>
+      <div class="panel loadout-mini" id="solo-loadout" data-go="loadout" role="button" tabindex="0" aria-label="Edit loadout"></div>
+      </div>
+    </div>
+    <div class="play-foot">
       <div class="row2 play-btns">
-        <button class="btn big gold shine" data-act="start-solo" id="btn-solo">Play vs Bots</button>
         <button class="btn big" data-go="host" id="btn-host">Host Online</button>
+        <button class="btn big gold shine" data-act="start-solo" id="btn-solo">Play vs Bots</button>
       </div>
     </div>
   </section>
@@ -177,6 +230,10 @@
         <ul class="lobby" id="join-lobby"></ul>
         <p class="hint center">Waiting for the host to start...</p>
       </div>
+      <div class="panel join-help">
+        <div class="lbl">How it works</div>
+        <ol class="steps"><li><svg><use href="#m-users"/></svg><span>A friend taps <b>Play</b>, picks a mode and taps <b>Host Online</b>.</span></li><li><svg><use href="#m-copy"/></svg><span>They share the 5-letter code or an invite link.</span></li><li><svg><use href="#m-link"/></svg><span>Enter the code above. You'll wait in their lobby until the match starts.</span></li></ol>
+      </div>
     </div>
   </section>
 
@@ -204,15 +261,12 @@
   <!-- CROWN PATH -->
   <section class="screen" id="s-path">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Crown Path</h2><div class="marks"><i class="mark-ico"></i><b id="marks-path">0</b></div></header>
-    <div class="scroll">
-      <div class="season-head"><div class="sh-name" id="season-name"></div><div class="sh-tier"><span class="lvl" id="season-tier">0</span><div><b id="season-tier-label"></b><div class="xpbar big"><i id="season-bar"></i></div><em id="season-xp"></em></div></div><p class="hint">Earn season XP from every match. All 30 tiers are free.</p></div>
-      <div class="track" id="season-track"></div>
-    </div>
+    <div class="scroll" id="path-body"></div>
   </section>
 
   <!-- TROPHIES -->
   <section class="screen" id="s-trophies">
-    <header class="bar"><button class="back" data-go="title">Back</button><h2>Trophies</h2><div></div></header>
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Trophies</h2><button class="hdr-btn" data-go="profile">Profile</button></header>
     <div class="scroll">
       <div class="panel">
         <div class="lbl">Title <span class="pts" id="title-count"></span></div>
@@ -223,12 +277,19 @@
         <div class="mastery" id="mastery-list"></div>
       </div>
       <div class="lbl" style="padding: 0 4px">Achievements <span class="pts" id="ach-count"></span></div>
+      <div class="ach-cats" id="ach-cats"></div>
       <div id="ach-list"></div>
       <div class="panel" style="margin-top:12px">
         <div class="lbl">Career</div>
         <div class="career" id="career2"></div>
       </div>
     </div>
+  </section>
+
+  <!-- PROFILE (A7) -->
+  <section class="screen" id="s-profile">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Profile</h2><button class="hdr-btn" data-go="armory">Store</button></header>
+    <div class="scroll" id="profile-body"></div>
   </section>
 
   <!-- QUESTS -->
@@ -253,7 +314,9 @@
       <div class="panel"><h3>Evolve</h3><p>Collect Promotion Shards from the floor, crates, Hollows and fallen players. Spend them to evolve: Pawn, then Knight or Bishop, then Rook, then Queen. Or Hone your current piece for +15% stats and a stronger signature, so you can stay your favourite piece all game.</p></div>
       <div class="panel"><h3>Attunement</h3><p>Every shard you pick up also attunes you, permanently: +1% HP, +0.8% ATK and +0.5% DEF per shard, plus +1 SPD every 6 shards, up to 30. Spending shards never removes attunement, so keep collecting even after you max out your piece. Every 5 attunement adds an orbiting crystal so everyone can see how strong you are.</p></div>
       <div class="panel"><h3>Ultimates</h3><p>Dealing and taking damage charges your Ultimate. When the gold button is full, unleash your piece's ultimate: En Passant, Fork, Excommunicate, Castling, Checkmate Nova, or the King's Divine Right.</p></div>
-      <div class="panel"><h3>World events</h3><p>Every third round something happens: Shard Rain, a Meteor Storm (get off the marked tiles), a Blood Moon that boosts all damage, or a Supply Drop cache worth breaking open.</p></div>
+      <div class="panel"><h3>World events</h3><p>Every third round something happens: Shard Rain, a Meteor Storm (get off the marked tiles), a Blood Moon that boosts all damage, or a Supply Drop cache worth breaking open. Later in the match: an Eclipse that hides distant pieces, Earthquakes that crack walls, a Mana Surge that charges every ultimate, a Royal Decree bounty on the leader, War Drums that speed everyone up, and the Restless Dead.</p></div>
+      <div class="panel"><h3>Hazards</h3><p>Many boards roll a hazard theme: lava, ice, portals, geyser vents that erupt every few rounds, conveyor tracks that carry pieces, cracked floor that collapses on the second step, or a rift storm that swaps two players. Chaos mode stacks two at once.</p></div>
+      <div class="panel"><h3>More ways to play</h3><p>King of the Hill: start your turn on the golden Throne to score, first to 10. Chaos: two hazards and a world event every round. Gauntlet: a co-op boss rush ending with the Wraith Regent and a Colossus together. Mirror Match: everyone gets the same random build.</p></div>
       <div class="panel"><h3>The board</h3><p>Walls block movement and shots. Rubble and crates break. Brambles stop slides and slow you down. Shrines heal once, then recharge. Hollows guard shard caches.</p></div>
       <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later. Standing in the void burns 20% of your HP every turn. Once the board is fully closed, everyone burns.</p></div>
       <div class="panel"><h3>The Crown</h3><p>On round 7 the Crown appears at the centre. Whoever takes it becomes the King: more HP, steady healing, but slow single steps. Kill the King and the Crown drops.</p></div>
@@ -367,15 +430,19 @@
     </div>
     <div role="dialog" aria-modal="true" class="modal hidden" id="m-results">
       <canvas id="confetti"></canvas>
-      <div class="modal-box results">
-        <div class="podium hidden" id="podium"></div>
+      <div class="modal-box results" id="r-box">
+        <div class="r-rays" aria-hidden="true"></div>
+        <div class="r-rank" id="r-rank" aria-hidden="true"></div>
         <div class="r-title" id="r-title"></div>
         <div class="r-place" id="r-place"></div>
+        <div class="podium hidden" id="podium"></div>
         <div class="r-stats" id="r-stats"></div>
+        <div class="r-sec" aria-hidden="true"><span>Rewards</span></div>
         <div class="r-xp"><div class="r-xp-top"><span class="lvl small" id="r-lvl">1</span><span id="r-xptext"></span></div><div class="xpbar big"><i id="r-xpbar"></i></div><div class="r-levelup hidden" id="r-levelup">Level Up</div></div>
         <div class="r-marks" id="r-marks"></div>
         <div class="r-recap hidden" id="r-recap"></div>
         <div class="r-quests" id="r-quests"></div>
+        <div class="r-sec" aria-hidden="true"><span>Standings</span></div>
         <ol class="r-board" id="r-board"></ol>
         <button class="btn wide potm hidden" data-act="potm" id="btn-potm">Play of the Match</button>
         <div class="row2"><button class="btn big gold wide shine hidden" data-act="keep-spectating" id="btn-keepspec">Spectate</button><button class="btn big wide" data-act="to-title" id="btn-menu">Menu</button><button class="btn big gold wide shine" data-act="rematch" id="btn-rematch">Play Again</button></div>
@@ -391,6 +458,12 @@
     <div class="set-sec">Audio</div>
     <div class="setting"><span>Music</span><input type="range" min="0" max="1" step="0.05" id="set-music"></div>
     <div class="setting"><span>Sound Effects</span><input type="range" min="0" max="1" step="0.05" id="set-sfx"></div>
+    <details class="set-more"><summary>Sound mix</summary>
+      <div class="setting sub"><span>Interface</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxUi" aria-label="Interface volume"></div>
+      <div class="setting sub"><span>Combat</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxCombat" aria-label="Combat volume"></div>
+      <div class="setting sub"><span>World</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxWorld" aria-label="World volume"></div>
+      <div class="setting sub"><span>Announcer</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxVoice" aria-label="Announcer volume"></div>
+    </details>
     <div class="set-sec">Feel</div>
     <label class="setting toggle"><span>Screen Shake</span><input type="checkbox" id="set-shake"><i></i></label>
     <label class="setting toggle"><span>Vibration</span><input type="checkbox" id="set-haptics"><i></i></label>
@@ -408,12 +481,25 @@
 </div>
 <div role="dialog" aria-modal="true" class="modal hidden global" id="m-reveal">
   <div class="modal-box reveal-box">
-    <div class="rv-new">NEW ITEM</div>
+    <div class="rv-new" id="rv-new">NEW ITEM</div>
     <canvas id="rv-canvas"></canvas>
+    <div class="rv-tap">Tap to open</div>
     <div class="rv-rar" id="rv-rar"></div>
     <div class="rv-name" id="rv-name"></div>
-    <button class="btn big gold wide shine" id="rv-equip">Equip now</button>
-    <button class="btn wide ghost" data-act="close-reveal">Later</button>
+    <div class="rv-acts"><button class="btn big gold wide shine" id="rv-equip">Equip now</button>
+    <button class="btn wide ghost" id="rv-close">Later</button></div>
+  </div>
+</div>
+<div role="dialog" aria-modal="true" aria-label="Item" class="modal hidden global" id="m-item">
+  <div class="modal-box item-box" id="mi-body"></div>
+</div>
+<div role="dialog" aria-modal="true" aria-label="Daily reward" class="modal hidden global" id="m-login">
+  <div class="modal-box login-box">
+    <div class="lg-k">Daily Reward</div>
+    <h3 id="lg-streak">Welcome back</h3>
+    <div class="lg-days" id="lg-days"></div>
+    <p class="hint center">Log in on consecutive days to climb the streak. Day 7 is the big one, then the week repeats.</p>
+    <button class="btn big gold wide shine" id="lg-claim">Claim</button>
   </div>
 </div>
 <div role="dialog" aria-modal="true" class="modal hidden global" id="m-confirm">
@@ -434,6 +520,7 @@
 <div class="splash" id="splash"><img src="icons/icon-192.png" alt=""><div class="sp-name">CHESS COMPLEX</div><div class="sp-bar"><i></i></div></div>
 <div class="toast" id="toast"></div>
 <div class="flash" id="ui-flash"></div>
+<div class="ui-wipe" id="ui-wipe" aria-hidden="true"></div>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

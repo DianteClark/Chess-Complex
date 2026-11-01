@@ -1,10 +1,11 @@
 // Codex: skill breakdowns with shape diagrams generated from the real rules engine.
-import { PIECES, ABILITIES, PASSIVES, EVOLVE_COST, honeCost, COMBOS, DISCOVERIES, WORLD_EVENTS, ATTUNE, STAT_GAIN } from './data.js';
+import { PIECES, ABILITIES, PASSIVES, EVOLVE_COST, honeCost, COMBOS, DISCOVERIES, WORLD_EVENTS, ATTUNE, STAT_GAIN, MUTATORS, MODES } from './data.js';
 import { abilityOptions, legalMoves } from './engine.js';
 import { drawPiece, pieceIcon } from './pieces.js';
 
 const ORDER = ['pawn', 'knight', 'bishop', 'rook', 'queen', 'king'];
-const TARGETS = { shove: [[1, 0]], pickpocket: [[1, 0]], transpose: [[2, -2]], castling: [[0, -3]], execute: [[2, 1]], charge: [[0, -3]], siege: [[0, -4]], penance: [[3, -3]] };
+const TARGETS = { shove: [[1, 0]], pickpocket: [[1, 0]], transpose: [[2, -2]], castling: [[0, -3]], execute: [[2, 1]], charge: [[0, -3]], siege: [[0, -4]], penance: [[3, -3]],
+  phalanx: [[0, -1]], outflank: [[1, -2]], consecrate: [[2, -2]], repel: [[1, 0]], bombard: [[0, -3]], gravity: [[2, -2]] };
 
 function synthState(piece, abilityId) {
   const tiles = []; for (let i = 0; i < 256; i++) tiles.push({ t: 'floor' });
@@ -36,7 +37,7 @@ export function diagram(piece, abilityId, px = 108, skin = 'ivory') {
     for (const o of opts) tiles.push(...o.tiles);
     if (best) { show = best.tiles; anchor = best.anchor; util = !(best.mult > 0); }
   }
-  const pts = [...tiles, ...moves, ...s.units.filter((v) => v !== u), ...(u.mark ? [u.mark] : [])];
+  const pts = [...tiles, ...moves, ...s.units.filter((v) => v !== u), ...(u.mark ? [u.mark] : []), ...(abilityId === 'gravity' ? [{ x: 11, y: 11 }] : [])];
   const maxd = pts.reduce((m, p) => Math.max(m, Math.abs(p.x - 8), Math.abs(p.y - 8)), 1);
   const W = Math.min(11, Math.max(5, 2 * maxd + 3)), C = (W - 1) / 2;
   const c = document.createElement('canvas');
@@ -49,6 +50,7 @@ export function diagram(piece, abilityId, px = 108, skin = 'ivory') {
   for (let yy = 0; yy < W; yy++) for (let xx = 0; xx < W; xx++) { x.fillStyle = (xx + yy) % 2 ? '#1c1928' : '#2a2638'; x.fillRect(xx * t, yy * t, t, t); }
   const fill = (list, col) => { x.fillStyle = col; for (const p of list) if (inWin(p)) { const [a, b] = toPx(p); x.fillRect(a + 1, b + 1, t - 2, t - 2); } };
   if (moves.length) fill(moves, 'rgba(93,200,255,0.55)');
+  if (abilityId === 'gravity') { const area = []; for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) >= 2) area.push({ x: 8 + dx, y: 8 + dy }); fill(area, 'rgba(180,140,255,0.2)'); } // pull radius
   fill(tiles, util ? 'rgba(180,140,255,0.16)' : 'rgba(255,90,90,0.16)');
   fill(show, util ? 'rgba(180,140,255,0.7)' : 'rgba(255,80,80,0.72)');
   if (anchor && inWin(anchor) && !(anchor.x === 8 && anchor.y === 8)) { const [a, b] = toPx(anchor); x.strokeStyle = '#ffe3a1'; x.lineWidth = 1.5; x.strokeRect(a + 1.5, b + 1.5, t - 3, t - 3); }
@@ -90,7 +92,7 @@ export function renderCodex(tab, el, profile) {
       <div class="panel"><div class="lbl">Promotion</div><div class="cx-line"><p>The ladder is fixed: Pawn, then Knight or Bishop (${EVOLVE_COST[2]}), then Rook (${EVOLVE_COST[3]} more), then Queen (${EVOLVE_COST[4]} more). The Promote menu shows every rung, and you can climb several at once if you have the shards: Pawn straight to Rook is ${EVOLVE_COST[2] + EVOLVE_COST[3]}, straight to Queen ${EVOLVE_COST[2] + EVOLVE_COST[3] + EVOLVE_COST[4]}. Promoting never costs your action. Climbing in one jump costs the same as climbing step by step, so there is never a reason to save: Knight now plus Rook later is the same total. Or Hone your current piece for +15% stats per level and a stronger Signature (Pawn ${honeCost(0, 1)}/${honeCost(1, 1)}/${honeCost(2, 1)}, Knight or Bishop ${honeCost(0, 2)}/${honeCost(1, 2)}/${honeCost(2, 2)}, Rook ${honeCost(0, 3)}/${honeCost(1, 3)}/${honeCost(2, 3)}, Queen ${honeCost(0, 4)}/${honeCost(1, 4)}/${honeCost(2, 4)}). Hone levels stay with that piece. Before round 6 a player at full HP cannot be eliminated by a single hit (Steadfast).</p></div></div>
       <div class="panel"><div class="lbl">The Storm</div><div class="cx-line"><p>From round 5 the outer ring cracks, then collapses a round later, every 3 rounds. The void burns 20% max HP per turn. When the board is fully closed, everyone burns 6% per turn.</p></div></div>
       <div class="panel"><div class="lbl">The Crown</div><div class="cx-line"><p>Appears on round 7 somewhere safe. The holder becomes the King: more HP, healing every turn, single steps, and a new ultimate. A Knight or Bishop who claims it with 4+ players left is lifted to near-Rook strength. Kill the King and the Crown shatters into 4 shards: there is only ever one King per match.</p></div></div>
-      <div class="panel"><div class="lbl">World Events</div>${Object.values(WORLD_EVENTS).map((w) => `<div class="cx-line"><b>${w.name}</b><p>${w.desc}.</p></div>`).join('')}<p class="hint">One hits every third round, starting on round 3.</p></div>
+      <div class="panel"><div class="lbl">World Events</div>${Object.values(WORLD_EVENTS).map((w) => `<div class="cx-line"><b>${w.name}</b><p>${w.desc}.</p></div>`).join('')}<p class="hint">One hits every third round, starting on round 3 (every round in Chaos). Meteors, Blood Moon, Eclipse, the Royal Decree and the Restless Dead wait until round 6.</p></div>
       <div class="panel"><div class="lbl">Terrain</div>
         <div class="cx-line"><b>Walls</b><p>Block movement, slides and most shots.</p></div>
         <div class="cx-line"><b>Rubble</b><p>Blocks until broken (2 hits). Rook Ramparts are sturdier rubble.</p></div>
@@ -101,7 +103,14 @@ export function renderCodex(tab, el, profile) {
       <div class="panel"><div class="lbl">Map Hazards</div><p class="hint">Most Royale, Blitz and Squads matches roll one hazard theme, announced at the start.</p>
         <div class="cx-line"><b>Magma Rift</b><p>Lava pools burn 8% max HP to anyone who starts a turn on them. Great places to shove people.</p></div>
         <div class="cx-line"><b>Frostbite</b><p>Anything that lands on ice keeps sliding in the same direction, up to 3 tiles. Pushes slide too.</p></div>
-        <div class="cx-line"><b>Warpgates</b><p>Two pairs of portals on opposite sides of the board. Step in and you arrive at the partner gate if it is free.</p></div></div>
+        <div class="cx-line"><b>Warpgates</b><p>Two pairs of portals on opposite sides of the board. Step in and you arrive at the partner gate if it is free.</p></div>
+        <div class="cx-line"><b>${MUTATORS.geysers.name}</b><p>Vents bubble for a round (watch for steam), then erupt at the end of the next: 10% max HP to the vent and the four tiles beside it, and whoever stands on the vent is thrown two tiles.</p></div>
+        <div class="cx-line"><b>${MUTATORS.conveyor.name}</b><p>Conveyor tracks move anything standing on them one tile along the arrows at the end of every round. Ride them, or park an enemy on one that runs into lava.</p></div>
+        <div class="cx-line"><b>${MUTATORS.crumble.name}</b><p>Cracked floor holds the first step, then gives way under the second: 12% max HP and you tumble to the nearest safe tile. The hole becomes a pit that blocks movement and shots.</p></div>
+        <div class="cx-line"><b>${MUTATORS.rift.name}</b><p>Every third round two random players swap places, wherever they are.</p></div>
+        <p class="hint">Chaos mode stacks two of these on the same board.</p></div>
+      <div class="panel"><div class="lbl">Modes</div>${['hill', 'chaos', 'gauntlet', 'mirror'].filter((k) => MODES[k]).map((k) => `<div class="cx-line"><b>${MODES[k].name}</b><p>${MODES[k].desc}</p></div>`).join('')}
+        <div class="cx-line"><b>The Throne</b><p>The golden 4x4 dais at the centre. In King of the Hill you score at the start of each of your turns on it. The storm still closes, so late in the match only the middle four tiles remain.</p></div></div>
       <div class="panel"><div class="lbl">Squads</div>
         <div class="cx-line"><b>No friendly fire</b><p>Your attacks pass over your teammate. Area attacks are safe to throw next to them.</p></div>
         <div class="cx-line"><b>Bond</b><p>Start your turn within 2 tiles of a teammate for +15% DEF.</p></div>
@@ -109,7 +118,13 @@ export function renderCodex(tab, el, profile) {
       <div class="panel"><div class="lbl">Siege</div>
         <div class="cx-line"><b>Waves</b><p>Eight waves of Hollows come from the edges and hunt you down, growing faster and tougher each wave. The next wave arrives one round after you clear the last, or after 4 rounds; Hollows still standing count against its size. To win, clear the last wave and beat the Elder Colossus.</p></div>
         <div class="cx-line"><b>Colossus</b><p>Waves 4 and 8 bring a Colossus that slams every tile around it. The first one drops the Crown.</p></div>
-        <div class="cx-line"><b>Holding on</b><p>Clearing a wave heals everyone 20%. Fallen allies leave souls just like in Squads.</p></div></div>`;
+        <div class="cx-line"><b>Holding on</b><p>Clearing a wave heals everyone 20%. Fallen allies leave souls just like in Squads.</p></div>
+        <div class="cx-line"><b>Stalker</b><p>From wave 3. Fast and frail: moves twice a turn.</p></div>
+        <div class="cx-line"><b>Hexer</b><p>From wave 4. Keeps its distance and fires Hex Bolts down any straight or diagonal line, 3 tiles.</p></div>
+        <div class="cx-line"><b>Splitter</b><p>From wave 5. Bursts into two Mites when it falls. Clear the Mites too.</p></div>
+        <div class="cx-line"><b>Brute</b><p>From wave 6. Slow, heavy, and wears a shield that soaks damage until it breaks.</p></div>
+        <div class="cx-line"><b>Wraith Regent</b><p>Gauntlet boss. Blinks to a fresh firing line and throws a Soul Lance 5 tiles in any direction. Below half HP it raises two minions.</p></div>
+        <div class="cx-line"><b>Enrage</b><p>A boss fight that drags on makes the boss faster and stronger every round. Do not stall.</p></div></div>`;
   } else if (tab === 'combos') {
     const found = profile.discovered || [];
     el.innerHTML = `<p class="hint center">A few starting ideas. The best combos are yours to find.</p>

@@ -25,7 +25,8 @@ class Run {
     p.on('console', (m) => { if (m.type() === 'error' && !/unpkg|peerjs|ERR_FAILED|Failed to load resource/i.test(m.text())) this.errors.push(`[${label}] console: ${m.text()}`); });
     await p.goto(BASE + '?net=local', { waitUntil: 'load' });
     await p.waitForFunction(() => window.__cc && window.__cc.game, null, { timeout: 15000 });
-    await p.evaluate(() => { window.__toasts = []; const t = document.querySelector('#toast'); new MutationObserver(() => { if (t.textContent) window.__toasts.push(t.textContent); }).observe(t, { childList: true, characterData: true, subtree: true }); });
+    // 10.0: in a match toast() is routed to the Director hint lane (#gm-tip), so watch both
+    await p.evaluate(() => { window.__toasts = []; for (const sel of ['#toast', '#gm-tip']) { const t = document.querySelector(sel); if (!t) continue; new MutationObserver(() => { const s = t.textContent.trim(); if (s && window.__toasts[window.__toasts.length - 1] !== s) window.__toasts.push(s); }).observe(t, { childList: true, characterData: true, subtree: true }); } });
     await sleep(900); // splash
     this.pages[label] = p;
     return p;

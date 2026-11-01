@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chess Complex - VFX gallery</title>
+<style>
+  html, body { margin: 0; background: #07060b; color: #e8e2f0; font: 13px/1.3 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 10px; background: #12101acc; backdrop-filter: blur(6px); border-bottom: 1px solid #2a2638; }
+  header b { color: #ffd24d; margin-right: 8px; }
+  button { background: #1c1928; color: #e8e2f0; border: 1px solid #3a3450; border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer; }
+  button.on { background: #ffd24d; color: #1a1626; border-color: #ffd24d; }
+  #stats { margin-left: auto; font-variant-numeric: tabular-nums; color: #9d97b3; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <b>VFX gallery</b>
+  <button data-set="all" class="on">All</button><button data-set="ability">Abilities</button><button data-set="finisher">Finishers</button><button data-set="event">Events</button>
+  <span style="width:10px"></span>
+  <button id="b-low">Low quality</button><button id="b-calm">Reduced motion</button><button id="b-pause">Pause</button><button id="b-slow">Slow x0.25</button>
+  <span id="stats"></span>
+</header>
+<canvas id="cv"></canvas>
+<script type="module">
+import { FX, FINISHER_LEN, hiSprite } from '../js/fx.js';
+import { PIECES, ABILITIES, FINISHERS, SIZE } from '../js/data.js';
+import { createMatch, abilityOptions, spawnDummy, slotAbility } from '../js/engine.js';
+
+const Q = new URLSearchParams(location.search);
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let set = Q.get('set') || 'all', lowQ = Q.has('low'), calm = Q.has('calm'), paused = false, slow = false;
+const only = Q.get('id'), cols0 = +Q.get('cols') || 0;
+if (Q.has('bare')) document.querySelector('header').style.display = 'none';
+
+// ---------- build ability scenarios from the real engine targeting ----------
+function scenario(ab) {
+  const s = createMatch([{ pid: 'a', name: 'A', skin: 'ivory', build: { pts: { hp: 0, atk: 0, def: 0, spd: 0 }, passive: 'regen', equips: {} } }], 11);
+  for (let i = 0; i < s.tiles.length; i++) s.tiles[i] = { t: 'floor' };
+  s.items = []; s.storm.ring = 0;
+  const u = s.units.find((q) => q.kind === 'player'); s.units = [u]; u.x = 8; u.y = 8;
+  let slot = null;
+  const HR = { hollowClaw: [null, 'atk'], colossusSlam: ['boss', 'atk'], hexBolt: ['caster', 'atk'], soulLance: ['regent', 'atk'], wraithStep: ['regent', 'sig'] };
+  if (HR[ab]) { u.kind = 'hollow'; u.boss = HR[ab][0] === 'boss'; u.role = HR[ab][0]; u.piece = u.boss ? 'rook' : 'pawn'; slot = HR[ab][1]; }
+  else for (const [pc, P] of Object.entries(PIECES)) {
+    if (P.attack === ab) { u.piece = pc; slot = 'atk'; break; } if (P.sig === ab) { u.piece = pc; slot = 'sig'; break; } if (P.ult === ab) { u.piece = pc; slot = 'ult'; break; }
+    if ((P.equips || []).includes(ab)) { u.piece = pc; u.equips[pc] = ab; slot = 'eq'; break; }
+  }
+  if (!slot) return null;
+  if (u.piece === 'king') u.kingStats = { hp: 150, atk: 20, def: 10, spd: 10 };
+  for (const [dx, dy] of [[1, -1], [2, 0], [-2, -2], [0, -3], [3, 2], [-1, 2]]) spawnDummy(s, 8 + dx, 8 + dy, 40);
+  if (u.role === 'caster' || u.role === 'regent') for (const q of s.units) if (q !== u) q.kind = 'player';
+  let opts = abilityOptions(s, u, slot);
+  if (!opts.length) return null;
+  opts = opts.slice().sort((a, b) => (b.hits || []).length - (a.hits || []).length);
+  const o = opts.find((q) => q.anchor.x >= 8 && q.anchor.y <= 8 && (q.hits || []).length) || opts[0];
+  const ev = { e: 'ability', id: u.id, ab, slot, anchor: o.anchor, from: { x: 8, y: 8 }, tiles: o.tiles, n: (o.hits || []).length };
+  return { ev, units: s.units.map((q) => ({ x: q.x, y: q.y, piece: q.piece, hollow: q.kind === 'hollow', me: q === u })), ult: slot === 'ult' };
+}
+
+const cells = [];
+for (const ab of Object.keys(ABILITIES)) { const sc = scenario(ab); if (sc) cells.push({ type: 'ability', id: ab, name: ABILITIES[ab].name || ab, sc, period: sc.ult ? 2.8 : 2.0 }); }
+for (const id of Object.keys(FINISHERS)) cells.push({ type: 'finisher', id, name: FINISHERS[id].name, period: (FINISHER_LEN[id] || 1.5) + 0.9 });
+const EVENTS = {
+  'hit': (f) => f.hit(8.5, 8.45, { n: 12, ang: 0 }),
+  'hit big': (f) => f.hit(8.5, 8.45, { n: 30, ang: 0 }),
+  'hit crit': (f) => f.hit(8.5, 8.45, { n: 40, crit: true, ang: 0 }),
+  'hit fire': (f) => f.hit(8.5, 8.45, { elem: 'fire' }),
+  'hit ice': (f) => f.hit(8.5, 8.45, { elem: 'ice', n: 14 }),
+  'hit thorns': (f) => f.hit(8.5, 8.45, { elem: 'thorns' }),
+  'ult charge': (f) => f.ultCharge(8.5, 8.5, '#ffd24d', '#ffe9a8'),
+  'promote': (f) => f.promote(8.5, 8.86, '#4dabff', '#7fe0ff'),
+  'crowned': (f) => f.promote(8.5, 8.86, '#ffd24d', '#ffe9a8', { crowned: true }),
+  'crown spawn': (f) => f.crownSpawn(8.5, 8.62),
+  'revive': (f) => f.revive(8.5, 8.86, '#5cff9d'),
+  'wave spawn': (f) => { f.waveSpawn(7.5, 8.62); f.after(0.1, () => f.waveSpawn(9.5, 7.62)); f.after(0.2, () => f.waveSpawn(8.5, 10.62)); },
+  'boss spawn': (f) => f.waveSpawn(8.5, 8.62, true),
+  'meteor': (f) => f.meteor(8.5, 9.1, 0, '#ff8a3d'),
+  'firework': (f) => f.firework(8.5, 6.5, '#c77dff'),
+  'geyser': (f) => f.event({ e: 'hazard', kind: 'geyser', phase: 'erupt', centers: [{ x: 8, y: 8 }], tiles: [{ x: 8, y: 8 }, { x: 9, y: 8 }, { x: 7, y: 8 }, { x: 8, y: 9 }, { x: 8, y: 7 }] }),
+  'earthquake': (f) => f.event({ e: 'world', kind: 'earthquake', tiles: [{ x: 7, y: 8 }, { x: 9, y: 9 }, { x: 8, y: 6 }] }),
+  'rift swap': (f) => f.event({ e: 'hazard', kind: 'rift', from: { x: 6, y: 9 }, to: { x: 10, y: 7 } }),
+};
+for (const k of Object.keys(EVENTS)) cells.push({ type: 'event', id: k, name: k, period: k.startsWith('hit') ? 1.2 : 2.4 });
+for (const c of cells) { c.fx = new FX(); c.t = 0; c.loop = -1; }
+
+let vis = [];
+function layout() {
+  vis = cells.filter((c) => (set === 'all' || c.type === set) && (!only || c.id === only));
+  const W = innerWidth, cols = cols0 || Math.max(1, Math.min(vis.length, Math.floor(W / 250))), cw = Math.floor(W / cols), ch = Math.round(cw * 0.86);
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  cv.width = W * dpr; cv.height = Math.ceil(vis.length / cols) * ch * dpr; cv.style.width = W + 'px'; cv.style.height = cv.height / dpr + 'px';
+  vis.forEach((c, i) => { c.rx = (i % cols) * cw; c.ry = Math.floor(i / cols) * ch; c.rw = cw; c.rh = ch; });
+  layout.dpr = dpr;
+  if (paused && vis.length) { ctx.setTransform(1, 0, 0, 1, 0, 0); for (const c of vis) drawCell(c); }
+}
+function fire(c) {
+  const f = c.fx; f.reset(); f.lowQ = lowQ; f.reduced = calm; f.cap = lowQ ? 260 : 600;
+  if (c.type === 'ability') {
+    const run = () => f.ability(c.sc.ev, '#4dabff', '#ffe9a8');
+    if (c.sc.ult) { f.ultCharge(8.5, 8.5, '#ffd24d', '#ffe9a8'); f.after(0.8, run); } else run();
+  } else if (c.type === 'finisher') f.finisher(c.id, 8.5, 8.86, 'rook', 'ivory', '#ffe7a8');
+  else EVENTS[c.id](f);
+}
+function step(c, dt) {
+  c.t += dt;
+  const loop = Math.floor(c.t / c.period);
+  if (loop !== c.loop) { c.loop = loop; fire(c); }
+  c.fx.update(dt);
+}
+const board = document.createElement('canvas');
+function drawCell(c) {
+  const dpr = layout.dpr, span = 7.2, sc = c.rw / span;
+  ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.beginPath(); ctx.rect(c.rx, c.ry, c.rw, c.rh); ctx.clip();
+  ctx.fillStyle = '#0d0b13'; ctx.fillRect(c.rx, c.ry, c.rw, c.rh);
+  ctx.translate(c.rx + c.rw / 2, c.ry + c.rh * 0.52); ctx.scale(sc, sc); ctx.translate(-8.5, -8.3);
+  for (let y = 3; y < 14; y++) for (let x = 3; x < 14; x++) { ctx.fillStyle = (x + y) % 2 ? '#1c1928' : '#2a2638'; ctx.fillRect(x, y, 1, 1); }
+  const f = c.fx;
+  f.drawGround(ctx);
+  const local = (c.t % c.period);
+  const units = c.type === 'ability' ? c.sc.units : c.type === 'finisher' ? (local < 0.05 || local > c.period - 0.4 ? [{ x: 8, y: 8, piece: 'rook' }] : []) : (c.id.startsWith('hit') ? [{ x: 8, y: 8, piece: 'knight' }] : []);
+  for (const u of units.slice().sort((a, b) => a.y - b.y)) {
+    const img = hiSprite(u.piece, u.hollow ? 'obsidian' : u.me ? 'ivory' : 'obsidian');
+    ctx.save(); ctx.translate(u.x + 0.5, u.y + 0.86); ctx.scale(1 / 160 * (u.me ? 1 : 0.85), 1 / 160 * (u.me ? 1 : 0.85)); ctx.globalAlpha = u.me ? 1 : 0.8; ctx.drawImage(img, -96, -224); ctx.restore();
+  }
+  f.drawAbove(ctx);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (f.screenFlash > 0.01 && !calm) { ctx.globalAlpha = f.screenFlash * 0.6; ctx.fillStyle = f.flashColor; ctx.fillRect(c.rx, c.ry, c.rw, c.rh); ctx.globalAlpha = 1; }
+  ctx.fillStyle = 'rgba(7,6,11,0.75)'; ctx.fillRect(c.rx, c.ry + c.rh - 20, c.rw, 20);
+  ctx.fillStyle = c.type === 'finisher' ? '#ffd24d' : c.type === 'event' ? '#7fe0ff' : '#e8e2f0'; ctx.font = '600 12px system-ui'; ctx.textBaseline = 'middle';
+  ctx.fillText(`${c.name}  (${c.id})`, c.rx + 8, c.ry + c.rh - 10);
+  ctx.fillStyle = '#6b6582'; ctx.textAlign = 'right'; ctx.fillText(f.parts.length + 'p', c.rx + c.rw - 8, c.ry + c.rh - 10); ctx.textAlign = 'left';
+  ctx.strokeStyle = '#2a2638'; ctx.strokeRect(c.rx + 0.5, c.ry + 0.5, c.rw - 1, c.rh - 1);
+  ctx.restore();
+}
+function frame(dt) {
+  for (const c of vis) step(c, dt);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+  for (const c of vis) drawCell(c);
+}
+// deterministic seek for screenshots: window.seek(t) restarts every cell and simulates t seconds at 60 Hz
+window.seek = (t) => { for (const c of vis) { c.t = 0; c.loop = -1; } const n = Math.round(t * 60); for (let i = 0; i < n; i++) for (const c of vis) step(c, 1 / 60); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); for (const c of vis) drawCell(c); paused = true; };
+window.cells = cells;
+layout();
+let last = performance.now(), ft = 16;
+function loop(now) {
+  const real = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!paused) { const t0 = performance.now(); frame(real * (slow ? 0.25 : 1)); ft = ft * 0.9 + (performance.now() - t0) * 0.1; }
+  const total = vis.reduce((a, c) => a + c.fx.parts.length, 0);
+  document.getElementById('stats').textContent = `${vis.length} effects  ${total} particles  ${ft.toFixed(1)} ms/frame`;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+addEventListener('resize', () => { if (innerWidth !== layout.w) { layout.w = innerWidth; layout(); } });
+document.querySelectorAll('[data-set]').forEach((b) => b.onclick = () => { set = b.dataset.set; document.querySelectorAll('[data-set]').forEach((x) => x.classList.toggle('on', x === b)); layout(); });
+const tog = (id, fn) => { const b = document.getElementById(id); b.onclick = () => { b.classList.toggle('on', fn()); }; };
+tog('b-low', () => (lowQ = !lowQ)); tog('b-calm', () => (calm = !calm)); tog('b-pause', () => (paused = !paused)); tog('b-slow', () => (slow = !slow));
+document.getElementById('b-low').classList.toggle('on', lowQ); document.getElementById('b-calm').classList.toggle('on', calm);
+cv.addEventListener('click', (e) => { const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top; const c = vis.find((q) => x >= q.rx && x < q.rx + q.rw && y >= q.ry && y < q.ry + q.rh); if (c) { c.t = 0; c.loop = -1; } });
+window.vfxReady = true;
+void SIZE; void slotAbility;
+</script>
+</body>
+</html>
