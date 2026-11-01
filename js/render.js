@@ -96,7 +96,7 @@ export class Renderer {
     const now = this.time;
     for (const u of s.units) {
       let d = this.disp.get(u.id);
-      if (!d) { d = { x: u.x, y: u.y, sx: u.x, sy: u.y, tx: u.x, ty: u.y, t0: -9, dur: 0.2, how: 'step', piece: u.piece, pop: 0, hp: u.hp, ghost: u.hp, lunge: null, deathAt: null, drop: null }; this.disp.set(u.id, d); }
+      if (!d) { d = { face: u.x > SIZE / 2 ? -1 : 1, x: u.x, y: u.y, sx: u.x, sy: u.y, tx: u.x, ty: u.y, t0: -9, dur: 0.2, how: 'step', piece: u.piece, pop: 0, hp: u.hp, ghost: u.hp, lunge: null, deathAt: null, drop: null }; this.disp.set(u.id, d); }
       if (d.piece !== u.piece) { d.pop = 1; d.piece = u.piece; }
     }
     this.state = s;
@@ -113,6 +113,7 @@ export class Renderer {
         const start = t;
         this.later(start, () => {
           d.sx = d.x; d.sy = d.y; d.tx = e.to.x; d.ty = e.to.y; d.t0 = this.time; d.how = e.how; d.dur = dur;
+          if (e.how !== 'push' && e.to.x !== e.from.x) d.face = e.to.x < e.from.x ? -1 : 1;
           if (e.how === 'dash') this.fx.beam({ x: e.from.x + 0.5, y: e.from.y + 0.55 }, { x: e.to.x + 0.5, y: e.to.y + 0.55 }, this.colorOf(e.id), 0.4, 0.5);
           if (e.how === 'blink' || e.how === 'swap') this.fx.burst(e.from.x + 0.5, e.from.y + 0.5, this.glowOf(e.id), 14, 2.5);
           this.sfx(e.how === 'jump' ? 'jump' : e.how === 'step' || e.how === 'push' ? 'step' : e.how === 'dash' ? 'whoosh' : e.how === 'blink' || e.how === 'swap' ? 'blink' : 'slide');
@@ -136,6 +137,7 @@ export class Renderer {
         }
         const start = t;
         this.later(start, () => {
+          if (d && e.anchor.x !== e.from.x) d.face = e.anchor.x < e.from.x ? -1 : 1;
           if (d && MELEE.has(e.ab)) { const dx = e.anchor.x - e.from.x, dy = e.anchor.y - e.from.y, l = Math.hypot(dx, dy) || 1; d.lunge = { t0: this.time, dx: dx / l, dy: dy / l, dur: 0.26 }; }
           this.fx.ability(e, this.colorOf(e.id), this.glowOf(e.id));
           this.sfx('ab:' + e.ab);
@@ -281,6 +283,7 @@ export class Renderer {
         }
         break;
       }
+      case 'steadfast': { const [x, y] = at(e.id); this.floats.push({ x, y: y - 1.5, text: 'STEADFAST', t: 0, life: 1.4, color: '#9df3ff', size: 0.6 }); fx.glyph(x, y - 0.3, '#9df3ff', 'shield', 1); fx.ring(x, y + 0.8, '#9df3ff', 1.8, 0.6); break; }
       case 'bramble': { const [x, y] = at(e.id); this.floats.push({ x, y: y - 1.2, text: 'SLOWED', t: 0, life: 0.9, color: '#d58bea', size: 0.5 }); break; }
     }
     void s;
@@ -733,6 +736,10 @@ export class Renderer {
     const sk = skinOf(u.skin);
     const dying = !u.alive;
     ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.ellipse(cx, base, Math.max(0.08, 0.32 - d.lift * 0.1 + dropY * 0.02), 0.1, 0, 0, Math.PI * 2); ctx.fill();
+    if (this.threats && this.threats.includes(u.id) && !dying) {
+      const k = 0.5 + 0.5 * Math.sin(T * 7); ctx.strokeStyle = `rgba(255,50,70,${0.5 + k * 0.5})`; ctx.lineWidth = 0.06;
+      ctx.beginPath(); ctx.ellipse(cx, base, 0.5 + k * 0.06, 0.18 + k * 0.02, 0, 0, Math.PI * 2); ctx.stroke();
+    }
     if (u.kind === 'player') {
       ctx.strokeStyle = u.color; ctx.lineWidth = active ? 0.07 : 0.045;
       ctx.globalAlpha = active ? 0.75 + 0.25 * Math.sin(T * 6) : 0.85;
@@ -754,7 +761,15 @@ export class Renderer {
     const stretch = d.how === 'jump' && d.moving ? d.lift * 0.08 : dropY < 0 ? 0.12 : 0;
     ctx.save();
     ctx.translate(cx, base - d.lift + bob + dropY);
-    ctx.scale(0.92 * pop * (1 + sq - stretch * 0.5), 0.92 * pop * (1 - sq + stretch));
+    if (!d.moving && !dying && !this.reduced) {
+      const ph = T + u.id * 1.7;
+      if (u.piece === 'knight') ctx.rotate(Math.sin(ph * 1.3) * 0.035 * (d.face || 1));
+      else if (u.piece === 'bishop') ctx.rotate(Math.sin(ph * 0.9) * 0.03);
+      else if (u.piece === 'queen' || u.piece === 'king') ctx.translate(0, -Math.abs(Math.sin(ph * 1.1)) * 0.02);
+      else if (u.piece === 'pawn' && (ph % 6) < 0.35) ctx.translate(0, -Math.sin(((ph % 6) / 0.35) * Math.PI) * 0.06);
+    }
+    const breathe = u.piece === 'rook' && !d.moving ? Math.sin(T * 1.6 + u.id) * 0.012 : 0;
+    ctx.scale(0.92 * pop * (1 + sq - stretch * 0.5) * (u.piece === 'knight' ? (d.face || 1) : 1), 0.92 * pop * (1 - sq + stretch + breathe));
     if (u.kind === 'hollow') ctx.translate(0, Math.sin(T * 3 + u.id) * 0.04);
     const fl = this.hitFlash.get(u.id) || (dying ? 1 : 0);
     if (sk.wire || sk.fx === 'aurora' || sk.fx === 'star' || sk.fx === 'glint') drawPiece(ctx, u.piece, u.skin, { flash: fl, alpha: 1, t: T, outline: mine ? 'rgba(255,255,255,0.22)' : null });

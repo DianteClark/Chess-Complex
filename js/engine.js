@@ -1,7 +1,7 @@
 // Chess Complex — authoritative rules engine. Pure data in, events out.
 import {
   SIZE, PIECES, ABILITIES, EVOLVE, EVOLVE_COST, MAX_HONE, honeCost, STAT_GAIN,
-  PLAYER_COLORS, HOLLOW_STATS, ATTUNE, MODES,
+  PLAYER_COLORS, HOLLOW_STATS, ATTUNE, MODES, STEADFAST_ROUND, CALM_ROUNDS,
 } from './data.js';
 
 const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -81,7 +81,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
   const A = s.arena;
   const inArena = (x, y) => !A || (x >= A.x0 && x <= A.x1 && y >= A.y0 && y <= A.y1);
   if (A) { for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (!inArena(x, y)) s.tiles[y * SIZE + x] = { t: 'out' }; s.storm.ring = A.x0; }
-  const sc = A ? 0.4 : 1; // content scale for small arenas
+  const sc = A ? 0.4 : 0.5 + 0.5 * Math.min(8, players.length) / 8; // content scales with arena size and player count
 
   const spawnOrder = A ? [[A.x0 + 1, A.y0 + 1], [A.x1 - 1, A.y1 - 1]] : SPAWNS.slice();
   for (let i = spawnOrder.length - 1; i > 0; i--) { const j = ri(s, i + 1); [spawnOrder[i], spawnOrder[j]] = [spawnOrder[j], spawnOrder[i]]; }
@@ -127,7 +127,12 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
   });
 
   // Hollows guard shard caches
-  for (let i = 0; i < (A ? 2 : 6); i++) {
+  // a starter shard two tiles from every spawn
+  for (const u of s.units) {
+    const c = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) === 2 && free(u.x + dx, u.y + dy) && !s.items.some((it) => it.x === u.x + dx && it.y === u.y + dy)) c.push([u.x + dx, u.y + dy]);
+    if (c.length) { const [x, y] = c[ri(s, c.length)]; s.items.push({ x, y, k: 'shard', n: 1 }); }
+  }
+  for (let i = 0; i < (A ? 2 : Math.round(6 * sc)); i++) {
     const p = randFree(A ? 2 : 3); if (!p) continue;
     const [x, y] = p;
     const h = {
@@ -365,7 +370,8 @@ function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
   if (crit) m *= 1.5;
   if (s.bloodMoon) m *= 1.3;
   if (tgt.piece === 'king') m *= 1.1;
-  const dmg = Math.max(1, Math.round(a.atk * m * 30 / (30 + d.def * defMul(tgt))));
+  let dmg = Math.max(1, Math.round(a.atk * m * 30 / (30 + d.def * defMul(tgt))));
+  if (s.round < STEADFAST_ROUND && tgt.kind === 'player' && tgt.hp >= d.maxHp && dmg >= tgt.hp) { dmg = tgt.hp - 1; ev.push({ e: 'steadfast', id: tgt.id }); }
   tgt.hp -= dmg;
   if (src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + dmg; chargeUlt(src, dmg * 1.1, ev); }
   if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
@@ -637,7 +643,7 @@ export function promoteOptions(u) {
   walk(u.piece, 0, 0);
   const out = [...best.entries()].map(([to, v]) => ({ to, cost: v.cost, steps: v.steps, type: 'evolve' })).sort((a, b) => a.cost - b.cost || (a.to < b.to ? -1 : 1));
   const h = u.hone[u.piece] || 0;
-  if (h < MAX_HONE) out.push({ to: 'hone', cost: honeCost(h), type: 'hone', level: h + 1 });
+  if (h < MAX_HONE) out.push({ to: 'hone', cost: honeCost(h, PIECES[u.piece].tier), type: 'hone', level: h + 1 });
   return out;
 }
 function promote(s, u, to, ev) {
@@ -742,12 +748,13 @@ function worldEvents(s, ev) {
   }
   const EV = (s.rules && s.rules.events) || 3;
   if (r < EV || r % EV !== 0) return;
-  const pool = ['shardRain', 'meteor', 'bloodMoon', 'supply'].filter((k) => k !== s.lastEvent);
+  const pool = (r < CALM_ROUNDS ? ['shardRain', 'supply'] : ['shardRain', 'meteor', 'bloodMoon', 'supply']).filter((k) => k !== s.lastEvent);
   const kind = pool[ri(s, pool.length)];
   s.lastEvent = kind;
   if (kind === 'shardRain') {
     const f = freeTiles(s, 1); const tiles = [];
-    for (let i = 0; i < 6 && f.length; i++) { const t = f.splice(ri(s, f.length), 1)[0]; s.items.push({ x: t.x, y: t.y, k: 'shard', n: 1 }); tiles.push(t); }
+    const nRain = Math.max(4, Math.min(10, alivePlayers(s).length + 2));
+    for (let i = 0; i < nRain && f.length; i++) { const t = f.splice(ri(s, f.length), 1)[0]; s.items.push({ x: t.x, y: t.y, k: 'shard', n: 1 }); tiles.push(t); }
     ev.push({ e: 'world', kind, tiles });
   } else if (kind === 'meteor') {
     const players = alivePlayers(s); const ms = [];

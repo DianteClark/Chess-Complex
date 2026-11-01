@@ -52,7 +52,7 @@ export const LESSONS = [
     id: 'evolve', name: 'Evolution', blurb: 'Promoting, the Knight, free actions and AOE shapes.',
     start(c) { c.clear(); c.reset('pawn', 6, 8); c.me.shards = 3; },
     steps: [
-      { say: 'You are carrying 3 shards. That is enough to evolve. Tap Promote and choose the Knight. Promoting never costs your action.', obj: 'Evolve into a Knight', glow: '[data-slot=promote]', setup: (c) => { c.me.shards = Math.max(3, c.me.shards); c.fresh(); }, check: (c) => c.me.piece === 'knight' },
+      { say: 'You are carrying shards. Two is enough to evolve. Tap Promote and choose the Knight. Promoting never costs your action.', obj: 'Evolve into a Knight', glow: '[data-slot=promote]', setup: (c) => { c.me.shards = Math.max(3, c.me.shards); c.fresh(); }, check: (c) => c.me.piece === 'knight' },
       { say: 'Knights jump in an L and ignore anything in the way. Their Signature, Vault, is a free action that grants a second jump.', next: true },
       { say: 'Use Vault, then make two jumps this turn.', obj: 'Vault, then jump twice', glow: '[data-slot=sig]', setup: (c) => { c.me.cd.sig = 0; c.fresh(); }, check: (c) => c.t.vaulted && c.t.moves >= 2 },
       { say: 'The Knight\'s attack, T-Strike, hits the tile ahead plus a 3-wide crossbar just beyond it. Line it up and hit both dummies at once.', obj: 'Hit 2 dummies with one T-Strike', glow: '[data-slot=atk]',

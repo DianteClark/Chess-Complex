@@ -19,9 +19,11 @@ export const PIECES = {
 };
 
 export const EVOLVE = { pawn: ['knight', 'bishop'], knight: ['rook'], bishop: ['rook'], rook: ['queen'], queen: [], king: [] };
-export const EVOLVE_COST = { 2: 3, 3: 5, 4: 7 };
+export const EVOLVE_COST = { 2: 2, 3: 4, 4: 7 }; // Pawn→Rook 6, Pawn→Queen 13
 export const MAX_HONE = 3;
-export const honeCost = (h) => 4 + h * 2;
+export const honeCost = (h, tier = 1) => [1, 3, 4, 6][tier - 1] + h * [1, 1, 2, 2][tier - 1]; // T1 1/2/3, T2 3/4/5, T3 4/6/8, T4 6/8/10
+export const STEADFAST_ROUND = 6;    // before this round a full-HP player cannot be one-shot
+export const CALM_ROUNDS = 6;        // no Blood Moon or Meteor Storm before this round
 
 // slot: atk = basic attack, sig = signature, eq = equipped
 export const ABILITIES = {
@@ -81,9 +83,9 @@ export const STAT_POINTS = 10;
 export const STAT_GAIN = { hp: 7, atk: 2, def: 1.5, spd: 1 };
 export const PRESETS = {
   bruiser:  { name: 'Bruiser',  pts: { hp: 3, atk: 5, def: 2, spd: 0 }, passive: 'thorns',    blurb: 'Hits hard, takes a punch.' },
-  scout:    { name: 'Scout',    pts: { hp: 2, atk: 3, def: 0, spd: 5 }, passive: 'scavenger', blurb: 'First to the loot, first to evolve.' },
-  tank:     { name: 'Tank',     pts: { hp: 4, atk: 2, def: 4, spd: 0 }, passive: 'regen',     blurb: 'Outlast everyone.' },
-  assassin: { name: 'Assassin', pts: { hp: 0, atk: 6, def: 0, spd: 4 }, passive: 'first',     blurb: 'Delete anyone at full health.' },
+  scout:    { name: 'Scout',    pts: { hp: 3, atk: 3, def: 1, spd: 3 }, passive: 'scavenger', blurb: 'First to the loot, first to evolve.' },
+  tank:     { name: 'Tank',     pts: { hp: 4, atk: 2, def: 2, spd: 2 }, passive: 'regen',     blurb: 'Outlast everyone.' },
+  assassin: { name: 'Assassin', pts: { hp: 2, atk: 5, def: 0, spd: 3 }, passive: 'first',     blurb: 'Delete anyone at full health.' },
 };
 
 export const PLAYER_COLORS = ['#ff4d6d', '#4dabff', '#ffd24d', '#5cff9d', '#c77dff', '#ff8f3d', '#3dfff0', '#ff6ad5'];
@@ -183,10 +185,10 @@ export const DISCOVERIES = {
 
 // ---------- 2.0: modes ----------
 export const MODES = {
-  royale: { name: 'Battle Royale', short: 'Royale', desc: 'The full experience. Up to 8 pieces, one survivor.', players: [2, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 0, events: 3 },
-  blitz:  { name: 'Blitz', short: 'Blitz', desc: 'Five-minute chaos. Faster storm, 15 second turns, everyone starts with 2 shards.', players: [2, 8], storm: { first: 3, every: 2 }, crown: 5, turnMs: 15000, startShards: 2, events: 2 },
+  royale: { name: 'Battle Royale', short: 'Royale', desc: 'The full experience. Up to 8 pieces, one survivor.', players: [2, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3 },
+  blitz:  { name: 'Blitz', short: 'Blitz', desc: 'Five-minute chaos. Faster storm, 15 second turns, quicker everything.', players: [2, 8], storm: { first: 3, every: 2 }, crown: 5, turnMs: 15000, startShards: 1, events: 2 },
   duel:   { name: 'Duel', short: 'Duel', desc: 'One on one in a tight 10x10 arena. Pure skill.', players: [2, 2], storm: { first: 6, every: 3 }, crown: 6, turnMs: 30000, startShards: 1, events: 4, arena: { x0: 3, y0: 3, x1: 12, y1: 12 } },
-  daily:  { name: 'Daily Challenge', short: 'Daily', desc: 'Same map, same loadout for everyone today. Seven Hard bots. Chase your best score.', players: [8, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 0, events: 3 },
+  daily:  { name: 'Daily Challenge', short: 'Daily', desc: 'Same map, same loadout for everyone today. Seven Hard bots. Chase your best score.', players: [8, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3 },
 };
 
 // ---------- 2.0: season ----------

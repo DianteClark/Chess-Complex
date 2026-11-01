@@ -1,7 +1,7 @@
 // Chess Complex — app shell: menus, loadout, armory, sessions, in-game HUD, progression.
 import { TRAILS, PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES, RARITY, BUNDLES, MODES, SEASON, SEASON_REWARDS, ACHIEVEMENTS } from './data.js';
 import { ensureProgress, seasonTier, seasonProgress, rewardLabel, addSeasonXp, checkAchievements, recordMatch, dailySeed, dailyScore, achievementValue } from './progression.js';
-import { legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM, createTutorial, ARENA, isVoid, isCracked } from './engine.js';
+import { previewDamage, legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM, createTutorial, ARENA, isVoid, isCracked } from './engine.js';
 import { LESSONS, Tutorial } from './tutorial.js';
 import { renderCodex, diagram } from './codex.js';
 import { KINDS, ensureStore, item, listKind, featured, bundleInfo, grant, equip, activeEmotes, makePreview, drawPreview } from './store.js';
@@ -687,7 +687,7 @@ const game = {
     this.r.reduced = settings.motion; this.r.setQuality(settings.quality);
     document.body.classList.toggle('bigtext', !!settings.bigtext);
     this.s = null; this.mode = 'move'; this.preview = null; this.lastTurnNo = -1; this.resultsShown = false; this.lastHp = null; this.lastAlive = 99;
-    $('#s-game').classList.remove('tut');
+    $('#s-game').classList.remove('tut'); $('#s-game').classList.remove('spectating'); $('#spec-bar').classList.add('hidden'); this.spec = null;
     this.r.reset(); this.r.setBounds(null); this.r.setTheme(profile.board); this.turnVault = false;
     $('#coach').classList.add('hidden'); $('#abinfo').classList.add('hidden'); this.r.shakeOn = settings.shake; this.r.resize();
     $$('#s-game .modal').forEach((m) => m.classList.add('hidden'));
@@ -737,6 +737,7 @@ const game = {
     const alive = alivePlayers(this.s).length;
     const lvl = this.s.over ? 1 : alive <= 2 ? 3 : (this.s.storm.ring > 0 || this.s.storm.crack || alive <= 4) ? 2 : 1;
     if (!this.resultsShown) music.set(lvl, lvl === 3 ? 'final' : 'fight');
+    if (this.spec) this.updateSpec();
     if (first) this.lastAlive = alive;
     if (alive === 2 && this.lastAlive > 2 && !this.s.over) this.after(() => this.banner('Final Two', 'Only one walks away', 'red'), 900);
     this.lastAlive = alive;
@@ -771,8 +772,45 @@ const game = {
         this.after(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : 'fell to the storm'}</span>`), 400);
         if (e.id === myId) { this.killedBy = k && k.id !== myId ? k : null; if (!s.over) this.after(() => this.showDead(), 1700); }
       }
-      if (e.e === 'over') this.after(() => this.showResults(), 4800);
+      if (e.e === 'over') this.after(() => { if (this.resultsShown) this.refreshFinal(); else this.showResults(); }, 4800);
     }
+  },
+  refreshFinal() {
+    const s = this.s, u = this.me; if (!s || !u) return;
+    const top3 = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 1 : a.place) - (b.alive ? 1 : b.place)).slice(0, 3);
+    const order = [top3[1], top3[0], top3[2]];
+    $('#podium').innerHTML = order.map((v, i) => v ? `<div class="pod p${[2, 1, 3][i]} ${v.id === u.id ? 'me' : ''}" style="--c:${v.color}"><img src="${pieceIcon(v.piece, v.skin, null, [2, 1, 3][i] === 1 ? 78 : 60)}" alt=""><span>${esc(v.name)}</span><div class="blk"><b>${[2, 1, 3][i]}</b></div></div>` : '<div class="pod empty"></div>').join('');
+    $('#podium').classList.remove('hidden');
+    const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 1 : a.place) - (b.alive ? 1 : b.place));
+    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.2 + i * 0.05}s"><b>${v.alive ? 1 : v.place}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
+    $('#btn-keepspec').classList.add('hidden'); $('#btn-menu').textContent = 'Menu';
+    $('#btn-rematch').classList.toggle('hidden', !!(session && session.mode === 'client'));
+    $('#spec-bar').classList.add('hidden');
+    $('#m-results').classList.remove('hidden');
+  },
+  startSpectate() {
+    const me = this.me; if (!this.s || (me && me.alive && !this.s.over)) return;
+    this.spec = { id: null };
+    $('#s-game').classList.add('spectating');
+    $('#spec-bar').classList.remove('hidden');
+    this.r.follow = true; this.updateSpec();
+  },
+  cycleSpec(d) {
+    const alive = this.s.units.filter((u) => u.alive && u.kind === 'player');
+    if (!alive.length) return;
+    const ids = [null, ...alive.map((u) => u.id)];
+    let i = ids.indexOf(this.spec ? this.spec.id : null); i = (i + d + ids.length) % ids.length;
+    this.spec = { id: ids[i] }; sfx.tap(); this.updateSpec();
+  },
+  updateSpec() {
+    if (!this.spec || !this.s) return;
+    let u = this.spec.id ? unitById(this.s, this.spec.id) : null;
+    if (u && !u.alive) { this.spec.id = null; u = null; }
+    const a = u || unitById(this.s, this.s.active);
+    $('#spec-name').textContent = u ? u.name : `Auto${a && a.kind === 'player' ? ' - ' + a.name : ''}`;
+    $('#spec-name').style.color = u ? u.color : '';
+    $('#spec-label').textContent = this.s.over ? 'Match over' : `Spectating - ${alivePlayers(this.s).length} left`;
+    if (a) this.r.focus(a.x, a.y);
   },
   showContenders() {
     const s = this.s, el = $('#contenders'); const ps = s.units.filter((u) => u.kind === 'player');
@@ -804,7 +842,8 @@ const game = {
       if (e.e === 'world') this.after(() => this.tip('world', '<b>World event!</b> One hits every few rounds. Check the banner and adapt.'), 2000);
       if (e.e === 'ultReady' && e.id === me.id) this.after(() => this.tip('ult', '<b>Ultimate ready.</b> Tap the gold button on your turn. Save it for a crowd or a finishing blow.'), 1200);
       if (e.e === 'crownSpawn') this.after(() => this.tip('crown', '<b>The Crown appeared.</b> Whoever holds it is tougher, but slow, and everyone will hunt them.'), 1800);
-      if (e.e === 'pickup' && e.id === me.id && e.k === 'shard') this.after(() => this.tip('shard', '<b>Shard collected.</b> Spend shards to evolve with Promote. Every shard also Attunes you permanently.'), 900);
+      if (e.e === 'steadfast' && e.id === me.id) this.after(() => this.tip('steadfast', '<b>Steadfast!</b> Until round 6, a full-HP piece survives any single hit. After that, evolve early to stay safe.'), 900);
+      if (e.e === 'pickup' && e.id === me.id && e.k === 'shard') this.after(() => this.tip('shard', '<b>Shard collected.</b> Two shards make you a Knight or Bishop: tap Promote. Every shard also Attunes you permanently.'), 900);
     }
     if (!profile.tips?.includes('hollow') && s.units.some((v) => v.kind === 'hollow' && v.alive && Math.max(Math.abs(v.x - me.x), Math.abs(v.y - me.y)) <= 3)) this.tip('hollow', '<b>A Hollow.</b> Neutral ghosts guard shard caches. They wake when you get close and drop 2 shards.');
   },
@@ -882,6 +921,27 @@ const game = {
     if (!canUse(this.s, u, this.mode)) return [];
     return abilityOptions(this.s, u, this.mode);
   },
+  computeThreats() {
+    const s = this.s, me = this.me; if (!s || !me || !me.alive) return [];
+    const out = [];
+    for (const v of s.units) {
+      if (!v.alive || v.id === me.id || v.kind !== 'player') continue;
+      if (Math.max(Math.abs(v.x - me.x), Math.abs(v.y - me.y)) > 8) continue;
+      const save = { x: v.x, y: v.y }; let best = 0;
+      for (const p of [save, ...legalMoves(s, v)]) {
+        v.x = p.x; v.y = p.y;
+        for (const slot of ['atk', 'sig', 'eq', 'ult']) {
+          if (slot === 'ult' ? (v.ult || 0) < 100 : slot !== 'atk' && v.cd && v.cd[slot] > 0) continue;
+          let opts = []; try { opts = abilityOptions(s, v, slot); } catch {}
+          for (const o of opts) if (o.mult > 0 && o.tiles.some((t) => t.x === me.x && t.y === me.y)) best = Math.max(best, previewDamage(v, me, o.mult)[1]);
+        }
+      }
+      v.x = save.x; v.y = save.y;
+      if (best >= me.hp) out.push({ id: v.id, dmg: best, sure: true });
+      else if (best * 1.5 >= me.hp) out.push({ id: v.id, dmg: Math.round(best * 1.5), sure: false });
+    }
+    return out;
+  },
   computeDanger() {
     const s = this.s, me = this.me; if (!s || !me) return null;
     const set = new Map();
@@ -906,6 +966,19 @@ const game = {
     const s = this.s; if (!s) return;
     const u = this.me;
     this.r.danger = this.danger ? this.computeDanger() : null;
+    const thr = this.myTurn() ? this.computeThreats() : (this.thrCache || []);
+    if (this.myTurn()) this.thrCache = thr;
+    this.r.threats = thr.map((t) => t.id);
+    const lt = $('#lethal');
+    if (thr.length && u && u.alive && !s.over) {
+      const t0 = unitById(s, thr[0].id); const sure = thr.some((t) => t.sure);
+      const pro = promoteOptions(u).filter((o) => o.type === 'evolve' && o.cost <= u.shards).pop();
+      let extra = '';
+      if (pro) { const gain = Math.round(PIECES[pro.to].hp - PIECES[u.piece === 'king' ? 'queen' : u.piece].hp); if (gain > 0) extra = ` Evolving to ${PIECES[pro.to].name} adds about ${gain} HP.`; }
+      lt.innerHTML = `<b>${sure ? 'LETHAL RANGE' : 'DANGER'}</b> ${esc(t0 ? t0.name : 'An enemy')}${thr.length > 1 ? ` +${thr.length - 1}` : ''} can ${sure ? 'eliminate' : 'crit'} you next turn.${extra}`;
+      lt.className = 'lethal ' + (sure ? 'sure' : '');
+      if (sure && this.myTurn() && this.lethalWarned !== s.turnNo) { this.lethalWarned = s.turnNo; sfx.warn(); haptic([40, 40, 40]); }
+    } else lt.className = 'lethal hidden';
     if (this.myTurn()) {
       if (this.mode === 'move') this.r.overlay = canMove(s, u) ? { moves: legalMoves(s, u), from: { x: u.x, y: u.y } } : null;
       else { const opts = this.options(); if (this.preview) this.preview = opts.find((o) => o.anchor.x === this.preview.anchor.x && o.anchor.y === this.preview.anchor.y) || null; this.r.overlay = { opts, preview: this.preview }; }
@@ -1077,7 +1150,7 @@ const game = {
       return `<button class="popt ${can ? '' : 'locked'}" data-to="${o.to}" ${can ? '' : 'disabled'}><img src="${pieceIcon(piece, u.skin, o.type === 'hone' ? '#7fe0ff' : null, 60)}" alt=""><div><b>${o.type === 'evolve' ? P.name : 'Hone ' + P.name}${tag}</b><span>${desc}</span>${can ? '' : `<span class="need">Need ${o.cost - u.shards} more shard${o.cost - u.shards > 1 ? 's' : ''}</span>`}</div><div class="cost"><span class="shard-ico"></span>${o.cost}</div></button>`;
     };
     const evo = opts.filter((o) => o.type === 'evolve'), hn = opts.find((o) => o.type === 'hone');
-    $('#promo-opts').innerHTML = `<div class="promo-path">${path}</div><div class="promo-have"><span class="shard-ico"></span> You have <b>${u.shards}</b> shards</div>`
+    $('#promo-opts').innerHTML = `<div class="promo-path">${path}</div><div class="promo-have"><span class="shard-ico"></span> You have <b>${u.shards}</b> shards</div><p class="hint center" style="margin:0 0 4px">Climbing step by step costs the same as jumping. Evolving early never wastes shards.</p>`
       + (evo.length ? `<div class="promo-sec">Evolve</div>${evo.map(card).join('')}` : '')
       + (hn ? `<div class="promo-sec">Or stay a ${PIECES[u.piece].name}</div>${card(hn)}` : '');
     $('#gm-tip').classList.add('hidden'); $('#h-inspect').classList.add('hidden'); $('#abinfo').classList.add('hidden');
@@ -1163,7 +1236,11 @@ const game = {
     const rankOf = (v) => (v.id === u.id ? place : v.alive ? (s.over ? 1 : 0) : v.place);
     const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (rankOf(a) || 0.5) - (rankOf(b) || 0.5));
     $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${rankOf(v) || '-'}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
-    $('#btn-rematch').classList.toggle('hidden', !!(session && (session.mode === 'client' || (session.mode === 'host' && !s.over))));
+    const liveSpec = !s.over && !u.alive && !(session && session.mode === 'client' && aborted);
+    $('#btn-keepspec').classList.toggle('hidden', !liveSpec);
+    $('#btn-menu').textContent = liveSpec && session && session.mode === 'host' ? 'Leave' : 'Menu';
+    $('#btn-rematch').classList.toggle('hidden', !!(liveSpec || (session && (session.mode === 'client' || (session.mode === 'host' && !s.over)))));
+    $('#spec-bar').classList.add('hidden');
     $('#m-results').classList.remove('hidden');
     music.set(0, 'menu');
     if (win) { sfx.win(); confetti(); haptic([50, 50, 50, 50, 150]); } else sfx.lose();
@@ -1294,9 +1371,12 @@ document.addEventListener('click', (e) => {
     case 'close-reveal': $('#m-reveal').classList.add('hidden'); if (armoryPreviews.queue && armoryPreviews.queue.length) { const [k, id] = armoryPreviews.queue.shift(); setTimeout(() => reveal(k, id), 150); } break;
     case 'forfeit': if (session && session.mode === 'tutorial') { $('#m-menu').classList.add('hidden'); endSession(); go('tutorial'); break; }
       $('#m-menu').classList.add('hidden'); game.showResults(!!(game.s && !game.s.over && game.me && game.me.alive)); break;
-    case 'spectate': $('#m-dead').classList.add('hidden'); game.r.overview(); break;
-    case 'results': game.showResults(); break;
-    case 'to-title': endSession(); go('title'); break;
+    case 'spectate': $('#m-dead').classList.add('hidden'); game.startSpectate(); break;
+    case 'keep-spectating': $('#m-results').classList.add('hidden'); game.startSpectate(); break;
+    case 'spec-prev': game.cycleSpec(-1); break;
+    case 'spec-next': game.cycleSpec(1); break;
+    case 'results': if (game.resultsShown) { $('#m-results').classList.remove('hidden'); $('#spec-bar').classList.add('hidden'); } else game.showResults(); break;
+    case 'to-title': leaveToTitle(); break;
     case 'next-lesson': startLesson(b.dataset.next); break;
     case 'to-tutorial': endSession(); go('tutorial'); break;
     case 'rematch':
@@ -1311,6 +1391,21 @@ $('#host-lobby').addEventListener('click', (e) => {
   if (c) { c.send({ t: 'full' }); c.close(); session.conns.delete(pid); }
   session.players = session.players.filter((p) => p.pid !== pid); session.renderLobby();
 });
+function confirmBox(title, body, yes, no, onYes) {
+  $('#cf-title').textContent = title; $('#cf-body').textContent = body; $('#cf-yes').textContent = yes; $('#cf-no').textContent = no;
+  $('#m-confirm').classList.remove('hidden');
+  $('#cf-yes').onclick = () => { $('#m-confirm').classList.add('hidden'); onYes(); };
+  $('#cf-no').onclick = () => { $('#m-confirm').classList.add('hidden'); sfx.tap(); };
+}
+function leaveToTitle() {
+  const live = session && session.mode === 'host' && game.s && !game.s.over && screen === 'game';
+  const friends = live ? [...session.conns.values()].length : 0;
+  if (live && friends > 0) {
+    confirmBox('End the match?', `You are hosting. The match runs on your device, so leaving ends it for ${friends === 1 ? 'your friend' : `all ${friends} friends`}. Keep spectating to let them finish.`, 'End match for everyone', 'Keep spectating', () => { endSession(); go('title'); });
+    return;
+  }
+  endSession(); go('title');
+}
 function copy(text, msg) {
   if (!text) return;
   (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast(msg), () => toast(text));

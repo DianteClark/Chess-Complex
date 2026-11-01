@@ -282,6 +282,7 @@
     <div class="abinfo hidden" id="abinfo"></div>
     <div class="discovery" id="discovery"></div>
     <div class="contenders hidden" id="contenders"></div>
+    <div class="lethal hidden" id="lethal"></div>
     <div class="gm-tip hidden" id="gm-tip"><img alt=""><p></p></div>
     <button class="ult-btn" id="ult-btn" data-slot="ult" aria-label="Ultimate"><svg class="ult-ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" class="ur-bg"/><circle cx="32" cy="32" r="28" class="ur-fg" id="ult-fg"/></svg><span class="ult-k">ULT</span><span class="ult-pct" id="ult-pct">0%</span></button>
     <div class="event-chip hidden" id="event-chip"></div>
@@ -291,6 +292,12 @@
     </div>
     <div class="fx-layer" id="fx-layer"></div>
 
+    <div class="spec-bar hidden" id="spec-bar">
+      <button class="icon-btn" data-act="spec-prev" aria-label="Previous player"><svg viewBox="0 0 24 24" class="stroke"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <div class="spec-who"><small id="spec-label">Spectating</small><b id="spec-name">Auto</b></div>
+      <button class="icon-btn" data-act="spec-next" aria-label="Next player"><svg viewBox="0 0 24 24" class="stroke"><path d="M9 5l7 7-7 7"/></svg></button>
+      <button class="btn small" data-act="results">Results</button>
+    </div>
     <div class="hud-bottom">
       <div class="card" id="h-card">
         <div class="portrait-wrap"><img class="portrait" id="h-portrait" alt=""><div class="hone-pips" id="h-hone"></div></div>
@@ -359,7 +366,7 @@
         <div class="r-recap hidden" id="r-recap"></div>
         <div class="r-quests" id="r-quests"></div>
         <ol class="r-board" id="r-board"></ol>
-        <div class="row2"><button class="btn big wide" data-act="to-title">Menu</button><button class="btn big gold wide shine" data-act="rematch" id="btn-rematch">Play Again</button></div>
+        <div class="row2"><button class="btn big gold wide shine hidden" data-act="keep-spectating" id="btn-keepspec">Spectate</button><button class="btn big wide" data-act="to-title" id="btn-menu">Menu</button><button class="btn big gold wide shine" data-act="rematch" id="btn-rematch">Play Again</button></div>
       </div>
     </div>
   </section>
@@ -395,6 +402,14 @@
     <div class="rv-name" id="rv-name"></div>
     <button class="btn big gold wide shine" id="rv-equip">Equip now</button>
     <button class="btn wide ghost" data-act="close-reveal">Later</button>
+  </div>
+</div>
+<div role="dialog" aria-modal="true" class="modal hidden global" id="m-confirm">
+  <div class="modal-box">
+    <h3 id="cf-title">Are you sure?</h3>
+    <p class="hint center" id="cf-body"></p>
+    <button class="btn wide danger" id="cf-yes">Leave</button>
+    <button class="btn wide gold" id="cf-no">Stay</button>
   </div>
 </div>
 <div role="dialog" aria-modal="true" class="modal hidden global" id="m-info">

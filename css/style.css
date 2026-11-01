@@ -709,3 +709,19 @@ body.bigtext .scroll, body.bigtext .modal-box, body.bigtext .feed, body.bigtext 
 .skin .save { font-size: 11px; color: var(--green); font-weight: 700; margin: -4px 0 6px; }
 .skin.owned-offer { opacity: .75; }
 #armory-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; } #armory-tabs .tab { flex: none; white-space: nowrap; }
+
+/* spectating */
+.spec-bar { position: absolute; left: 50%; bottom: calc(14px + var(--sb)); transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(14,12,20,.95); border: 1px solid var(--line); border-radius: 10px; z-index: 6; width: min(420px, 94vw); animation: rise .3s both; }
+.spec-who { flex: 1; text-align: center; min-width: 0; }
+.spec-who small { display: block; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--mute); }
+.spec-who b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+#s-game.spectating .hud-bottom, #s-game.spectating .ult-btn, #s-game.spectating .emote-wrap { display: none; }
+#btn-keepspec { margin-bottom: 8px; }
+
+.lethal { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--hb, 190px) + 10px); width: min(360px, 74vw); padding: 7px 10px; background: rgba(60,10,18,.94); border: 1px solid rgba(255,90,100,.6); border-radius: 6px; font-size: 11.5px; line-height: 1.35; color: #ffd8dc; z-index: 4; pointer-events: none; animation: rise .3s both; }
+.lethal b { color: #ff8a95; letter-spacing: .12em; margin-right: 4px; }
+.lethal.sure { border-color: #ff4d6d; animation: rise .3s both, lethalPulse 1s infinite; }
+@keyframes lethalPulse { 50% { box-shadow: 0 0 18px rgba(255,77,109,.6); } }
+#s-game.spectating .lethal { display: none; }
+.lethal { left: calc(10px + env(safe-area-inset-left, 0px)); right: calc(92px + env(safe-area-inset-right, 0px)); transform: none; width: auto; }
+#btn-keepspec { margin: 0; }
