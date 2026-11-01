@@ -356,13 +356,13 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: 0; bord
 .lobby .pcard em { display: flex; align-items: center; gap: 4px; font-size: var(--t-xs); }
 .lobby .pcard em svg { width: 12px; height: 12px; fill: currentColor; }
 .lobby .pcard.host em { color: var(--gold); }
-.lobby .pcard .team-tag { position: absolute; top: 6px; right: 8px; margin: 0; padding: 1px 6px; font-size: 10px; }
+.lobby .pcard .team-tag { position: absolute; top: 6px; right: 8px; margin: 0; padding: 1px 6px; font-size: 11px; }
 .lobby .pcard button { position: absolute; right: 4px; bottom: 2px; min-height: 40px; min-width: 40px; padding: 0 8px; font-size: var(--t-xs); font-weight: 700; }
 .lobby .pcard.open { background: rgba(255, 255, 255, .02); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); border: 1px dashed rgba(255, 255, 255, .12); animation: none; }
 .lobby .pcard.open::before { opacity: .25; }
 .lobby .pcard.open b { color: var(--mute-2); font-weight: 600; }
-.lobby .pcard.open[data-team]::after { content: attr(data-team); position: absolute; top: 6px; right: 8px; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--c); opacity: .6; }
-.lobby li .ttl { font-size: 10px; }
+.lobby .pcard.open[data-team]::after { content: attr(data-team); position: absolute; top: 6px; right: 8px; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--c); opacity: .6; }
+.lobby li .ttl { font-size: 11px; }
 #btn-start-host { margin-top: 4px; }
 
 /* ---------- modals ---------- */
@@ -392,7 +392,7 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: 0; bord
 .rk-laurel { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--rk2); filter: drop-shadow(0 0 10px color-mix(in srgb, var(--rk2) 50%, transparent)); }
 .rk-medal { position: relative; width: 70px; height: 70px; margin-top: -6px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
   background: radial-gradient(circle at 35% 30%, var(--rk1), var(--rk2) 55%, var(--rk3)); box-shadow: inset 0 -3px 6px rgba(0, 0, 0, .35), inset 0 2px 3px rgba(255, 255, 255, .6), 0 0 0 3px rgba(10, 8, 16, .9), 0 0 0 4px var(--rk2), 0 8px 24px rgba(0, 0, 0, .5); color: #1d1406; }
-.rk-medal small { font-size: 9.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; opacity: .75; }
+.rk-medal small { font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; opacity: .75; }
 .rk-medal b { font-family: var(--display); font-weight: 900; font-size: 30px; margin: 1px 0 -1px; }
 .rk-medal span { font-size: var(--t-xs); font-weight: 800; letter-spacing: .06em; opacity: .8; }
 .results.reveal .rk { animation: rkIn .8s .1s var(--ease-back) both; }
@@ -575,3 +575,76 @@ body.reduced .badge.new, body.reduced .act.promo.ready, body.reduced .new-player
 .splash.out .sp-bar i, #splash.out .sp-bar i { animation: none !important; }
 .act .a-k, #ult-pct, .ult-pct, .attune-pill, #h-hptext { font-size: 11px; }
 .mode .chip, .modes .chip { font-size: 11px; }
+
+/* 10.1: Lesson Complete card spacing (the Lessons button sat flush with the card edge) */
+#m-lesson .modal-box { padding-bottom: 22px; display: flex; flex-direction: column; gap: 10px; }
+#m-lesson .modal-box .btn { margin: 0; }
+
+/* B1 10.1 layout sweep: alignment, spacing, tap targets and contrast found by tests/layout/crawl.cjs */
+/* HUD top row: pills, alive count and icon buttons share one centre line instead of top-aligning */
+.hud-top { align-items: center; }
+.hud-info { align-items: center; }
+/* action buttons: icon sits inline before its label so long labels (Signature, Equipped) never run into it */
+.act .a-i { position: static; display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 5px; }
+.act .a-k { display: inline; letter-spacing: .12em; }
+.act .a-n { margin-top: 1px; }
+/* narrow phones (360): keep the HUD top on one row and the play buttons inside their edges */
+@media (max-width: 374px) {
+  .hud-top { gap: 4px; padding-left: 6px; padding-right: 6px; }
+  .hud-info, .hud-btns { gap: 4px; }
+  .hud-top .pill { padding: 5px 6px; letter-spacing: .05em; }
+  .hud-top .icon-btn { min-width: 40px; min-height: 40px; width: 40px; height: 40px; }
+  .play-foot .btn { letter-spacing: .04em; font-size: 14px; }
+  .modal-box.results > .row2 .btn { letter-spacing: .04em; font-size: 14px; }
+  /* screen titles (Crown Path, How to Play) fit between Back and the marks pill */
+  .bar { padding-left: 10px; padding-right: 10px; }
+  .bar h2 { letter-spacing: .06em; font-size: 15px; padding: 0 2px; }
+  /* host lobby: Copy Code / Copy Invite Link stay on one line each */
+  #s-host .row2 .btn { letter-spacing: .04em; font-size: 13px; padding-left: 8px; padding-right: 8px; }
+}
+/* badges and the mode TODAY chip: white text on a deeper red reads at 4.8:1 (was 3.2:1) */
+.badge:not(.new), .mode .chip:not(.new), .modes .mode .chip:not(.new) { background: #d8274a; }
+/* join panel: no dead space under the Join button while the status line is empty */
+.code-panel .status:empty { min-height: 0; margin: 0; }
+/* title news card on short phones: clamp to one clean line instead of cutting the second line in half */
+@media (orientation: portrait) and (max-height: 760px) { .nc-body { -webkit-line-clamp: 1; } }
+/* results: the sticky button row fades in over a taller band so scrolled rows are not cut under the buttons */
+.modal-box.results > .row2 { padding-top: 22px; background: linear-gradient(0deg, #120f1e calc(100% - 22px), rgba(18, 15, 30, 0)); }
+/* codex combos: secrets grid no longer overlaps the hint under it */
+.cx-secrets { margin-bottom: 12px; }
+/* emote picker: 40px tap targets */
+.emote-menu { gap: 6px; }
+.emote-menu button { min-height: 40px; padding: 10px 12px; }
+/* chip buttons (store item tools, collection chips, trophy filters): 40px tap targets */
+button.chip { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+/* landscape phones: the turn-order strip was squeezed to ~100px and centred with overflow hidden, which cut off the
+   current-turn chip; the HUD buttons move to the empty top of the side column so the strip gets the room */
+@media (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
+  .hud-top { justify-content: flex-start; }
+  .hud-top .hud-btns { position: fixed; top: calc(8px + var(--st)); right: calc(8px + env(safe-area-inset-right, 0px)); }
+  .hud-top .order { flex: 0 1 auto; min-width: 0; max-width: none; justify-content: flex-start; }
+}
+/* short landscape: the sticky results buttons took a third of the screen */
+@media (orientation: landscape) and (max-height: 520px) {
+  .modal-box.results > .row2 { padding-top: 14px; padding-bottom: calc(10px + var(--sb)); background: linear-gradient(0deg, #120f1e calc(100% - 14px), rgba(18, 15, 30, 0)); }
+  .modal-box.results > .row2 .btn, .modal-box.results > .row2 .btn.big { min-height: 44px; padding-top: 9px; padding-bottom: 9px; font-size: 15px; }
+}
+/* results "+ 20 Marks": the flex gap split the plus sign from the number */
+#r-marks > #rm { margin-left: -8px; }
+/* promote sheet: option cards match the rounded cards used everywhere else (were 3px square corners) */
+.popt { border-radius: 14px; }
+/* lobby: the host's Remove button sat on top of the PLAYER / BOT label; it becomes a close glyph in the card's top-right
+   corner of the role line (40px hit area), so the name keeps the full width */
+.lobby .pcard button[data-kick] { top: auto; right: 0; bottom: 0; width: 40px; height: 40px; min-height: 40px; padding: 0; font-size: 22px; font-weight: 500; line-height: 1; display: grid; place-items: center; color: #ff8aa0; background: none; box-shadow: none; border: 0; }
+.lobby .pcard button[data-kick]:active { color: #fff; }
+.lobby .pcard:has(button[data-kick]) .team-tag { right: 40px; }
+/* action buttons: the cooldown counter moves to the bottom-right beside the ability name (which gets matching side
+   padding while it shows) so it never covers the Equipped / Signature label */
+#s-game .act .cd { top: auto; bottom: 4px; right: 4px; min-width: 20px; height: 20px; font-size: 11px; }
+#s-game .act.cooling .a-n { padding: 0 24px; }
+/* host view: a slightly smaller avatar on removable seats so long names still fit on narrow phones */
+@media (max-width: 480px) {
+  .lobby .pcard:has(button[data-kick]) { grid-template-columns: 36px 1fr; padding-left: 8px; }
+  .lobby .pcard:has(button[data-kick]) .pc-av { width: 36px; height: 36px; border-radius: 10px; }
+  .lobby .pcard:has(button[data-kick]) .pc-av img { width: 34px; height: 34px; }
+}

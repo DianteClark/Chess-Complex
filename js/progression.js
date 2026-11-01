@@ -135,7 +135,7 @@ export function achievementValue(p, a) {
   switch (a.stat) {
     case 'level': return p.level;
     case 'discoveries': return (p.discovered || []).length;
-    case 'tutorialDone': return (p.tutorial || []).includes('graduation') || (p.tutorial || []).length >= 5 ? 1 : 0;
+    case 'tutorialDone': return (p.tutorial || []).includes('graduation') || (p.tutorial || []).length >= 7 ? 1 : 0;
     case 'cosmetics': return ownedCounts(p).total + 3;
     case 'mythics': return ownedCounts(p).byRarity.mythic || 0;
     case 'collections': return (p.collections || []).length;

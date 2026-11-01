@@ -48,20 +48,50 @@ export function newsFrom(html) {
 // ---------- cinematic title / menu background ----------
 // Layers (back to front): sky gradient (cached), light shafts, perspective board floor with fog,
 // drifting pieces with depth parallax, dust motes, and the hero piece on its pedestal (title only).
+// B3 10.1 perf: everything here is soft (gradients, fog, faint drifting pieces), so the scene renders at 1x and the
+// browser scales it up (about 4x fewer pixels per frame on a phone). Static layers (sky, horizon fog, vignette) are
+// prerendered; light shafts (including the title's former CSS shafts, which cost a masked full-screen layer each)
+// go to a 1/3-resolution layer. The crisp hero piece and pedestal get their own small full-DPR canvas (#bg-hero).
+const mkC = (w, h) => { const k = document.createElement('canvas'); k.width = Math.max(1, Math.ceil(w)); k.height = Math.max(1, Math.ceil(h)); return k; };
+const smooth = (t) => t * t * (3 - 2 * t);
 export function initScene({ canvas, bg, getProfile, getScreen, settings }) {
   const c = canvas, x = c.getContext('2d');
-  let W = 0, H = 0, d = 1, sky = null;
+  let W = 0, H = 0, d = 1, sky = null, vig = null, fogL = null, shL = null, shX = null, shSpr = null, hd = 1, hzY = 0;
+  const SH = 3; // shaft layer downscale
+  const hc = document.createElement('canvas'); hc.id = 'bg-hero'; hc.setAttribute('aria-hidden', 'true');
+  hc.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:0;pointer-events:none;visibility:hidden';
+  c.after(hc);
+  const hx = hc.getContext('2d'); let hShown = false, hKey = '';
   const lowQ = () => settings && settings.quality === 'low';
+  const tileCol = Array.from({ length: 33 }, (_, i) => { const f = i / 32; return `rgba(232,189,98,${(0.05 * f * f + 0.01).toFixed(4)})`; });
   const resize = () => {
-    d = Math.min(lowQ() ? 1 : 2, devicePixelRatio || 1); W = innerWidth; H = innerHeight;
-    c.width = Math.round(W * d); c.height = Math.round(H * d);
-    sky = document.createElement('canvas'); sky.width = c.width; sky.height = c.height;
+    d = Math.min(1, devicePixelRatio || 1); hd = Math.min(lowQ() ? 1 : 2, devicePixelRatio || 1); W = innerWidth; H = innerHeight;
+    c.width = Math.round(W * d); c.height = Math.round(H * d); hKey = '';
+    hzY = H * (W > H ? 0.6 : 0.64);
+    // horizon glow + fog (static for a given size), quarter resolution: pure gradients upscale cleanly
+    fogL = mkC(W / 4, H / 4); { const f = fogL.getContext('2d'); f.scale(fogL.width / W, fogL.height / H); const hz = hzY;
+      const hg = f.createLinearGradient(0, hz - 70, 0, hz + 60); hg.addColorStop(0, 'rgba(255,200,120,0)'); hg.addColorStop(0.55, 'rgba(255,200,120,0.16)'); hg.addColorStop(1, 'rgba(20,14,34,0)');
+      f.fillStyle = hg; f.fillRect(0, hz - 70, W, 130);
+      const fog = f.createLinearGradient(0, hz - 40, 0, H); fog.addColorStop(0, 'rgba(14,11,26,0)'); fog.addColorStop(0.12, 'rgba(14,11,26,0.55)'); fog.addColorStop(0.45, 'rgba(14,11,26,0.08)'); fog.addColorStop(1, 'rgba(6,5,10,0.6)');
+      f.fillStyle = fog; f.fillRect(0, hz - 40, W, H - hz + 40); }
+    vig = mkC(W / 4, H / 4); { const v = vig.getContext('2d'); v.scale(vig.width / W, vig.height / H);
+      const g = v.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
+      v.fillStyle = g; v.fillRect(0, 0, W, H); }
+    shL = mkC(W * d / SH, H * d / SH); shX = shL.getContext('2d');
+    if (!shSpr) { // the title's CSS shaft: horizontal beam gradient x vertical fade mask
+      shSpr = mkC(32, 128); const q = shSpr.getContext('2d');
+      const hg = q.createLinearGradient(0, 0, 32, 0); hg.addColorStop(0, 'rgba(255,226,170,0)'); hg.addColorStop(0.4, 'rgba(255,226,170,0.09)'); hg.addColorStop(0.5, 'rgba(255,236,200,0.14)'); hg.addColorStop(0.6, 'rgba(255,226,170,0.09)'); hg.addColorStop(1, 'rgba(255,226,170,0)');
+      q.fillStyle = hg; q.fillRect(0, 0, 32, 128); q.globalCompositeOperation = 'destination-in';
+      const vg = q.createLinearGradient(0, 0, 0, 128); vg.addColorStop(0, '#000'); vg.addColorStop(0.45, 'rgba(0,0,0,0.5)'); vg.addColorStop(0.8, 'rgba(0,0,0,0)');
+      q.fillStyle = vg; q.fillRect(0, 0, 32, 128);
+    }
+    sky = mkC(c.width, c.height);
     const s = sky.getContext('2d'); s.scale(d, d);
     const g = s.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0a0916'); g.addColorStop(0.45, '#151129'); g.addColorStop(0.62, '#1d1631'); g.addColorStop(1, '#07060c');
     s.fillStyle = g; s.fillRect(0, 0, W, H);
     const r = s.createRadialGradient(W / 2, H * 0.6, 10, W / 2, H * 0.6, Math.max(W, H) * 0.65); r.addColorStop(0, 'rgba(255,196,110,0.16)'); r.addColorStop(0.4, 'rgba(120,80,190,0.08)'); r.addColorStop(1, 'rgba(0,0,0,0)');
     s.fillStyle = r; s.fillRect(0, 0, W, H);
-    for (let i = 0; i < (lowQ() ? 40 : 90); i++) { s.globalAlpha = 0.15 + Math.random() * 0.5; s.fillStyle = '#fff'; const sz = Math.random() < 0.1 ? 1.6 : 0.9; s.fillRect(Math.random() * W, Math.random() * H * 0.55, sz, sz); }
+    for (let i = 0; i < (lowQ() ? 40 : 90); i++) { s.globalAlpha = 0.15 + Math.random() * 0.5; s.fillStyle = '#fff'; const sz = Math.random() < 0.1 ? 1.6 : 1; s.fillRect(Math.random() * W, Math.random() * H * 0.55, sz, sz); }
     s.globalAlpha = 1;
     bg.d = d;
   };
@@ -92,50 +122,74 @@ export function initScene({ canvas, bg, getProfile, getScreen, settings }) {
       if (z0 <= 0.2) continue;
       const y0 = hz + (camH * f) / z0, y1 = hz + (camH * f) / z1;
       const fade = clamp(1 - z0 / (rows + 1), 0, 1);
+      x.fillStyle = tileCol[Math.round(fade * 32)];
+      x.beginPath(); // one path per row (same colour)
       for (let k = -cols; k < cols; k++) {
         if (((k + r) & 1) === 0) continue;
         const xa0 = cx + (k * f * 0.55) / z0, xb0 = cx + ((k + 1) * f * 0.55) / z0;
         const xa1 = cx + (k * f * 0.55) / z1, xb1 = cx + ((k + 1) * f * 0.55) / z1;
         if (Math.max(xa0, xb0) < -50 || Math.min(xa0, xb0) > W + 50) continue;
-        x.fillStyle = `rgba(232,189,98,${0.05 * fade * fade + 0.01})`;
-        x.beginPath(); x.moveTo(xa0, y0); x.lineTo(xb0, y0); x.lineTo(xb1, y1); x.lineTo(xa1, y1); x.closePath(); x.fill();
+        x.moveTo(xa0, y0); x.lineTo(xb0, y0); x.lineTo(xb1, y1); x.lineTo(xa1, y1); x.closePath();
       }
+      x.fill();
     }
-    // horizon glow + fog
-    const hg = x.createLinearGradient(0, hz - 70, 0, hz + 60); hg.addColorStop(0, 'rgba(255,200,120,0)'); hg.addColorStop(0.55, 'rgba(255,200,120,0.16)'); hg.addColorStop(1, 'rgba(20,14,34,0)');
-    x.fillStyle = hg; x.fillRect(0, hz - 70, W, 130);
-    const fog = x.createLinearGradient(0, hz - 40, 0, H); fog.addColorStop(0, 'rgba(14,11,26,0)'); fog.addColorStop(0.12, 'rgba(14,11,26,0.55)'); fog.addColorStop(0.45, 'rgba(14,11,26,0.08)'); fog.addColorStop(1, 'rgba(6,5,10,0.6)');
-    x.fillStyle = fog; x.fillRect(0, hz - 40, W, H - hz + 40);
     x.restore();
+    // horizon glow + fog (prerendered)
+    x.drawImage(fogL, 0, 0, W, H);
   };
-  const drawShafts = () => {
-    x.save(); x.globalCompositeOperation = 'lighter';
+  const shG = [{ k: null, len: 0 }, { k: null, len: 0 }, { k: null, len: 0 }]; // cached beam gradients
+  const drawShafts = (title) => {
+    // 1/3-resolution light layer: the scene's three swaying beams plus, on the title, its three pulsing CSS-style shafts
+    const k = d / SH; shX.setTransform(1, 0, 0, 1, 0, 0); shX.clearRect(0, 0, shL.width, shL.height);
+    shX.setTransform(k, 0, 0, k, 0, 0); shX.globalCompositeOperation = 'lighter';
+    const len = H * 1.1;
     for (let i = 0; i < 3; i++) {
       const sw = Math.sin(T * 0.15 + i * 2.1) * 0.06;
       const ox = W * (0.3 + i * 0.22) - mx * 30 * (i + 1);
-      const ang = -0.35 + i * 0.3 + sw, len = H * 1.1, wTop = 30 + i * 12, wBot = 160 + i * 50;
-      const g = x.createLinearGradient(0, 0, 0, len); g.addColorStop(0, `rgba(255,220,160,${0.09 - i * 0.015})`); g.addColorStop(1, 'rgba(255,220,160,0)');
-      x.save(); x.translate(ox, -20); x.rotate(ang); x.fillStyle = g;
-      x.beginPath(); x.moveTo(-wTop, 0); x.lineTo(wTop, 0); x.lineTo(wBot, len); x.lineTo(-wBot, len); x.closePath(); x.fill(); x.restore();
+      const ang = -0.35 + i * 0.3 + sw, wTop = 30 + i * 12, wBot = 160 + i * 50;
+      const gc = shG[i]; if (gc.len !== len) { gc.len = len; gc.k = shX.createLinearGradient(0, 0, 0, len); gc.k.addColorStop(0, `rgba(255,220,160,${0.09 - i * 0.015})`); gc.k.addColorStop(1, 'rgba(255,220,160,0)'); }
+      shX.save(); shX.translate(ox, -20); shX.rotate(ang); shX.fillStyle = gc.k;
+      shX.beginPath(); shX.moveTo(-wTop, 0); shX.lineTo(wTop, 0); shX.lineTo(wBot, len); shX.lineTo(-wBot, len); shX.closePath(); shX.fill(); shX.restore();
     }
-    x.restore();
+    if (title) {
+      const vmax = Math.max(W, H) / 100;
+      for (let i = 0; i < 3; i++) { // left 6/36/64%, 34/22/34vmax wide, rotate 16/-4/-18deg about the top centre, opacity .25-.7 over 9 s alternate
+        const w = (i === 1 ? 22 : 34) * vmax, left = W * [0.06, 0.36, 0.64][i], top = -0.2 * H, hh = 1.4 * H;
+        const ph = ((T + i * 3) / 9) % 2, tri = ph < 1 ? ph : 2 - ph;
+        shX.save(); shX.globalAlpha = 0.25 + 0.45 * smooth(tri); shX.translate(left + w / 2, top); shX.rotate([16, -4, -18][i] * Math.PI / 180);
+        shX.drawImage(shSpr, -w / 2, 0, w, hh); shX.restore();
+      }
+    }
+    shX.globalCompositeOperation = 'source-over';
+    x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'lighter'; x.drawImage(shL, 0, 0, c.width, c.height); x.restore();
   };
   const drawHero = (dt) => {
     const slot = (bg.heroEl ||= document.getElementById('hero-slot'));
-    if (!slot) return;
+    if (!slot) return hideHero();
     const rc = slot.getBoundingClientRect();
-    if (rc.width < 90 || rc.height < 100) return;
+    if (rc.width < 90 || rc.height < 100) return hideHero();
     const p = getProfile();
     if (heroSkin !== p.skin) { heroSkin = p.skin; heroSwap = 1; }
     heroSwap = Math.max(0, heroSwap - dt * 2.2);
     const sz = Math.min(rc.height * 0.82, rc.width * 0.9, 240), cx0 = rc.left + rc.width / 2, by = rc.bottom - Math.max(14, sz * 0.12);
     const sk = skinOf(p.skin);
+    // soft light (spotlight cone + glow) stays in the 1x scene canvas
     x.save();
-    // spotlight cone
     const cone = x.createLinearGradient(0, by - sz * 1.4, 0, by); cone.addColorStop(0, 'rgba(255,230,180,0)'); cone.addColorStop(1, 'rgba(255,230,180,0.12)');
     x.fillStyle = cone; x.beginPath(); x.moveTo(cx0 - sz * 0.12, by - sz * 1.5); x.lineTo(cx0 + sz * 0.12, by - sz * 1.5); x.lineTo(cx0 + sz * 0.5, by); x.lineTo(cx0 - sz * 0.5, by); x.closePath(); x.fill();
     const g2 = x.createRadialGradient(cx0, by, 4, cx0, by, sz * 0.8); g2.addColorStop(0, hexA(sk.glow, 0.42)); g2.addColorStop(1, hexA(sk.glow, 0));
     x.fillStyle = g2; x.fillRect(cx0 - sz, by - sz, sz * 2, sz * 1.3);
+    x.restore();
+    // crisp parts (pedestal, piece, motes) on the small full-DPR hero canvas, sized in 16 px steps
+    const szB = Math.ceil(sz / 16) * 16, bw = szB * 1.7, bh = szB * 1.85, bx = cx0 - bw / 2, bt = by - szB * 1.5;
+    const key = szB + '|' + hd;
+    if (key !== hKey) { hKey = key; hc.width = Math.ceil(bw * hd); hc.height = Math.ceil(bh * hd); hc.style.width = bw + 'px'; hc.style.height = bh + 'px'; }
+    hc.style.transform = `translate(${bx.toFixed(1)}px,${bt.toFixed(1)}px)`;
+    if (!hShown) { hShown = true; hc.style.visibility = 'visible'; }
+    { const x = hx; // same drawing code, other canvas
+    x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, hc.width, hc.height);
+    x.setTransform(hd, 0, 0, hd, -bx * hd, -bt * hd);
+    x.save();
     // pedestal: two stacked discs with a rotating rune ring
     x.fillStyle = '#120f1d'; x.beginPath(); x.ellipse(cx0, by + 8, sz * 0.46, sz * 0.12, 0, 0, Math.PI * 2); x.fill();
     const pg = x.createLinearGradient(cx0 - sz * 0.46, 0, cx0 + sz * 0.46, 0); pg.addColorStop(0, '#2a2440'); pg.addColorStop(0.5, '#4a4068'); pg.addColorStop(1, '#1a1628');
@@ -159,7 +213,12 @@ export function initScene({ canvas, bg, getProfile, getScreen, settings }) {
     hero.parts = hero.parts.filter((q) => (q.life -= dt * 0.8) > 0);
     for (const q of hero.parts) { q.y += q.vy * dt; x.globalAlpha = q.life * 0.9; x.fillStyle = q.c; x.beginPath(); x.arc(q.x, q.y, 1.8, 0, Math.PI * 2); x.fill(); }
     x.globalAlpha = 1;
+    // the scene vignette used to darken the hero too: apply its value at the piece
+    const vr = Math.hypot(cx0 - W / 2, by - sz * 0.5 - H / 2), r0 = Math.min(W, H) * 0.35, r1 = Math.max(W, H) * 0.75, va = 0.55 * clamp((vr - r0) / (r1 - r0), 0, 1);
+    if (va > 0.01) { x.globalCompositeOperation = 'source-atop'; x.fillStyle = `rgba(0,0,0,${va.toFixed(3)})`; x.fillRect(bx, bt, bw, bh); x.globalCompositeOperation = 'source-over'; }
+    }
   };
+  function hideHero() { if (hShown) { hShown = false; hc.style.visibility = 'hidden'; } }
   const frame = (dt) => {
     const reduced = reducedNow(settings);
     const k = reduced ? 0 : 1;
@@ -168,8 +227,8 @@ export function initScene({ canvas, bg, getProfile, getScreen, settings }) {
     x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(sky, 0, 0);
     x.setTransform(d, 0, 0, d, 0, 0);
     const scr = getScreen();
-    const hz = H * (W > H ? 0.6 : 0.64);
-    if (!lowQ()) drawShafts();
+    const hz = hzY;
+    if (!lowQ()) drawShafts(scr === 'title');
     drawFloor(hz, dt * k);
     for (const p of parts) {
       p.y -= p.v * dt * k; p.ph += dt * k; p.r += p.vr * dt * k;
@@ -189,26 +248,51 @@ export function initScene({ canvas, bg, getProfile, getScreen, settings }) {
       }
       x.globalAlpha = 1;
     }
-    if (scr === 'title') drawHero(dt);
-    // vignette
-    const v = x.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.55)');
-    x.fillStyle = v; x.fillRect(0, 0, W, H);
+    if (scr === 'title') drawHero(dt); else hideHero();
+    // vignette (prerendered)
+    x.drawImage(vig, 0, 0, W, H);
   };
   const loop = (now) => {
     requestAnimationFrame(loop);
     try {
       const dt = Math.min(0.05, (now - last) / 1000); last = now; acc += dt;
-      if (!bg.on) return; // nothing to do during matches: skip the DOM query entirely
+      if (!bg.on) { hideHero(); return; } // nothing to do during matches: skip the DOM query entirely
       const fps = reducedNow(settings) ? 12 : lowQ() ? 24 : 30;
       if (acc < 1 / fps) return;
       const modalUp = !!document.querySelector('.modal.global:not(.hidden), .sequel');
       if (modalUp) return;
-      const step = acc; acc = 0;
+      const step = Math.min(acc, 0.1); acc = 0; // after a match or a modal, resume without a jump
       if (lowQ() !== bg.wasLow) { bg.wasLow = lowQ(); resize(); }
       frame(step);
     } catch (err) { console.error(err); }
   };
   requestAnimationFrame(loop);
+  releaseFinishedAnimations();
+}
+// B3 10.1 perf: a finished CSS entrance animation with fill-mode both/forwards (riseIn, a7in, scrIn...) keeps its element
+// on its own compositor layer for as long as it exists (the store's 45 cards alone made ~110 extra layers through
+// overlap). When an animation ends and its final frame equals the element's normal style, drop the fill so the layer
+// can go away. Animations whose end state differs from the base style (fade-outs, sqUp...) keep their fill.
+let releaseOn = false;
+function releaseFinishedAnimations() {
+  if (releaseOn || typeof document === 'undefined') return; releaseOn = true;
+  document.addEventListener('animationend', (e) => {
+    try {
+      const el = e.target; if (!el || !el.getAnimations) return;
+      const pseudo = e.pseudoElement || null;
+      for (const a of el.getAnimations({ subtree: !!pseudo })) {
+        if (a.animationName !== e.animationName || a.playState !== 'finished') continue;
+        const ef = a.effect; if (!ef || (pseudo && ef.pseudoElement !== pseudo) || (!pseudo && ef.pseudoElement)) continue;
+        const fill = ef.getComputedTiming().fill; if (fill !== 'forwards' && fill !== 'both') continue;
+        const props = new Set(); for (const k of ef.getKeyframes()) for (const p in k) if (p !== 'offset' && p !== 'easing' && p !== 'composite' && p !== 'computedOffset') props.add(p);
+        const norm = (p, v) => { if (p === 'transform' && v !== 'none') { try { const m = new DOMMatrix(v); return m.isIdentity ? 'none' : m.toString(); } catch { return v; } } return v; };
+        const cs = getComputedStyle(el, pseudo), before = [...props].map((p) => norm(p, cs[p]));
+        ef.updateTiming({ fill: 'none' });
+        const cs2 = getComputedStyle(el, pseudo);
+        if ([...props].some((p, i) => norm(p, cs2[p]) !== before[i])) ef.updateTiming({ fill }); // end state is not the base style
+      }
+    } catch { /* never let this break anything */ }
+  }, true);
 }
 function hexA(hex, a) {
   if (typeof hex !== 'string' || hex[0] !== '#') return `rgba(255,215,120,${a})`;

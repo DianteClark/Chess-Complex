@@ -34,6 +34,26 @@ function badgeSprite(text, col) {
   if (BADGE.size > 300) BADGE.clear();
   BADGE.set(key, c); return c;
 }
+// B3 10.1: the big glowing titles (ultimate cine name, screen banners) are rendered once into a sprite: outlined text
+// with shadowBlur, redrawn every frame, was the costliest thing on screen during those moments. Same drawing calls,
+// at the canvas's device resolution; shadowBlur is in device pixels either way.
+const GLOWTXT = new Map();
+try { document.fonts && document.fonts.addEventListener('loadingdone', () => GLOWTXT.clear()); } catch {}
+function glowText(text, font, px, lw, stroke, fill, glow, blur, sheen, dpr) {
+  const key = text + '|' + font + '|' + lw + '|' + stroke + '|' + fill + '|' + glow + '|' + blur + '|' + sheen + '|' + dpr;
+  let e = GLOWTXT.get(key); if (e) return e;
+  const m = (glowText.m ||= document.createElement('canvas').getContext('2d')); m.font = font;
+  const pad = Math.ceil(lw + blur / dpr * 1.5 + 4), w = Math.ceil(m.measureText(text).width + pad * 2), h = Math.ceil(px * 1.4 + pad * 2);
+  const c = document.createElement('canvas'); c.width = Math.ceil(w * dpr); c.height = Math.ceil(h * dpr);
+  const x = c.getContext('2d'); x.scale(dpr, dpr); x.translate(w / 2, h / 2); x.font = font; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.lineWidth = lw; x.lineJoin = 'round'; x.strokeStyle = stroke; x.strokeText(text, 0, 0);
+  if (fill === 'gold') { const g = x.createLinearGradient(0, -px / 2, 0, px / 2); g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, '#ffe9a8'); g.addColorStop(1, '#d6a33a'); x.fillStyle = g; } else x.fillStyle = fill;
+  if (blur) { x.shadowColor = glow; x.shadowBlur = blur; }
+  x.fillText(text, 0, 0); x.shadowBlur = 0;
+  if (sheen) { x.fillStyle = 'rgba(255,255,255,0.35)'; x.fillText(text, 0, -px * 0.03); }
+  if (GLOWTXT.size > 12) GLOWTXT.clear();
+  e = { c, w, h }; GLOWTXT.set(key, e); return e;
+}
 // 5.0: paired portal colours, tile art cache
 export const PORTAL_COLS = ['#3de0ff', '#ff5ad8'];
 const TEX = new Map();
@@ -81,14 +101,33 @@ export class Renderer {
     this.resize();
     addEventListener('resize', () => this.resize());
   }
-  setQuality(q) { this.quality = q || 'auto'; this.lowQ = q === 'low'; this.ftAvg = 16; this.ftT = 0; this.resize(); }
+  setQuality(q) { this.quality = q || 'auto'; this.lowQ = q === 'low'; this.ftAvg = 16; this.ftT = 0; this.aq = { tier: this.lowQ ? 2 : 0, t: 0, warm: 1, hold: 6, upAt: -1e9 }; this.resize(); }
+  // B3 10.1: adaptive quality for 'auto'. Tiers: 0 full (DPR up to 2), 1 DPR 1.5 with every effect, 2 lowQ (DPR 1, cheap
+  // effects). Steps down after ~1.2 s averaging over 22 ms a frame (under ~45 fps); steps back up after a calm spell near
+  // the display rate. A step-up that fails within 5 s doubles the wait before the next try (6 s up to 48 s), so it settles.
+  autoQuality(realDt) {
+    const q = this.aq || (this.aq = { tier: 0, t: 0, warm: 1, hold: 6, upAt: -1e9 });
+    this.ftAvg = (this.ftAvg || 16) * 0.92 + realDt * 1000 * 0.08;
+    if (q.warm > 0) { q.warm -= realDt; q.t = 0; return; } // just resized / rebaked: ignore the first second
+    const full = Math.min(2, devicePixelRatio || 1), tiers = full > 1.5 ? [0, 1, 2] : [0, 2], i = Math.max(0, tiers.indexOf(q.tier));
+    let next = q.tier;
+    if (this.ftAvg > 22) { q.t = q.t > 0 ? q.t + realDt : realDt; if (q.t > 1.2 && i < tiers.length - 1) next = tiers[i + 1]; }
+    else if (this.ftAvg < 17.8 && i > 0) { q.t = q.t < 0 ? q.t - realDt : -realDt; if (-q.t > q.hold) next = tiers[i - 1]; }
+    else q.t = 0;
+    if (next === q.tier) return;
+    if (next > q.tier && this.real - q.upAt < 5) q.hold = Math.min(48, q.hold * 2); // the last step up did not hold
+    if (next < q.tier) q.upAt = this.real;
+    q.tier = next; q.t = 0; q.warm = 1; this.ftAvg = 16.7;
+    this.lowQ = next === 2; this.resize();
+  }
   setTheme(id) { this.themeId = BOARDS[id] ? id : 'hall'; this.theme = BOARDS[this.themeId]; this.look = null; this.wallSpr = null; this.weather = new W10.Weather(); this.fcache = null; }
   lookOf() { if (!this.look || this.look.th !== this.theme) { this.look = W10.lookOf(this.themeId, this.theme); this.look.th = this.theme; } return this.look; }
   light(x, y, col, rad, life, a) { W10.addLight(this, x, y, col, rad, life, a); }
   // cinematic framing: briefly push the camera in on a big moment, then hand control back
   shot(x, y, zMul = 1.2, dur = 1) { if (this.reduced) return; this.focus(x, y); if (!this.shotEnd) this.shotPrevZ = this.cam.tz; this.cam.tz = Math.min(this.maxZ, this.defaultZoom() * zMul); this.shotEnd = this.real + dur; }
   resize() {
-    const dpr = this.lowQ ? 1 : Math.min(2, devicePixelRatio || 1);
+    const full = Math.min(2, devicePixelRatio || 1), dpr = this.lowQ ? 1 : this.quality === 'auto' && this.aq && this.aq.tier === 1 ? Math.min(full, 1.5) : full;
+    if (this.aq) this.aq.warm = Math.max(this.aq.warm, 0.6);
     const r = this.c.getBoundingClientRect();
     this.W = r.width || innerWidth; this.H = r.height || innerHeight; this.dpr = dpr;
     this.c.width = Math.round(this.W * dpr); this.c.height = Math.round(this.H * dpr);
@@ -500,6 +539,7 @@ export class Renderer {
       case 'bramble': { const [x, y] = at(e.id); this.floats.push({ x, y: y - 1.2, text: 'SLOWED', t: 0, life: 0.9, color: '#d58bea', size: 0.5 }); break; }
       default: { // A6 fx.event draws A9's hazard / world / siege-role events
         if (this.fx.event) this.fx.event(e, at);
+        HZ.event(this, e, at); // B4 10.1: tile-anchored hazard art (eruption columns, rift tears, throne pulses, pit collapses)
         const SN = { split: 'split', shieldBreak: 'shieldbreak', summon: 'summon', bountyClaim: 'bountyclaim', enrage: 'enrage' };
         if (e.e === 'hazard' && e.kind) this.sfx('hazard:' + e.kind + ':' + (e.phase || 'go'));
         else if (e.e === 'hill') this.sfx(e.contested ? 'hill:contested' : 'hill:score');
@@ -512,7 +552,7 @@ export class Renderer {
 
   frame(realDt) {
     this.real += realDt;
-    if (this.quality === 'auto' && !this.lowQ) { this.ftAvg = (this.ftAvg || 16) * 0.95 + realDt * 1000 * 0.05; this.ftT = (this.ftT || 0) + realDt; if (this.ftT > 4 && this.ftAvg > 27) { this.lowQ = true; this.resize(); } }
+    if (this.quality === 'auto') this.autoQuality(realDt);
     if (this.reduced) this.punch = 0;
     this.fx.cap = this.lowQ ? 260 : 600; this.fx.lowQ = this.lowQ; this.fx.reduced = this.reduced;
     let dt = realDt;
@@ -603,7 +643,11 @@ export class Renderer {
       const fc = this.floorCache(), k = fc.c.width / (SIZE + FPAD * 2);
       const [ax, ay] = this.toWorld(-sh, -sh), [bx, by] = this.toWorld(W + sh, H + sh);
       const x0 = Math.max(-FPAD, Math.floor(ax)), y0 = Math.max(-FPAD, Math.floor(ay)), x1 = Math.min(SIZE + FPAD, Math.ceil(bx)), y1 = Math.min(SIZE + FPAD, Math.ceil(by));
-      if (x1 > x0 && y1 > y0) ctx.drawImage(fc.c, (x0 + FPAD) * k, (y0 + FPAD) * k, (x1 - x0) * k, (y1 - y0) * k, x0, y0, x1 - x0, y1 - y0);
+      if (Math.abs((z * dpr) / k - 1) < 0.002) { // B3 10.1: baked at the on-screen scale: copy 1:1 on whole device pixels, no resampling
+        const offX = Math.round(dpr * ((this.CX ?? W / 2) + ox) - k * (this.cam.x + FPAD)), offY = Math.round(dpr * (this.CY + oy) - k * (this.cam.y + FPAD));
+        const sx = Math.max(0, -offX), sy = Math.max(0, -offY), sw = Math.min(fc.c.width, this.c.width - offX) - sx, sh2 = Math.min(fc.c.height, this.c.height - offY) - sy;
+        if (sw > 0 && sh2 > 0) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(fc.c, sx, sy, sw, sh2, sx + offX, sy + offY, sw, sh2); ctx.restore(); }
+      } else if (x1 > x0 && y1 > y0) ctx.drawImage(fc.c, (x0 + FPAD) * k, (y0 + FPAD) * k, (x1 - x0) * k, (y1 - y0) * k, x0, y0, x1 - x0, y1 - y0);
     }
     W10.drawStormVoid(this, ctx, T); // swirling nebula in the collapsed ring + glowing storm seam
     // animated floor layer on top of the cached static board
@@ -859,10 +903,7 @@ export class Renderer {
     const kp = Math.max(9, Math.min(12, px * 0.24));
     ctx.save(); ctx.translate(R.cx, cy - kp * 0.35); ctx.scale(slam, slam);
     ctx.globalAlpha = a * Math.min(1, k * 9);
-    ctx.lineWidth = Math.max(4, px * 0.12); ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,0.9)'; ctx.strokeText(name, 0, 0);
-    const g = ctx.createLinearGradient(0, -px / 2, 0, px / 2); g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, '#ffe9a8'); g.addColorStop(1, '#d6a33a');
-    if (!this.lowQ) { ctx.shadowColor = c.color; ctx.shadowBlur = 18; }
-    ctx.fillStyle = g; ctx.fillText(name, 0, 0); ctx.shadowBlur = 0;
+    { const gt = glowText(name, ctx.font, px, Math.max(4, px * 0.12), 'rgba(0,0,0,0.9)', 'gold', c.color, this.lowQ ? 0 : 18, false, this.dpr); ctx.drawImage(gt.c, -gt.w / 2, -gt.h / 2, gt.w, gt.h); ctx.lineJoin = 'round'; }
     if (!calm && k < 0.16) { ctx.globalAlpha = (1 - k / 0.16) * 0.8 * a; ctx.fillStyle = '#fff'; ctx.fillText(name, 0, 0); }
     ctx.restore();
     ctx.globalAlpha = a;
@@ -876,21 +917,33 @@ export class Renderer {
   floorCache() {
     const s = this.state, th = this.theme, want = this.z * this.dpr;
     // geometric zoom buckets (~12% apart) so the blit is close to 1:1; capped for memory
-    const px = Math.min(this.lowQ ? 64 : 128, Math.max(16, Math.round(Math.pow(1.12, Math.ceil(Math.log(want) / Math.log(1.12))))));
-    let oh = 0; for (let i = 0; i < s.tiles.length; i++) if (s.tiles[i].t === 'out') oh = (oh * 31 + i) | 0;
-    const B = this.bounds;
-    const key = th.name + '|' + this.lookOf().mat + '|' + s.storm.ring + '|' + px + '|' + oh + '|' + W10.solidsKey(s) + '|' + (B ? B.x0 + ',' + B.y0 + ',' + B.x1 + ',' + B.y1 : '');
+    const cap = this.lowQ ? 64 : 128, span = SIZE + FPAD * 2;
+    let px = Math.min(cap, Math.max(16, Math.round(Math.pow(1.12, Math.ceil(Math.log(want) / Math.log(1.12))))));
+    // B3 10.1: near the resting zoom, bake at exactly the on-screen scale so draw() can blit 1:1 (see the fast path there)
+    const rest = this.defaultZoom() * this.dpr;
+    if (rest <= cap && Math.abs(want / rest - 1) < 0.07) px = Math.round(span * rest) / span;
+    // the content part of the key only changes with the state object (new each update), so it is not rebuilt per frame
+    const B = this.bounds, mk = this.fcMemo || (this.fcMemo = {});
+    if (mk.s !== s || mk.ring !== s.storm.ring || mk.th !== th || mk.B !== B) {
+      let oh = 0; for (let i = 0; i < s.tiles.length; i++) if (s.tiles[i].t === 'out') oh = (oh * 31 + i) | 0;
+      mk.s = s; mk.ring = s.storm.ring; mk.th = th; mk.B = B;
+      mk.pre = th.name + '|' + this.lookOf().mat + '|' + s.storm.ring + '|'; mk.post = '|' + oh + '|' + W10.solidsKey(s) + '|' + (B ? B.x0 + ',' + B.y0 + ',' + B.x1 + ',' + B.y1 : '');
+    }
+    const key = mk.pre + px + mk.post;
     let fc = this.fcache;
     if (fc && fc.key === key) return fc;
-    const kNoPx = key.replace('|' + px + '|', '|');
+    const kNoPx = mk.pre + mk.post;
     if (fc && fc.kNoPx === kNoPx && Math.abs(this.cam.z - this.cam.tz) > this.cam.tz * 0.04) return fc; // A5: keep scaling the old bake mid-zoom; rebake once the zoom settles
-    const span = SIZE + FPAD * 2, n = Math.round(span * px);
+    // B3 10.1: only the zoom changed and the old bake is within 0.8-1.25x of the screen scale: keep scaling it (a bake costs
+    // 15-50 ms, and camera shots used to cost two of them); a zoom back near rest still rebakes for the exact 1:1 copy
+    if (fc && fc.kNoPx === kNoPx && fc.px && px !== Math.round(span * rest) / span && want / fc.px > 0.8 && want / fc.px < 1.25) return fc;
+    const n = Math.round(span * px);
     if (!fc) fc = this.fcache = { c: document.createElement('canvas') };
     if (fc.c.width !== n) { fc.c.width = n; fc.c.height = n; }
     const g = fc.c.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, n, n);
     g.setTransform(px, 0, 0, px, FPAD * px, FPAD * px);
     const save = this.x; this.x = g; this.drawStatic(g, false); this.x = save;
-    fc.key = key; fc.kNoPx = kNoPx; this.cacheBuilds = (this.cacheBuilds || 0) + 1;
+    fc.key = key; fc.kNoPx = kNoPx; fc.px = px; this.cacheBuilds = (this.cacheBuilds || 0) + 1;
     return fc;
   }
   drawStatic(ctx, live) {
@@ -920,10 +973,8 @@ export class Renderer {
     ctx.translate(W / 2 + jx, cy - (b.sub ? px * 0.28 : 0) + jy); ctx.scale(pop, pop);
     ctx.font = `900 ${px}px Cinzel, serif`;
     const tw = ctx.measureText(b.text).width; if (tw > W * 0.86) { px *= W * 0.86 / tw; ctx.font = `900 ${px}px Cinzel, serif`; }
-    ctx.lineWidth = Math.max(4, px * 0.12); ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(6,4,10,0.95)'; ctx.strokeText(b.text, 0, 0);
-    if (!this.lowQ) { ctx.shadowColor = b.color; ctx.shadowBlur = b.ominous ? 26 : 16; }
-    ctx.fillStyle = b.color; ctx.fillText(b.text, 0, 0); ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillText(b.text, 0, -px * 0.03);
+    { const gt = glowText(b.text, ctx.font, px, Math.max(4, px * 0.12), 'rgba(6,4,10,0.95)', b.color, b.color, this.lowQ ? 0 : b.ominous ? 26 : 16, true, this.dpr); ctx.drawImage(gt.c, -gt.w / 2, -gt.h / 2, gt.w, gt.h); }
+    ctx.lineJoin = 'round';
     if (b.sub) { ctx.font = `700 ${Math.max(12, px * 0.3)}px "Chakra Petch", sans-serif`; ctx.lineWidth = 4; ctx.strokeText(b.sub, 0, px * 0.78); ctx.fillStyle = b.ominous ? '#e8d4ff' : '#f2ecff'; ctx.fillText(b.sub, 0, px * 0.78); }
     ctx.restore();
   }

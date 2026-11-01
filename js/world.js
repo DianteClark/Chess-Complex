@@ -3,8 +3,9 @@
 // offscreen canvases; per-frame work is blits and batched paths. lowQ skips the light map,
 // halves weather and drops secondary layers.
 import { SIZE } from './data.js';
-import { ringOf, unitById } from './engine.js';
+import { ringOf, unitById, HILL } from './engine.js';
 import { hiSprite } from './fx.js';
+import * as HZ from './hazards10.js'; // B4 10.1: baked hazard tile art + hazard lights
 
 export const FPAD = 0.7;
 const TAU = Math.PI * 2;
@@ -192,7 +193,7 @@ function tileTexture(L, th, par, v) {
 
 // ---------- static board (cached by Renderer.floorCache) ----------
 export const isSolidT = (t) => t === 'wall' || t === 'rubble' || t === 'crate' || t === 'chest';
-export function solidsKey(s) { let h = 0; for (let i = 0; i < s.tiles.length; i++) { const t = s.tiles[i].t; if (isSolidT(t) || (t === 'shrine' && s.tiles[i].cd === 0)) h = (Math.imul(h, 31) + i * 7 + t.length) | 0; } return h; }
+export function solidsKey(s) { let h = 0; for (let i = 0; i < s.tiles.length; i++) { const t = s.tiles[i].t; if (isSolidT(t) || (t === 'shrine' && s.tiles[i].cd === 0)) h = (Math.imul(h, 31) + i * 7 + t.length) | 0; else if (t === 'pit' || t === 'crumble') h = (Math.imul(h, 31) + HZ.bakeKey(s.tiles[i], i)) | 0; } return h; }
 export function paintBoard(r, ctx, live) {
   const s = r.state, th = r.theme, L = r.lookOf();
   const FB = r.bounds || { x0: 0, y0: 0, x1: SIZE - 1, y1: SIZE - 1 };
@@ -240,6 +241,7 @@ export function paintBoard(r, ctx, live) {
   ctx.globalAlpha = 1;
   ctx.strokeStyle = th.grid; ctx.lineWidth = th.glowGrid ? 0.025 : 0.012;
   ctx.beginPath(); for (let i = FB.x0; i <= FB.x1 + 1; i++) { ctx.moveTo(i, FB.y0); ctx.lineTo(i, FB.y1 + 1); } for (let i = FB.y0; i <= FB.y1 + 1; i++) { ctx.moveTo(FB.x0, i); ctx.lineTo(FB.x1 + 1, i); } ctx.stroke();
+  HZ.bake(r, ctx, live); // B4 10.1: throne dais, geyser vents, conveyor belts, cracks and pits
   if (live) return;
   // baked contact shadows: walls and props shade the floor to their south-east (key light from the north-west)
   const sr = softRect();
@@ -502,6 +504,7 @@ export function drawLighting(r, ctx, T) {
     for (const it of s.items) if (it.k === 'crown') glow(it.x + 0.5, it.y + 0.6, 2.2, '#ffd24d', 0.22);
     for (const m of s.meteors || []) glow(m.x + 0.5, m.y + 0.5, 1.6, '#ff6a2a', 0.18 + 0.12 * Math.sin(T * 8));
   }
+  HZ.lights(r, ctx, T); // B4 10.1: throne owner glow, braziers, pressurised geysers (cheap: a few blits)
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 }
 // baked light map: ambient darkness with holes for the static light sources, composited into the floor cache
@@ -525,7 +528,10 @@ export function bakeLight(r, g) {
     else if (k === 'portal') cut(x + 0.5, y + 0.5, 1.8, 0.85);
     else if (k === 'chest') cut(x + 0.5, y + 0.5, 1.6, 0.75);
     else if (k === 'ice') cut(x + 0.5, y + 0.5, 0.9, 0.25);
+    else if (k === 'geyser') cut(x + 0.5, y + 0.5, 1.2, 0.4);
+    else if (k === 'conveyor') cut(x + 0.5, y + 0.5, 0.8, 0.15);
   }
+  if (s.hill && s.tiles[(HILL.y0 + 1) * SIZE + HILL.x0 + 1].t === 'throne') { cut(HILL.x0 + 2, HILL.y0 + 2, 3.6, 0.75); for (const [px, py] of [[0, 0], [4, 0], [0, 4], [4, 4]]) cut(HILL.x0 + px, HILL.y0 + py - 0.4, 1.4, 0.7); } // B4: throne + braziers
   q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
   g.drawImage(lc, -FPAD, -FPAD, span, span);
 }

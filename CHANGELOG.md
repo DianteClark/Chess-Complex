@@ -1,5 +1,13 @@
 # Changelog
 
+## 10.1 (November 2026)
+From the owner's playtest of 10.0, plus a four-handler polish round.
+- **Fixed (owner reports):** emote names in store Collections were clipped and off-centre; the Lesson Complete card's Lessons button sat flush with the card edge; the Board lesson said the Crown appears at the centre (it spawns on a random safe tile, and the Crown banner now names the area).
+- **Performance:** menu scene renders cheaper layers (title 12 to 40 fps in the same test), store compositor layers 219 to 33, match main-thread time per frame below 5.0, three-step auto quality that reacts in about 1 s, boot about 0.4 s, memory levels off over 10 matches.
+- **Hazard art:** Throne dais with capture ring and contested state, geysers that escalate before erupting, conveyor belts, cracking and collapsing floors, Rift Storm tears; baked into the board layer and lit.
+- **Layout and accessibility:** a crawler over about 84 states at four sizes; text under 11px 86 to 0, tap targets under 40px 20 to 0, low contrast 3 to 0, nine overlap and spacing fixes (lobby cards, action buttons, landscape turn strip, small-phone HUD and titles, item sheet, results bar).
+- **Copy:** tutorials, Codex, How to Play, banners and descriptions checked against the engine (bounty rules, Gauntlet heal and bosses, Crown boost for Pawns, event timing, Steadfast and more). The bounty world event is renamed Royal Bounty so it no longer clashes with the Queen's Royal Decree. Lesson Complete shows progress and the next lesson.
+
 ## 10.0 (November 2026): the sequel
 Built by ten specialist handlers working in parallel (messaging, music, sound, piece art, world rendering, effects, store and progression, menus, gameplay, QA), coordinated through `docs/V10_BRIEF.md` and `docs/V10_NOTES.md`.
 

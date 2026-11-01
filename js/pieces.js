@@ -940,7 +940,8 @@ const SPR = new Map(); // key piece|skin|res -> sprite record
 let sprPx = 0, sprVer = 0;
 // Canvas pixels held by all sprites (~4 bytes each). LRU beyond this, but a sprite drawn in the last few seconds is
 // never evicted (the visible set may exceed the budget rather than thrash). Phones ~24 MB, big screens ~48 MB.
-const SPR_BUDGET = typeof window !== 'undefined' && (innerWidth * innerHeight >= 1e6 || (navigator.deviceMemory || 4) >= 8) ? 12e6 : 6e6;
+// B3 10.1: phones get 6e6 px (~24 MB) whatever navigator.deviceMemory says (8 GB phones still kill tabs over canvas memory).
+const SPR_BUDGET = typeof window !== 'undefined' && innerWidth * innerHeight >= 1e6 ? 12e6 : 6e6;
 const SPR_KEEP_MS = 3000;
 const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 function imgCanvas(W, H, data) { const c = mkCanvas(W, H); const x = c.getContext('2d'); const id = x.createImageData(W, H); id.data.set(data); x.putImageData(id, 0, 0); return c; }
@@ -1287,7 +1288,7 @@ export function pieceIcon(piece, skinId, color = null, px = 64) {
   const res = pieceRes(iconFrame(piece, px) * iconDpr() * 0.9);
   if (SPR.has(piece + '|' + sk + '|' + res) || typeof window === 'undefined') { // sprite ready: encode now
     const url = iconCanvas(piece, skinId, color, px, res).toDataURL();
-    if (ICONS.size > 600) ICONS.clear();
+    if (ICONS.size > 600) clearIcons();
     ICONS.set(key, url); return url;
   }
   const url = svgStandIn(piece, skinId, color, px);
@@ -1300,6 +1301,11 @@ export function pieceIcon(piece, skinId, color = null, px = 64) {
 }
 // debug / tests: true once pieceIcon(...) returns the final (non stand-in) image
 export const iconReady = (piece, skinId, color = null, px = 64) => ICONS.has(piece + '|' + skinId + '|' + color + '|' + px);
+// B3 10.1: blob: icon URLs pin their PNG until revoked; free them when the memo is dropped (shown <img>s keep their decoded image)
+function clearIcons() {
+  const old = [...ICONS.values()].filter((u) => typeof u === 'string' && u.startsWith('blob:')); ICONS.clear();
+  if (old.length) setTimeout(() => { for (const u of old) { try { URL.revokeObjectURL(u); } catch {} } }, 30000); // after any in-flight markup has loaded
+}
 let iconSwapBusy = false;
 READY_CB.push(function swapIcons() {
   if (!TEMP.size || iconSwapBusy) return;
@@ -1320,7 +1326,7 @@ READY_CB.push(function swapIcons() {
   for (const e of ready) {
     TEMP.delete(e.key); TEMPURL.delete(e.url);
     const c = iconCanvas(e.piece, e.skinId, e.color, e.px, e.res);
-    const fin = (url) => { if (ICONS.size > 600) ICONS.clear(); ICONS.set(e.key, url); swaps.set(e.url, url); done(); };
+    const fin = (url) => { if (ICONS.size > 600) clearIcons(); ICONS.set(e.key, url); swaps.set(e.url, url); done(); };
     if (c.toBlob && typeof URL !== 'undefined' && URL.createObjectURL) c.toBlob((b) => fin(b ? URL.createObjectURL(b) : c.toDataURL()), 'image/png');
     else fin(c.toDataURL());
   }

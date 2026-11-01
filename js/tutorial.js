@@ -34,7 +34,7 @@ export const LESSONS = [
       { say: 'Each turn you get one move and one action, in either order. When you are done, end your turn.', obj: 'End your turn', glow: '[data-slot=end]', check: (c) => c.t.turns >= 1 },
       { say: 'Turn order runs on SPD. The strip at the top shows who acts next. Faster pieces get more turns, so speed is a real stat here.', glow: '#h-order', next: true },
       { say: 'See those cyan crystals? Promotion Shards. Walk onto them to collect them. It may take a couple of turns.', obj: 'Collect 2 shards', setup: (c) => { c.item(7, 7); c.item(8, 8); c.fresh(); }, mark: () => [{ x: 7, y: 7 }, { x: 8, y: 8 }], check: (c) => (c.me.attune || 0) >= 2 },
-      { say: 'Every shard you ever collect also Attunes you: a little more HP, ATK and DEF, permanently. You will spend shards to evolve, but attunement stays. Keep collecting all game.', glow: '#h-attune', next: true },
+      { say: 'Every shard you collect also attunes you: a little more HP, ATK and DEF for the rest of the match. You spend shards to evolve, but attunement stays. Keep collecting all game.', glow: '#h-attune', next: true },
     ],
   },
   {
@@ -50,10 +50,10 @@ export const LESSONS = [
     ],
   },
   {
-    id: 'evolve', name: 'Evolution', blurb: 'Promoting, the Knight, free actions and AOE shapes.',
+    id: 'evolve', name: 'Evolution', blurb: 'Promoting, the Knight, free actions and attack shapes.',
     start(c) { c.clear(); c.reset('pawn', 6, 8); c.me.shards = 3; },
     steps: [
-      { say: 'You are carrying shards. Two is enough to evolve. Tap Promote and choose the Knight. Promoting never costs your action.', obj: 'Evolve into a Knight', glow: '[data-slot=promote]', setup: (c) => { c.me.shards = Math.max(3, c.me.shards); c.fresh(); },
+      { say: 'You are carrying 3 shards, and a Knight costs 2. Tap Promote and choose the Knight. Promoting never costs your action.', obj: 'Evolve into a Knight', glow: '[data-slot=promote]', setup: (c) => { c.me.shards = Math.max(3, c.me.shards); c.fresh(); },
         check: (c) => { if (c.me.piece === 'bishop' || c.me.piece === 'rook') { c.reset('pawn', c.me.x, c.me.y); c.me.shards = 3; c.fresh(); c.pub(); } return c.me.piece === 'knight'; } }, // wrong pick: back to Pawn to try again
       { say: 'Knights jump in an L and ignore anything in the way. Their Signature, Vault, is a free action that grants a second jump.', next: true },
       { say: 'Use Vault, then make two jumps this turn.', obj: 'Vault, then jump twice', glow: '[data-slot=sig]', setup: (c) => { c.me.cd.sig = 0; c.fresh(); }, check: (c) => c.t.vaulted && c.t.moves >= 2 },
@@ -69,7 +69,7 @@ export const LESSONS = [
     id: 'ultimate', name: 'Ultimates', blurb: 'Charging and unleashing your ultimate.',
     start(c) { c.clear(); c.reset('knight', 6, 8); },
     steps: [
-      { say: 'Dealing and taking damage charges your Ultimate, the gold button. I have filled yours.', glow: '#ult-btn', setup: (c) => { c.me.ult = 100; c.fresh(); }, next: true },
+      { say: 'Dealing and taking damage charges your ultimate, the gold button. I have filled yours.', glow: '#ult-btn', setup: (c) => { c.me.ult = 100; c.fresh(); }, next: true },
       { say: 'The Knight\'s ultimate, Fork, jumps and then hits every square a knight could reach from the landing. Land on the marked tile to catch every dummy.', obj: 'Unleash Fork', glow: '#ult-btn',
         setup: (c) => {
           c.me.ult = 100; c.fresh();
@@ -85,17 +85,17 @@ export const LESSONS = [
     id: 'hazards', name: 'The Board', blurb: 'Storm, terrain, world events and the Crown.',
     start(c) { c.clear(); c.reset('knight', 7, 8); },
     steps: [
-      { say: 'The board fights back. From round 5, the outer ring cracks. A round later it collapses into the void, which burns 20% of your HP every turn. Those red tiles are cracking right now.', setup: (c) => { c.s.storm = { ring: 4, crack: true }; c.fresh(); }, next: true },
-      { say: 'Walls block movement and shots. Rubble and crates break when hit. Brambles stop slides and slow you down. Shrines heal you once, then recharge.', setup: (c) => { c.s.storm = { ring: 0, crack: false }; c.tile(9, 7, 'wall'); c.tile(9, 8, 'wall'); c.tile(5, 6, 'rubble', { hp: 2 }); c.tile(10, 10, 'crate', { hp: 1 }); c.tile(5, 10, 'bramble'); c.tile(9, 10, 'shrine', { cd: 0 }); }, mark: () => [{ x: 9, y: 7, label: 'Wall' }, { x: 5, y: 6, label: 'Rubble' }, { x: 10, y: 10, label: 'Crate' }, { x: 5, y: 10, label: 'Bramble' }, { x: 9, y: 10, label: 'Shrine' }], next: true },
-      { say: 'Every third round a World Event hits: Shard Rain, a Meteor Storm, a Blood Moon, or a Supply Drop. A supply cache just landed. Break it open with T-Strike. It takes two hits, so end your turn between them.', obj: 'Break open the cache', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'),
+      { say: 'The board fights back. From round 5 the outer ring cracks, then falls into the void a round later, and the storm closes in again every 3 rounds. The void burns 20% of your max HP a turn. These red tiles are cracking now.', setup: (c) => { c.s.storm = { ring: 4, crack: true }; c.fresh(); }, next: true },
+      { say: 'Walls block movement and shots. Rubble and crates break when hit. Brambles stop slides and cost you initiative. Shrines heal 40% once, then recharge.', setup: (c) => { c.s.storm = { ring: 0, crack: false }; c.tile(9, 7, 'wall'); c.tile(9, 8, 'wall'); c.tile(5, 6, 'rubble', { hp: 2 }); c.tile(10, 10, 'crate', { hp: 1 }); c.tile(5, 10, 'bramble'); c.tile(9, 10, 'shrine', { cd: 0 }); }, mark: () => [{ x: 9, y: 7, label: 'Wall' }, { x: 5, y: 6, label: 'Rubble' }, { x: 10, y: 10, label: 'Crate' }, { x: 5, y: 10, label: 'Bramble' }, { x: 9, y: 10, label: 'Shrine' }], next: true },
+      { say: 'Every third round a world event hits, such as Shard Rain, a Meteor Storm, a Blood Moon or a Supply Drop. A supply cache just landed. Break it open with T-Strike. This one takes two hits, so end your turn between them.', obj: 'Break open the cache', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'),
         setup: (c) => { c.clear(); c.reset('knight', 7, 9); c.tile(7, 8, 'chest', { hp: 2 }); c.fresh(); }, mark: () => [{ x: 7, y: 8 }], check: (c, ev) => c.ev(ev, (e) => e.e === 'chest' && e.broke) },
-      { say: 'On round 7 the Crown appears at the centre. Claim it to become the King: tougher and self-healing, but slow. Everyone will hunt you. Go on, take it.', obj: 'Claim the Crown',
+      { say: 'On round 7 the Crown appears somewhere safe on the board. Claim it to become the King: tougher and self-healing, but slow, and everyone will hunt you. If the King falls, the Crown shatters into 4 shards. Go on, take it.', obj: 'Claim the Crown',
         setup: (c) => { c.clear(); c.reset('knight', 6, 9); c.item(7, 7, 'crown'); c.fresh(); }, mark: () => [{ x: 7, y: 7 }], check: (c) => c.me.piece === 'king' },
-      { say: 'That is the core of it. One more lesson covers the newest dangers on the board, or jump straight into the Graduation match.', next: true },
+      { say: 'That is the core of it. One more lesson covers hazard themes, the Throne and Siege, or you can jump straight into the Graduation match.', next: true },
     ],
   },
   {
-    id: 'frontier', name: 'New Ground', blurb: 'Geysers, crumbling floors, the Throne and the new Hollows.',
+    id: 'frontier', name: 'New Ground', blurb: 'Hazard themes, the Throne and Siege Hollows.',
     start(c) { c.clear(); c.reset('knight', 7, 8); },
     steps: [
       { say: 'Some boards roll a hazard theme. This is a geyser vent, and the steam means it erupts at the end of the round: it scalds the vent and the four tiles beside it, and throws whoever stands on it. You are standing on it. Jump clear.', obj: 'Get clear of the geyser',
@@ -107,10 +107,10 @@ export const LESSONS = [
       { say: 'In King of the Hill the golden Throne sits at the centre. Start your turn on it for 2 points, or 1 if an enemy shares it. First to 10 wins. Step onto the Throne.', obj: 'Step onto the Throne',
         setup: (c) => { c.clear(); c.reset('pawn', 5, 10); for (let y = 6; y <= 9; y++) for (let x = 6; x <= 9; x++) c.tile(x, y, 'throne'); c.fresh(); },
         mark: () => [{ x: 6, y: 9 }], check: (c) => { const t = c.s.tiles[c.me.y * 16 + c.me.x]; return !!t && t.t === 'throne'; } },
-      { say: 'In Siege and the Gauntlet, new Hollows hunt you: fast Stalkers, Hexers that shoot from range, Splitters that burst into Mites, and Brutes behind a shield. Shields soak damage until they break. Break this one.', obj: 'Break the shield', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'),
+      { say: 'In Siege and the Gauntlet, Hollows come in waves and hunt you: fast Stalkers, Hexers that shoot from range, Splitters that burst into Mites, and Brutes behind a shield. A shield soaks damage until it breaks. Break this one.', obj: 'Break the shield', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'),
         setup: (c) => { c.clear(); c.reset('knight', 7, 10); const d = c.dummy(7, 9, 60); d.shield = 10; d.shieldMax = 10; d.role = 'brute'; d.name = 'Brute'; c.fresh(); },
         mark: (c) => c.dummies().map((d) => ({ x: d.x, y: d.y })), check: (c, ev) => c.ev(ev, (e) => e.e === 'shieldBreak') },
-      { say: 'Watch the banners for the new world events too: Eclipse hides distant pieces, Earthquakes reshape walls, Mana Surge charges every ultimate, the Royal Decree puts a bounty on the leader, War Drums speed everyone up, and the Restless Dead rise to hunt. The Codex has it all. Now prove yourself in the Graduation match.', next: true },
+      { say: 'Watch the banners for the other world events: an Eclipse hides distant pieces, an Earthquake reshapes the walls, a Mana Surge charges every ultimate, a Royal Bounty marks the leader, War Drums speed everyone up, and the Restless Dead rise to hunt. The Codex has the details. Now prove yourself in the Graduation match.', next: true },
     ],
   },
 ];

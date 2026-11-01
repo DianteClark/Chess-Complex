@@ -109,7 +109,7 @@
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v10.0</div>
+    <div class="version">v10.1</div>
   </section>
 
   <!-- LOADOUT -->
@@ -241,7 +241,7 @@
   <section class="screen" id="s-tutorial">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Tutorial</h2><div></div></header>
     <div class="scroll">
-      <div class="mentor"><img id="mentor-img" alt=""><div><b>The Grandmaster</b><p>Five short lessons, then a graduation match. Each lesson pays 50 Marks the first time you finish it.</p></div></div>
+      <div class="mentor"><img id="mentor-img" alt=""><div><b>The Grandmaster</b><p>Six short lessons, then a graduation match. Each lesson pays 50 Marks the first time you finish it.</p></div></div>
       <div id="lesson-list"></div>
     </div>
   </section>
@@ -309,18 +309,18 @@
   <section class="screen" id="s-howto">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>How to Play</h2><div></div></header>
     <div class="scroll prose">
-      <div class="panel"><h3>Last piece standing</h3><p>Everyone starts as a Pawn on a 16 by 16 board. Up to 8 players. Eliminate everyone else.</p></div>
+      <div class="panel"><h3>Last piece standing</h3><p>Everyone starts as a Pawn on a 16 by 16 board, up to 8 players. Eliminate everyone else. Before round 6, a piece at full HP survives any single hit (Steadfast), so nobody is knocked out in the opening.</p></div>
       <div class="panel"><h3>Turns run on speed</h3><p>Every piece has a speed meter. Higher SPD means you act more often. The strip at the top shows who moves next. On your turn you get one move and one action, in either order. Vault and Sprint are free actions.</p></div>
-      <div class="panel"><h3>Evolve</h3><p>Collect Promotion Shards from the floor, crates, Hollows and fallen players. Spend them to evolve: Pawn, then Knight or Bishop, then Rook, then Queen. Or Hone your current piece for +15% stats and a stronger signature, so you can stay your favourite piece all game.</p></div>
-      <div class="panel"><h3>Attunement</h3><p>Every shard you pick up also attunes you, permanently: +1% HP, +0.8% ATK and +0.5% DEF per shard, plus +1 SPD every 6 shards, up to 30. Spending shards never removes attunement, so keep collecting even after you max out your piece. Every 5 attunement adds an orbiting crystal so everyone can see how strong you are.</p></div>
-      <div class="panel"><h3>Ultimates</h3><p>Dealing and taking damage charges your Ultimate. When the gold button is full, unleash your piece's ultimate: En Passant, Fork, Excommunicate, Castling, Checkmate Nova, or the King's Divine Right.</p></div>
-      <div class="panel"><h3>World events</h3><p>Every third round something happens: Shard Rain, a Meteor Storm (get off the marked tiles), a Blood Moon that boosts all damage, or a Supply Drop cache worth breaking open. Later in the match: an Eclipse that hides distant pieces, Earthquakes that crack walls, a Mana Surge that charges every ultimate, a Royal Decree bounty on the leader, War Drums that speed everyone up, and the Restless Dead.</p></div>
-      <div class="panel"><h3>Hazards</h3><p>Many boards roll a hazard theme: lava, ice, portals, geyser vents that erupt every few rounds, conveyor tracks that carry pieces, cracked floor that collapses on the second step, or a rift storm that swaps two players. Chaos mode stacks two at once.</p></div>
-      <div class="panel"><h3>More ways to play</h3><p>King of the Hill: start your turn on the golden Throne to score, first to 10. Chaos: two hazards and a world event every round. Gauntlet: a co-op boss rush ending with the Wraith Regent and a Colossus together. Mirror Match: everyone gets the same random build.</p></div>
-      <div class="panel"><h3>The board</h3><p>Walls block movement and shots. Rubble and crates break. Brambles stop slides and slow you down. Shrines heal once, then recharge. Hollows guard shard caches.</p></div>
-      <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later. Standing in the void burns 20% of your HP every turn. Once the board is fully closed, everyone burns.</p></div>
-      <div class="panel"><h3>The Crown</h3><p>On round 7 the Crown appears at the centre. Whoever takes it becomes the King: more HP, steady healing, but slow single steps. Kill the King and the Crown drops.</p></div>
-      <div class="panel"><h3>Controls</h3><p>Tap a highlighted tile to move. Pick an ability, tap a target to preview the damage, tap again to confirm. Drag to pan, pinch or scroll to zoom. On a keyboard: 1-4 for actions, P to promote, Space to end your turn.</p></div>
+      <div class="panel"><h3>Evolve</h3><p>Collect Promotion Shards from the floor, crates, Hollows and fallen players, then tap Promote. The ladder is Pawn, then Knight or Bishop (2 shards), then Rook (4 more), then Queen (7 more), and promoting never uses your action. Or Hone your current piece instead: +15% stats and a stronger Signature per level, up to 3, so you can stay your favourite piece all game.</p></div>
+      <div class="panel"><h3>Attunement</h3><p>Every shard you pick up also attunes you for the rest of the match: +1% HP, +0.8% ATK and +0.5% DEF per shard, plus +1 SPD every 6 shards, up to 30. Spending shards never removes attunement, so keep collecting even after you max out your piece. Every 5 attunement adds an orbiting crystal so everyone can see how strong you are.</p></div>
+      <div class="panel"><h3>Ultimates</h3><p>Dealing and taking damage charges your ultimate. When the gold button is full, unleash your piece's ultimate: En Passant, Fork, Excommunicate, Castling, Checkmate Nova, or the King's Divine Right.</p></div>
+      <div class="panel"><h3>World events</h3><p>Every third round something happens: Shard Rain, a Supply Drop cache worth breaking open, an Earthquake that cracks walls, a Mana Surge that charges every ultimate, or War Drums that speed everyone up. From round 6 the dangerous ones join in: a Meteor Storm (get off the marked tiles), a Blood Moon that boosts all damage, an Eclipse that hides distant pieces, a Royal Bounty on the leader, and the Restless Dead.</p></div>
+      <div class="panel"><h3>Hazards</h3><p>Most boards roll a hazard theme: lava, ice, portals, geyser vents that erupt every third round, conveyor tracks that carry pieces, cracked floor that collapses on the second step, or a rift storm that swaps two players. Chaos stacks two at once.</p></div>
+      <div class="panel"><h3>Ten ways to play</h3><p>Battle Royale: the full game. Blitz: 15-second turns and a faster storm. Duel: one on one in a 10 by 10 arena. Squads: teams of two who can revive each other. Siege: co-op against eight waves of Hollows. Daily Challenge: one map and build for everyone, new each day. King of the Hill: start your turn on the golden Throne to score, first to 10. Chaos: two hazards and a world event every round. Gauntlet: a co-op boss rush that ends with the Regent Ascendant and a Colossus together. Mirror Match: everyone gets the same random build.</p></div>
+      <div class="panel"><h3>The board</h3><p>Walls block movement and shots. Rubble and crates break when hit. Brambles stop slides and cost initiative. Shrines heal 40% once, then recharge. Hollows guard shard caches.</p></div>
+      <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later, and the storm closes in again every 3 rounds. Standing in the void burns 20% of your max HP every turn. Once the board is fully closed, everyone burns 6% a turn.</p></div>
+      <div class="panel"><h3>The Crown</h3><p>On round 7 the Crown appears on a random safe tile. Whoever takes it becomes the King: more HP and healing every turn, but slow single steps, and everyone will hunt you. Kill the King and the Crown shatters into 4 shards.</p></div>
+      <div class="panel"><h3>Controls</h3><p>Tap a highlighted tile to move. Pick an ability, tap a target to preview the damage, tap again to confirm. Hold an action button to see what it does. Drag to pan, pinch or scroll to zoom. On a keyboard: 1-4 for actions, P to promote, Space or E to end your turn, Esc to cancel.</p></div>
     </div>
   </section>
 
@@ -398,6 +398,8 @@
         <div class="r-title">Lesson Complete</div>
         <div class="r-place" id="lesson-name"></div>
         <div class="r-marks" id="lesson-reward"></div>
+        <div class="lesson-prog" id="lesson-prog" style="display:flex;flex-direction:column;align-items:center;gap:6px"><div class="pips" id="lesson-pips" aria-hidden="true" style="width:100%;max-width:220px"></div><span id="lesson-count" style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute)"></span></div>
+        <div class="lesson-up" id="lesson-next" style="text-align:center;padding:10px 12px;border-radius:14px;background:rgba(0,0,0,.25);box-shadow:inset 0 0 0 1px rgba(127,224,255,.25);line-height:1.35"></div>
         <button class="btn big gold wide shine" data-act="next-lesson" id="btn-next-lesson">Next Lesson</button>
         <button class="btn wide" data-act="to-tutorial">Lessons</button>
       </div>
