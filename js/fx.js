@@ -145,6 +145,28 @@ export class FX {
         });
         break;
       }
+      case 'confetti': {
+        const cols = ['#ff4d6d', '#ffd24d', '#5cff9d', '#4dabff', '#c77dff', '#ffffff'];
+        this.shatterSprite(base, x, y, 0.9);
+        for (let i = 0; i < 70; i++) { const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, v = 3 + Math.random() * 4; this.parts.push({ x, y: y - 0.5, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: 5, life: 1 + Math.random() * 0.6, t: 0, color: cols[i % cols.length], size: 0.06, kind: 'chunk', rot: Math.random() * 6, vr: (Math.random() - 0.5) * 20, floor: y + 0.2 }); }
+        this.ring(x, y, '#ffd24d', 2.2, 0.5); this.flash(0.2, '#fff6d0');
+        break;
+      }
+      case 'frozen':
+        this.implodes.push({ img: pieceSprite(piece, skin, 'rgba(170,230,255,0.85)'), x, y, t: 0, life: 0.45, hold: true });
+        this.after(0.05, () => { this.burst(x, y - 0.5, '#e8fbff', 20, 1.5, 'up'); this.ring(x, y, '#9df3ff', 1.6, 0.4); });
+        this.after(0.45, () => {
+          this.shatterSprite(pieceSprite(piece, skin, 'rgba(170,230,255,0.85)'), x, y, 1.3);
+          this.burst(x, y - 0.4, '#d8fbff', 34, 5, 'chunk'); this.burst(x, y - 0.4, '#ffffff', 26, 6);
+          this.ring(x, y, '#9df3ff', 3, 0.6, 0.12); this.flash(0.35, '#e8fbff'); this.decal(x, y - 0.1, 'rgba(180,230,255,0.35)', 0.55);
+        });
+        break;
+      case 'ascend':
+        this.pillar(x, y, '#fff6d0', 1, 1.4, 9);
+        this.implodes.push({ img: pieceSprite(piece, skin, 'white'), x, y, t: 0, life: 1.1, rise: true });
+        for (let i = 0; i < 6; i++) this.after(i * 0.12, () => this.burst(x, y - 0.5 - i * 0.3, '#fff6d0', 10, 1.2, 'up'));
+        this.after(0.9, () => { this.flash(0.45, '#fffbe6'); this.ring(x, y - 2.5, '#ffe9a8', 3, 0.7, 0.1); this.burst(x, y - 2.6, '#ffffff', 40, 4); });
+        break;
       case 'starfall':
         this.meteor(x, y - 0.3, 0, '#9df3ff', () => {
           this.flash(0.5, '#d8f6ff'); this.shatterSprite(base, x, y, 1.4);
@@ -349,9 +371,9 @@ export class FX {
     ctx.lineCap = 'butt';
     for (const im of this.implodes) {
       const k = im.t / im.life;
-      const sc = im.hold ? 1 : 1 - k * k;
-      ctx.save(); ctx.globalAlpha = im.hold ? 1 : 1 - k * 0.3;
-      ctx.translate(im.x, im.y - (im.hold ? 0 : k * 0.4)); ctx.rotate(im.hold ? 0 : k * k * 6); ctx.scale(sc / SPR, sc / SPR);
+      const sc = im.hold ? 1 : im.rise ? 1 - k * 0.3 : 1 - k * k;
+      ctx.save(); ctx.globalAlpha = im.hold ? 1 : im.rise ? 1 - k : 1 - k * 0.3;
+      ctx.translate(im.x, im.y - (im.hold ? 0 : im.rise ? k * k * 3 : k * 0.4)); ctx.rotate(im.hold || im.rise ? 0 : k * k * 6); ctx.scale(sc / SPR, sc / SPR);
       ctx.drawImage(im.img, -48, -112);
       ctx.restore();
     }

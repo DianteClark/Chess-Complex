@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.0 (October 2026)
+**Promotion ladder**
+- The Promote menu shows the whole fixed ladder with a path strip, your shard count and the total cost of every rung. Climb several rungs in one tap: Pawn to Rook for 8, Pawn to Queen for 15, Knight or Bishop to Queen for 12. Unaffordable rungs show how many shards you still need. Bots climb the ladder too.
+
+**The Store** (replaces the Armory)
+- Featured: four daily offers, including a 30% Deal of the Day, plus a Founder's Pack placeholder for the future app store release.
+- Bundles: Inferno Collection, Winter Court, Spring Bloom and Regal Treasury, 20-25% off, charging only for items you don't own.
+- Rarity tiers (Common, Rare, Epic, Legendary, Season) with coloured cards and a shimmer on Legendaries.
+- Item reveal: every purchase plays a full-screen reveal with rays in its rarity colour and an Equip button. Purchases need a confirm tap.
+- New cosmetics: Jade, Amethyst, Onyx, Frostfire and Solar Flare piece sets; Sakura Terrace, Frozen Tundra (snow) and Abyssal Deep (bubbles) boards; Party Popper, Deep Freeze and Ascension finishers.
+- New cosmetic types: Trails (Sparks, Embers, Frost, Petals, Stardust, Royal Procession) that follow your piece for everyone to see, and Emote packs (Good Sport, Trash Talk, Royal Court).
+
+**Showtime**
+- A contender reveal before every match, with a VS screen for Duels.
+- A podium on the results screen once a match ends.
+- Your equipped piece set and trail on a pedestal on the title screen.
+
+**Fixes from the 3.0 code review**
+- A host pressing Play Again mid-match could leave friends frozen. Rematch is now only available after the match ends.
+- A friend's forfeit left their piece human-controlled, wasting turn timers, and paid 15 Marks. A bot now takes over and nothing is paid. Forfeits count as a loss and reset win streaks.
+- The Graduation match now always uses Battle Royale instead of the Play screen's mode.
+- Importing an old or malformed backup code could break Host Online and other screens. All profiles are now validated on load and import.
+- The Daily Challenge's equipped abilities were wrong on about 45% of days, and its bots differed between attempts. Both are now seeded.
+- Animations could pause for a second after a backlog flush.
+- Rejected lobby joiners are disconnected. Clients see the lobby's mode. A host can no longer start a 1-player match.
+
+
 ## 2.0 (October 2026)
 **Modes**
 - Battle Royale, Blitz (faster storm, 15 second turns, 2 starting shards), Duel (1v1 in a 10x10 arena) and Daily Challenge (seeded map and loadout, 7 Hard bots, best-score tracking).

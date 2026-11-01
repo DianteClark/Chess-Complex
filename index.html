@@ -52,7 +52,7 @@
         <button class="btn" data-go="join">Join With Code</button>
         <div class="tiles">
           <button class="tile" data-go="loadout"><svg><use href="#i-sig"/></svg><span>Loadout</span></button>
-          <button class="tile" data-go="armory"><svg><use href="#i-eq"/></svg><span>Armory</span></button>
+          <button class="tile store" data-go="armory"><svg><use href="#i-eq"/></svg><span>Store</span><i class="badge" id="s-badge"></i></button>
           <button class="tile path" data-go="path"><svg><use href="#i-promo"/></svg><span>Crown Path</span><i class="badge" id="p-badge"></i></button>
           <button class="tile" data-go="trophies"><svg><use href="#i-trophy"/></svg><span>Trophies</span></button>
           <button class="tile" data-go="quests"><svg><use href="#i-scroll"/></svg><span>Quests</span><i class="badge" id="q-badge"></i></button>
@@ -70,7 +70,7 @@
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v2.0</div>
+    <div class="version">v3.0</div>
   </section>
 
   <!-- LOADOUT -->
@@ -105,11 +105,15 @@
 
   <!-- ARMORY -->
   <section class="screen" id="s-armory">
-    <header class="bar"><button class="back" data-go="title">Back</button><h2>Armory</h2><div class="marks"><i class="mark-ico"></i><b id="marks-armory">0</b></div></header>
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Store</h2><div class="marks"><i class="mark-ico"></i><b id="marks-armory">0</b></div></header>
     <div class="tabs" id="armory-tabs">
-      <button class="tab on" data-tab="pieces">Piece Sets</button>
+      <button class="tab on" data-tab="featured">Featured</button>
+      <button class="tab" data-tab="bundles">Bundles</button>
+      <button class="tab" data-tab="pieces">Pieces</button>
       <button class="tab" data-tab="boards">Boards</button>
       <button class="tab" data-tab="finishers">Finishers</button>
+      <button class="tab" data-tab="trails">Trails</button>
+      <button class="tab" data-tab="emotes">Emotes</button>
     </div>
     <div class="scroll">
       <p class="hint center" id="armory-hint">Earn Marks every match. Spend them here.</p>
@@ -277,6 +281,7 @@
     <div class="coach hidden" id="coach"><img id="coach-img" alt=""><div class="coach-body"><b>The Grandmaster</b><p id="coach-text"></p><div class="coach-obj hidden" id="coach-obj"><i></i><span></span></div></div><button class="btn small gold" id="coach-next">Next</button></div>
     <div class="abinfo hidden" id="abinfo"></div>
     <div class="discovery" id="discovery"></div>
+    <div class="contenders hidden" id="contenders"></div>
     <div class="gm-tip hidden" id="gm-tip"><img alt=""><p></p></div>
     <button class="ult-btn" id="ult-btn" data-slot="ult" aria-label="Ultimate"><svg class="ult-ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" class="ur-bg"/><circle cx="32" cy="32" r="28" class="ur-fg" id="ult-fg"/></svg><span class="ult-k">ULT</span><span class="ult-pct" id="ult-pct">0%</span></button>
     <div class="event-chip hidden" id="event-chip"></div>
@@ -345,6 +350,7 @@
     <div role="dialog" aria-modal="true" class="modal hidden" id="m-results">
       <canvas id="confetti"></canvas>
       <div class="modal-box results">
+        <div class="podium hidden" id="podium"></div>
         <div class="r-title" id="r-title"></div>
         <div class="r-place" id="r-place"></div>
         <div class="r-stats" id="r-stats"></div>
@@ -379,6 +385,16 @@
     <div class="row2"><button class="btn small" data-act="export-profile">Copy Backup Code</button><button class="btn small" data-act="import-profile">Restore Backup</button></div>
     <div class="set-links"><a href="privacy.html" target="_blank" rel="noopener">Privacy</a><a href="#" data-act="credits">Credits</a><a href="#" data-act="whatsnew">What's New</a></div>
     <button class="btn wide" data-act="close-settings">Done</button>
+  </div>
+</div>
+<div role="dialog" aria-modal="true" class="modal hidden global" id="m-reveal">
+  <div class="modal-box reveal-box">
+    <div class="rv-new">NEW ITEM</div>
+    <canvas id="rv-canvas"></canvas>
+    <div class="rv-rar" id="rv-rar"></div>
+    <div class="rv-name" id="rv-name"></div>
+    <button class="btn big gold wide shine" id="rv-equip">Equip now</button>
+    <button class="btn wide ghost" data-act="close-reveal">Later</button>
   </div>
 </div>
 <div role="dialog" aria-modal="true" class="modal hidden global" id="m-info">

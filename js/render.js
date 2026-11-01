@@ -1,5 +1,5 @@
 // Board renderer: themed tiles, pieces, telegraphs, sequenced combat VFX, camera juice.
-import { SIZE, BOARDS, ABILITIES } from './data.js';
+import { SIZE, BOARDS, ABILITIES, TRAILS } from './data.js';
 import { drawPiece, skinOf, PIECE_TOP } from './pieces.js';
 import { hiSprite } from './fx.js';
 import { ringOf, stats, unitById, previewDamage } from './engine.js';
@@ -69,6 +69,7 @@ export class Renderer {
     const saveBase = this.base; this.base = this.time;
     for (const t of due) t.fn();
     this.base = saveBase;
+    this.seqEnd = this.time;
     for (const d of this.disp.values()) { d.t0 = -9; d.x = d.sx = d.tx; d.y = d.sy = d.ty; d.lunge = null; }
   }
   sfx(n) { this.hooks.sfx && this.hooks.sfx(n); }
@@ -540,6 +541,11 @@ export class Renderer {
         ctx.globalAlpha = blink * 0.9;
         ctx.fillStyle = 'rgba(220,255,140,0.25)'; ctx.beginPath(); ctx.arc(x, y, 0.16, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = 'rgba(240,255,190,0.95)'; ctx.beginPath(); ctx.arc(x, y, 0.045, 0, Math.PI * 2); ctx.fill();
+      } else if (w === 'snow') {
+        const x = m.x + Math.sin(m.p * 0.8) * 0.5, y = SIZE - m.y;
+        ctx.globalAlpha = 0.75; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x, y, m.s * 1.4, 0, Math.PI * 2); ctx.fill();
+      } else if (w === 'bubbles') {
+        ctx.globalAlpha = 0.35 + a * 0.3; ctx.strokeStyle = '#9dfff6'; ctx.lineWidth = 0.012; ctx.beginPath(); ctx.arc(m.x + Math.sin(m.p * 1.3) * 0.25, m.y, m.s * 2.2, 0, Math.PI * 2); ctx.stroke();
       } else if (w === 'stars') {
         ctx.globalAlpha = a * 0.7; ctx.fillStyle = '#e8f6ff'; ctx.fillRect(m.x, m.y, m.s, m.s);
       } else {
@@ -761,6 +767,10 @@ export class Renderer {
     if (Math.random() < 0.07 && u.kind === 'player' && sk.fx !== 'dust') {
       const col = sk.fx === 'ember' ? '#ff8a3d' : sk.fx === 'frost' ? '#d6f7ff' : sk.fx === 'leaf' ? '#8de37a' : sk.fx === 'spark' ? '#00f0ff' : sk.fx === 'star' ? '#d6a6ff' : '#ffe9a8';
       this.fx.parts.push({ x: cx + (Math.random() - 0.5) * 0.4, y: base - 0.3 - Math.random() * 0.5, vx: (Math.random() - 0.5) * 0.2, vy: -0.4, g: -0.1, life: 0.9, t: 0, color: col, size: 0.025, kind: 'spark', rot: 0, vr: 0 });
+    }
+    if (u.trail && u.trail !== 'none' && (d.moving || d.lunge) && TRAILS[u.trail] && !this.lowQ) {
+      const cols = TRAILS[u.trail].colors;
+      for (let i = 0; i < 2; i++) this.fx.parts.push({ x: cx + (Math.random() - 0.5) * 0.3, y: base - 0.15 - d.lift - Math.random() * 0.4, vx: (Math.random() - 0.5) * 0.4, vy: -0.2 - Math.random() * 0.4, g: u.trail === 'royal' ? 2 : -0.2, life: 0.6 + Math.random() * 0.4, t: 0, color: cols[(Math.random() * cols.length) | 0], size: u.trail === 'petals' ? 0.05 : 0.035, kind: u.trail === 'royal' ? 'coin' : u.trail === 'petals' ? 'chunk' : 'spark', rot: Math.random() * 6, vr: (Math.random() - 0.5) * 8, floor: u.trail === 'royal' ? base : null });
     }
     if (u.kind === 'hollow' && Math.random() < 0.1) this.fx.parts.push({ x: cx + (Math.random() - 0.5) * 0.3, y: base - 0.1, vx: 0, vy: -0.3, g: -0.1, life: 0.8, t: 0, color: '#8f8cff', size: 0.03, kind: 'spark', rot: 0, vr: 0 });
     // attunement crystals orbit

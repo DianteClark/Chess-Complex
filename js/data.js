@@ -233,3 +233,56 @@ export const ACHIEVEMENTS = {
   level10:    { name: 'Veteran', desc: 'Reach level 10.', stat: 'level', goal: 10, reward: 200 },
   collector:  { name: 'Collector', desc: 'Own 12 cosmetics.', stat: 'cosmetics', goal: 12, reward: 250 },
 };
+
+// ---------- 3.0: store ----------
+export const RARITY = {
+  common:    { name: 'Common',    color: '#b8b2c8' },
+  rare:      { name: 'Rare',      color: '#4dabff' },
+  epic:      { name: 'Epic',      color: '#c77dff' },
+  legendary: { name: 'Legendary', color: '#ffb347' },
+  season:    { name: 'Season',    color: '#5cff9d' },
+};
+Object.assign(SKINS, {
+  jade:      { name: 'Jade',       price: 220, body: ['#9cf0c4', '#0e5a3a'], rim: '#eafff4', glow: '#3dffa8', line: '#03281a', fx: 'leaf' },
+  amethyst:  { name: 'Amethyst',   price: 220, body: ['#e2b8ff', '#4a1a7a'], rim: '#f7ecff', glow: '#b06bff', line: '#1e0636', fx: 'glint' },
+  onyx:      { name: 'Onyx',       price: 480, body: ['#5a5560', '#000000'], rim: '#ff5a5a', glow: '#ff2a2a', line: '#ff3b3b', fx: 'ember' },
+  frostfire: { name: 'Frostfire',  price: 520, body: ['#9df3ff', '#c4361a'], rim: '#ffffff', glow: '#ff8a3d', line: '#2a0a10', fx: 'frost' },
+  solar:     { name: 'Solar Flare', price: 950, body: ['#fffbe6', '#ff6a00'], rim: '#ffffff', glow: '#ffcf4a', line: '#5a1a00', fx: 'glint' },
+});
+Object.assign(BOARDS, {
+  sakura: { weather: 'petals', name: 'Sakura Terrace', price: 350, light: '#3a2430', dark: '#2a1822', vein: 'rgba(255,180,210,0.08)', frame: '#ffb7d0', grid: 'rgba(255,183,208,0.12)', wallTop: ['#5a3a48', '#3e2632'], wallFront: '#2a1820', bg: ['#2e1624', '#070306'], mote: '#ffd1dc' },
+  tundra: { weather: 'snow', name: 'Frozen Tundra', price: 350, light: '#d6e4ee', dark: '#a9bccb', vein: 'rgba(60,90,120,0.14)', frame: '#9df3ff', grid: 'rgba(40,70,100,0.14)', wallTop: ['#f2f8fc', '#b9cad8'], wallFront: '#7a8fa0', bg: ['#1a2a3a', '#05080c'], mote: '#ffffff' },
+  abyss:  { weather: 'bubbles', name: 'Abyssal Deep', price: 550, light: '#0f2a33', dark: '#0a1d24', vein: 'rgba(80,220,255,0.07)', frame: '#3dfff0', grid: 'rgba(61,255,240,0.12)', wallTop: ['#1f4a55', '#14333b'], wallFront: '#0a1f25', bg: ['#0a2a36', '#010508'], mote: '#9dfff6' },
+});
+Object.assign(FINISHERS, {
+  confetti: { name: 'Party Popper', price: 300, desc: 'Pop! Your victim bursts into confetti.' },
+  frozen:   { name: 'Deep Freeze',  price: 550, desc: 'Flash-frozen solid, then shattered into ice.' },
+  ascend:   { name: 'Ascension',    price: 900, desc: 'Lifted into a beam of light and dissolved.' },
+});
+export const TRAILS = {
+  none:     { name: 'None',      price: 0,   rarity: 'common', colors: [] },
+  sparks:   { name: 'Sparks',    price: 120, rarity: 'common', colors: ['#fff1c4', '#ffd24d'] },
+  embers:   { name: 'Embers',    price: 250, rarity: 'rare', colors: ['#ff8a3d', '#ffd27a', '#ff4d1f'] },
+  frost:    { name: 'Frost',     price: 250, rarity: 'rare', colors: ['#d8fbff', '#7fe0ff', '#ffffff'] },
+  petals:   { name: 'Petals',    price: 250, rarity: 'rare', colors: ['#ffd1dc', '#ff9ec0', '#ffffff'] },
+  stardust: { name: 'Stardust',  price: 450, rarity: 'epic', colors: ['#c99bff', '#9df3ff', '#ffffff'] },
+  royal:    { name: 'Royal Procession', price: 800, rarity: 'legendary', colors: ['#ffd24d', '#fff6d0', '#ff4d6d'] },
+};
+export const EMOTE_PACKS = {
+  basic:    { name: 'Classic',   price: 0,   rarity: 'common', emotes: { gg: 'GG', check: 'Check!', nice: 'Nice one', oops: 'Oops', come: 'Come at me', mercy: 'Mercy!' } },
+  friendly: { name: 'Good Sport', price: 100, rarity: 'common', emotes: { gl: 'Good luck', wp: 'Well played', ty: 'Thanks!', sorry: 'Sorry!' } },
+  taunts:   { name: 'Trash Talk', price: 200, rarity: 'rare', emotes: { slow: 'Too slow', soon: 'Checkmate soon', all: 'Is that all?', bye: 'Bye bye' } },
+  royal:    { name: 'Royal Court', price: 400, rarity: 'epic', emotes: { kneel: 'Kneel', long: 'Long live me', yourmove: 'Your move', crown: 'Mine now' } },
+};
+for (const p of Object.values(EMOTE_PACKS)) Object.assign(EMOTES, p.emotes);
+export const RARITIES = {
+  skin: { ivory: 'common', obsidian: 'common', ember: 'rare', glacier: 'rare', verdant: 'rare', jade: 'rare', amethyst: 'rare', crimson: 'epic', neon: 'epic', gilded: 'epic', onyx: 'epic', frostfire: 'epic', voidborn: 'legendary', celestial: 'legendary', solar: 'legendary', arcane: 'season', sovereign: 'season' },
+  board: { hall: 'common', garden: 'rare', marble: 'rare', sakura: 'rare', tundra: 'rare', neon: 'epic', forge: 'epic', abyss: 'epic', astral: 'legendary', throne: 'season' },
+  finisher: { shatter: 'common', inferno: 'rare', lightning: 'rare', confetti: 'rare', voidrift: 'epic', midas: 'epic', frozen: 'epic', starfall: 'legendary', ascend: 'legendary', coronation: 'season' },
+};
+export const BUNDLES = {
+  inferno: { name: 'Inferno Collection', items: [['skin', 'ember'], ['board', 'forge'], ['finisher', 'inferno'], ['trail', 'embers']], off: 0.25 },
+  winter:  { name: 'Winter Court', items: [['skin', 'glacier'], ['board', 'tundra'], ['finisher', 'frozen'], ['trail', 'frost']], off: 0.25 },
+  bloom:   { name: 'Spring Bloom', items: [['skin', 'verdant'], ['board', 'sakura'], ['trail', 'petals'], ['emote', 'friendly']], off: 0.25 },
+  regal:   { name: 'Regal Treasury', items: [['skin', 'gilded'], ['board', 'marble'], ['finisher', 'midas'], ['trail', 'royal']], off: 0.2 },
+};

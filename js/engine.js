@@ -117,7 +117,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     const [x, y] = spawnOrder[i];
     const u = {
       id: s.nextId++, pid: p.pid, name: p.name, bot: !!p.isBot, kind: 'player', slot: i,
-      color: PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter', title: String(p.title || '').slice(0, 24),
+      color: PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter', trail: p.trail || 'none', title: String(p.title || '').slice(0, 24),
       piece: 'pawn', hone: {}, pts: { ...p.build.pts }, passive: p.build.passive, equips: { ...p.build.equips },
       x, y, hp: 1, gauge: rand(s) * 40, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [],
       alive: true, kills: 0, momentum: 0, mark: null, place: 0, dmgDealt: 0, attune: 0, ult: 0, ults: 0, botLevel: p.botLevel || 'normal', pref: rand(s) < 0.5 ? 'knight' : 'bishop',
@@ -631,7 +631,11 @@ export function useAbility(s, u, slot, anchor, ev) {
 
 export function promoteOptions(u) {
   if (u.kind !== 'player' || u.piece === 'king') return [];
-  const out = EVOLVE[u.piece].map((to) => ({ to, cost: EVOLVE_COST[PIECES[to].tier], type: 'evolve' }));
+  // Fixed ladder: every later rung is listed, with the total cost of climbing to it in one go.
+  const best = new Map();
+  const walk = (pc, acc, steps) => { for (const to of EVOLVE[pc]) { const c = acc + EVOLVE_COST[PIECES[to].tier]; if (!best.has(to) || best.get(to).cost > c) best.set(to, { cost: c, steps: steps + 1 }); walk(to, c, steps + 1); } };
+  walk(u.piece, 0, 0);
+  const out = [...best.entries()].map(([to, v]) => ({ to, cost: v.cost, steps: v.steps, type: 'evolve' })).sort((a, b) => a.cost - b.cost || (a.to < b.to ? -1 : 1));
   const h = u.hone[u.piece] || 0;
   if (h < MAX_HONE) out.push({ to: 'hone', cost: honeCost(h), type: 'hone', level: h + 1 });
   return out;
@@ -849,7 +853,9 @@ export function planBot(s, u) {
   for (let k = 0; k < 3; k++) {
     const opts = promoteOptions(u).filter((o) => o.cost <= u.shards);
     if (!opts.length) break;
-    let pick = opts.find((o) => o.type === 'evolve' && (o.to === u.pref || opts.filter((q) => q.type === 'evolve').length === 1));
+    const evo = opts.filter((o) => o.type === 'evolve');
+    const top = evo.reduce((m, o) => Math.max(m, PIECES[o.to].tier), 0);
+    let pick = evo.find((o) => PIECES[o.to].tier === top && (top !== 2 || o.to === u.pref)) || evo.find((o) => PIECES[o.to].tier === top);
     if (!pick && u.piece === 'queen') pick = opts.find((o) => o.type === 'hone');
     if (!pick) break;
     acts.push({ type: 'promote', to: pick.to });

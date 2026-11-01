@@ -1,9 +1,10 @@
 // Chess Complex — app shell: menus, loadout, armory, sessions, in-game HUD, progression.
-import { PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES, MODES, SEASON, SEASON_REWARDS, ACHIEVEMENTS } from './data.js';
+import { TRAILS, PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES, RARITY, BUNDLES, MODES, SEASON, SEASON_REWARDS, ACHIEVEMENTS } from './data.js';
 import { ensureProgress, seasonTier, seasonProgress, rewardLabel, addSeasonXp, checkAchievements, recordMatch, dailySeed, dailyScore, achievementValue } from './progression.js';
 import { legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM, createTutorial, ARENA, isVoid, isCracked } from './engine.js';
 import { LESSONS, Tutorial } from './tutorial.js';
 import { renderCodex, diagram } from './codex.js';
+import { KINDS, ensureStore, item, listKind, featured, bundleInfo, grant, equip, activeEmotes, makePreview, drawPreview } from './store.js';
 import { Renderer } from './render.js';
 import { pieceIcon, drawPiece } from './pieces.js';
 import { FX } from './fx.js';
@@ -31,8 +32,27 @@ function defaultProfile() {
 }
 let profile = defaultProfile();
 try { const raw = localStorage.getItem(PKEY); if (raw) { const d = defaultProfile(); profile = { ...d, ...JSON.parse(raw) }; for (const k of ['ownedBoards', 'ownedFinishers', 'owned', 'tutorial', 'discovered']) if (!Array.isArray(profile[k])) profile[k] = d[k]; } } catch {}
-ensureProgress(profile);
-if (!profile.mode || !MODES[profile.mode]) profile.mode = 'royale';
+function normalizeProfile(d) {
+  const def = defaultProfile();
+  const p = { ...def, ...(d && typeof d === 'object' ? d : {}) };
+  for (const k of ['owned', 'ownedBoards', 'ownedFinishers', 'tutorial', 'discovered', 'played']) if (!Array.isArray(p[k])) p[k] = def[k] || [];
+  if (typeof p.marks !== 'number' || !isFinite(p.marks)) p.marks = def.marks;
+  if (typeof p.name !== 'string' || !p.name) p.name = def.name;
+  const b = p.build && typeof p.build === 'object' ? p.build : def.build;
+  const pts = { hp: 0, atk: 0, def: 0, spd: 0 }; let left = STAT_POINTS;
+  for (const k of Object.keys(pts)) { const v = Math.max(0, Math.min(left, Math.floor(+((b.pts || {})[k]) || 0))); pts[k] = v; left -= v; }
+  const equips = {}; for (const pc of PIECE_ORDER) equips[pc] = PIECES[pc].equips.includes(b.equips && b.equips[pc]) ? b.equips[pc] : def.build.equips[pc];
+  p.build = { preset: PRESETS[b.preset] ? b.preset : null, pts, passive: PASSIVES[b.passive] ? b.passive : def.build.passive, equips };
+  if (!SKINS[p.skin]) p.skin = 'ivory'; if (!BOARDS[p.board]) p.board = 'hall'; if (!FINISHERS[p.finisher]) p.finisher = 'shatter';
+  if (!MODES[p.mode]) p.mode = 'royale';
+  if (!['easy', 'normal', 'hard'].includes(p.botLevel)) p.botLevel = 'normal';
+  if (p.quests && (!Array.isArray(p.quests.list) || p.quests.list.some((q) => !q || !QUESTS[q.id]))) p.quests = null;
+  if (p.daily && (typeof p.daily !== 'object' || !Array.isArray(p.daily.days))) p.daily = null;
+  ensureProgress(p); ensureStore(p);
+  if (!TRAILS[p.trail]) p.trail = 'none';
+  return p;
+}
+profile = normalizeProfile(profile);
 const save = () => { try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch {} };
 const CB_COLORS = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7', '#FFFFFF'];
 const ptsUsed = () => Object.values(profile.build.pts).reduce((a, b) => a + b, 0);
@@ -79,6 +99,7 @@ function renderProfile() {
   $('#marks-title').textContent = profile.marks; $('#marks-armory').textContent = profile.marks; $('#marks-quests').textContent = profile.marks;
   $('#q-badge').textContent = profile.quests && profile.quests.seen === profile.quests.date ? '' : dailyQuests().filter((q) => !q.done).length || '';
   $('#t-badge').textContent = profile.tutorial.length ? '' : 'NEW';
+  $('#s-badge').textContent = profile.storeSeen === today() ? '' : '!';
   $('#p-badge').textContent = seasonTier(profile) > (profile.season.seen || 0) ? '!' : '';
   ['#marks-play', '#marks-path'].forEach((k) => { const el = $(k); if (el) el.textContent = profile.marks; });
   let np = $('#new-player');
@@ -134,6 +155,28 @@ function bgInit() {
         x.rotate(p.r + Math.sin(p.ph * 0.3) * 0.08); x.scale(p.s, p.s);
         drawPiece(x, p.piece, p.skin, { t: now / 1000 });
         x.globalAlpha = 1;
+      }
+      // hero showcase: your equipped set on a pedestal below the menu
+      if (typeof screen !== 'undefined' && screen === 'title') {
+        const mb = (bg.menuEl ||= document.querySelector('.menu')).getBoundingClientRect().bottom;
+        const room = innerHeight - mb - 24;
+        if (room > 90) {
+          const sz = Math.min(room * 0.8, 180), cx0 = innerWidth / 2, by = innerHeight - Math.max(16, (room - sz) / 2);
+          const T = now / 1000;
+          x.setTransform(bg.d, 0, 0, bg.d, 0, 0);
+          const g2 = x.createRadialGradient(cx0, by, 4, cx0, by, sz * 0.9); g2.addColorStop(0, 'rgba(255,215,120,0.32)'); g2.addColorStop(1, 'rgba(255,215,120,0)');
+          x.fillStyle = g2; x.fillRect(cx0 - sz, by - sz * 1.2, sz * 2, sz * 1.5);
+          x.strokeStyle = 'rgba(255,215,120,0.55)'; x.lineWidth = 1.5; x.beginPath(); x.ellipse(cx0, by, sz * 0.42, sz * 0.1, 0, 0, Math.PI * 2); x.stroke();
+          x.strokeStyle = 'rgba(255,215,120,0.25)'; x.beginPath(); x.ellipse(cx0, by, sz * 0.42 + (T * 20) % 30, sz * 0.1 + ((T * 20) % 30) * 0.24, 0, 0, Math.PI * 2); x.stroke();
+          x.translate(cx0, by - 4 + Math.sin(T * 1.6) * 3); x.scale(sz * 0.78, sz * 0.78);
+          drawPiece(x, 'king', profile.skin, { t: T });
+          const tr = TRAILS[profile.trail];
+          if (tr && tr.colors.length && Math.random() < 0.5) (bg.hp ||= []).push({ x: cx0 + (Math.random() - 0.5) * sz * 0.5, y: by - Math.random() * sz * 0.8, vy: -20 - Math.random() * 20, life: 1, c: tr.colors[(Math.random() * tr.colors.length) | 0] });
+          x.setTransform(bg.d, 0, 0, bg.d, 0, 0);
+          bg.hp = (bg.hp || []).filter((q) => (q.life -= dt2) > 0);
+          for (const q of bg.hp) { q.y += q.vy * dt2; x.globalAlpha = q.life; x.fillStyle = q.c; x.beginPath(); x.arc(q.x, q.y, 2.2, 0, Math.PI * 2); x.fill(); }
+          x.globalAlpha = 1;
+        }
       }
     }
     requestAnimationFrame(loop);
@@ -201,96 +244,83 @@ function onLoadoutClick(e) {
   save(); renderLoadout();
 }
 
-// ---------- armory ----------
-let armoryTab = 'pieces';
+// ---------- store ----------
+let armoryTab = 'featured';
 const armoryPreviews = { list: [], active: false };
+const TAB_KIND = { pieces: 'skin', boards: 'board', finishers: 'finisher', trails: 'trail', emotes: 'emote' };
+function priceTag(n) { return `<i class="mark-ico"></i>${n}`; }
+function storeCard(it, opts = {}) {
+  const col = RARITY[it.rarity].color;
+  const price = opts.final ?? it.price;
+  const btn = it.equipped && KINDS[it.kind].equip ? `<button class="btn small" disabled>Equipped</button>`
+    : it.owned ? (KINDS[it.kind].equip ? `<button class="btn small" data-equip="${it.kind}:${it.id}">Equip</button>` : `<button class="btn small" disabled>Owned</button>`)
+    : it.season ? `<button class="btn small" disabled>Crown Path reward</button>`
+    : `<button class="btn small gold" data-buy="${it.kind}:${it.id}" data-price="${price}">${opts.off ? `<s>${it.price}</s> ` : ''}${priceTag(price)}</button>`;
+  const visual = it.kind === 'skin' && !opts.canvas ? `<div class="row"><img src="${pieceIcon('knight', it.id, null, 48)}" alt=""><img class="mid" src="${pieceIcon('queen', it.id, null, 72)}" alt=""><img src="${pieceIcon('rook', it.id, null, 48)}" alt=""></div>` : `<canvas class="preview" data-kind="${it.kind}" data-id="${it.id}"></canvas>`;
+  return `<div class="skin r-${it.rarity} ${it.equipped && KINDS[it.kind].equip ? 'equipped' : ''} ${it.owned ? '' : 'locked'}" data-card="${it.kind}:${it.id}" style="--rc:${col}">
+    ${opts.deal ? '<div class="deal">DEAL OF THE DAY -30%</div>' : ''}<div class="glow" style="background:${col}"></div>
+    ${visual}<div class="rar">${RARITY[it.rarity].name} ${KINDS[it.kind].label}</div><h4>${it.name}</h4>${it.kind === 'finisher' ? `<div class="desc">${FINISHERS[it.id].desc}</div>` : ''}${btn}</div>`;
+}
 function renderArmory() {
   renderProfile();
   $$('#armory-tabs .tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === armoryTab));
-  const hints = { pieces: 'Piece sets change how your pieces look to everyone.', boards: 'Boards change the arena you see.', finishers: 'Finishers play when you eliminate someone. Everyone sees them.' };
-  $('#armory-hint').textContent = hints[armoryTab];
-  const tag = (price) => `<div class="price-tag"><i class="mark-ico"></i>${price}</div>`;
-  const btn = (kind, k, owned, eq, price) => eq ? `<button class="btn small" disabled>Equipped</button>` : owned ? `<button class="btn small" data-equip-${kind}="${k}">Equip</button>` : price == null ? `<button class="btn small" disabled>Crown Path reward</button>` : `<button class="btn small gold" data-buy-${kind}="${k}">Unlock ${price}</button>`;
   armoryPreviews.list = [];
-  if (armoryTab === 'pieces') {
-    $('#skins').innerHTML = Object.entries(SKINS).map(([k, s]) => {
-      const owned = profile.owned.includes(k), eq = profile.skin === k;
-      return `<div class="skin ${eq ? 'equipped' : ''} ${owned ? '' : 'locked'}" data-card="${k}"><div class="glow" style="background:${s.glow}"></div>
-        <div class="row"><img src="${pieceIcon('knight', k, null, 48)}" alt=""><img class="mid" src="${pieceIcon('queen', k, null, 72)}" alt=""><img src="${pieceIcon('rook', k, null, 48)}" alt=""></div>
-        <h4>${s.name}</h4>${btn('skin', k, owned, eq, s.price)}</div>`;
-    }).join('');
-  } else if (armoryTab === 'boards') {
-    $('#skins').innerHTML = Object.entries(BOARDS).map(([k, s]) => {
-      const owned = profile.ownedBoards.includes(k), eq = profile.board === k;
-      return `<div class="skin ${eq ? 'equipped' : ''} ${owned ? '' : 'locked'}" data-card="${k}"><div class="glow" style="background:${s.frame}"></div><canvas class="preview" data-board="${k}"></canvas><h4>${s.name}</h4>${btn('board', k, owned, eq, s.price)}</div>`;
+  const el = $('#skins'); const hint = $('#armory-hint');
+  if (armoryTab === 'featured') {
+    const now = new Date(), mid = new Date(now); mid.setHours(24, 0, 0, 0);
+    const hrs = Math.floor((mid - now) / 3600000), mins = Math.floor(((mid - now) % 3600000) / 60000);
+    hint.innerHTML = `New offers in ${hrs}h ${mins}m`;
+    const feat = featured(profile, today());
+    if (profile.storeSeen !== today()) { profile.storeSeen = today(); save(); }
+    el.innerHTML = feat.map((it) => storeCard(it, { canvas: true, off: it.off, final: it.final, deal: it.deal })).join('')
+      + `<div class="supporter"><div class="sup-h"><b>Founder's Pack</b><span>Support the game</span></div><p>An exclusive Founder piece set, 2,000 Marks and a Founder title. Coming with the app store release.</p><button class="btn small" disabled>Coming soon</button></div>`;
+  } else if (armoryTab === 'bundles') {
+    hint.textContent = 'Bundles only charge for the items you do not own yet.';
+    el.innerHTML = Object.keys(BUNDLES).map((k) => {
+      const b = bundleInfo(profile, k);
+      return `<div class="bundle ${b.owned ? 'owned' : ''}"><div class="b-h"><b>${b.name}</b>${b.owned ? '' : `<span class="off">-${Math.round(b.off * 100)}%</span>`}</div>
+        <div class="b-items">${b.items.map((i) => `<div class="b-it ${i.owned ? 'have' : ''}" style="--rc:${RARITY[i.rarity].color}"><canvas class="preview" data-kind="${i.kind}" data-id="${i.id}"></canvas><span>${i.name}</span></div>`).join('')}</div>
+        ${b.owned ? '<button class="btn small" disabled>Owned</button>' : `<button class="btn small gold" data-bundle="${k}" data-price="${b.price}"><s>${b.full}</s> ${priceTag(b.price)}</button>`}</div>`;
     }).join('');
   } else {
-    $('#skins').innerHTML = Object.entries(FINISHERS).map(([k, s]) => {
-      const owned = profile.ownedFinishers.includes(k), eq = profile.finisher === k;
-      return `<div class="skin ${eq ? 'equipped' : ''} ${owned ? '' : 'locked'}" data-card="${k}"><div class="glow" style="background:#ff8a3d"></div><canvas class="preview" data-fin="${k}"></canvas><h4>${s.name}</h4><div class="desc">${s.desc}</div>${btn('fin', k, owned, eq, s.price)}</div>`;
-    }).join('');
+    const kind = TAB_KIND[armoryTab];
+    hint.textContent = { skin: 'Piece sets change how your pieces look to everyone.', board: 'Boards change the arena you see.', finisher: 'Finishers play when you eliminate someone. Everyone sees them.', trail: 'Trails follow your piece whenever it moves.', emote: 'Emote packs add phrases to your emote menu.' }[kind];
+    el.innerHTML = listKind(profile, kind).filter((i) => !(kind === 'trail' && i.id === 'none' && false)).map((i) => storeCard(i)).join('');
   }
-  $$('#skins canvas.preview').forEach((cv) => setupPreview(cv));
+  $$('#skins canvas.preview').forEach((cv) => armoryPreviews.list.push(makePreview(cv, cv.dataset.kind, cv.dataset.id, { skin: profile.skin })));
 }
-function setupPreview(cv) {
-  const dpr = Math.min(2, devicePixelRatio || 1);
-  const r = cv.getBoundingClientRect(); cv.width = (r.width || 150) * dpr; cv.height = (r.height || 110) * dpr;
-  const p = { cv, ctx: cv.getContext('2d'), dpr, board: cv.dataset.board, fin: cv.dataset.fin, fx: new FX(), t: Math.random() * 2, cycle: 0 };
-  armoryPreviews.list.push(p);
-}
-function drawPreview(p, dt) {
-  const { ctx, cv, dpr } = p; const W = cv.width / dpr, H = cv.height / dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  p.t += dt;
-  if (p.board) {
-    const th = BOARDS[p.board]; const ts = W / 6;
-    ctx.fillStyle = th.bg[1]; ctx.fillRect(0, 0, W, H);
-    ctx.save(); ctx.scale(ts, ts); ctx.translate(0, (H / ts - 4) / 2);
-    for (let y = 0; y < 4; y++) for (let x = 0; x < 6; x++) { ctx.fillStyle = (x + y) % 2 ? th.dark : th.light; ctx.fillRect(x, y, 1, 1); }
-    ctx.strokeStyle = th.grid; ctx.lineWidth = 0.03; for (let i = 0; i <= 6; i++) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 4); ctx.stroke(); }
-    if (th.lava) { ctx.strokeStyle = `rgba(255,110,30,${0.5 + 0.3 * Math.sin(p.t * 2)})`; ctx.lineWidth = 0.05; ctx.beginPath(); ctx.moveTo(0.2, 2.6); ctx.lineTo(1.4, 2.3); ctx.lineTo(2, 2.8); ctx.stroke(); }
-    if (th.glowGrid) { const sw = (p.t * 2) % 5; ctx.strokeStyle = 'rgba(0,240,255,0.6)'; ctx.beginPath(); ctx.moveTo(0, sw); ctx.lineTo(6, sw); ctx.stroke(); }
-    const g = ctx.createLinearGradient(4, 0.6, 5, 1.6); g.addColorStop(0, th.wallTop[0]); g.addColorStop(1, th.wallTop[1]);
-    ctx.fillStyle = th.wallFront; ctx.fillRect(4, 1.58, 1, 0.42); ctx.fillStyle = g; ctx.fillRect(4, 0.58, 1, 1);
-    ctx.translate(2.5, 2.86 + Math.sin(p.t * 2) * 0.02); ctx.scale(0.92, 0.92); drawPiece(ctx, 'knight', profile.skin, { t: p.t });
-    ctx.restore();
-  } else {
-    ctx.fillStyle = '#0d0b13'; ctx.fillRect(0, 0, W, H);
-    const ts = H / 2.2;
-    ctx.save(); ctx.scale(ts, ts);
-    const cx = W / ts / 2, by = 1.75;
-    p.cycle += dt;
-    if (p.cycle > 2.6) { p.cycle = 0; p.shown = false; }
-    if (!p.shown && p.cycle > 0.5) { p.shown = true; p.fx.finisher(p.fin, cx, by, 'rook', 'obsidian', '#7f6bff'); }
-    p.fx.update(dt);
-    ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.beginPath(); ctx.ellipse(cx, by, 0.6, 0.15, 0, 0, Math.PI * 2); ctx.fill();
-    p.fx.drawGround(ctx);
-    if (!p.shown) { ctx.save(); ctx.translate(cx, by); ctx.scale(0.92, 0.92); drawPiece(ctx, 'rook', 'obsidian', { t: p.t, flash: Math.max(0, (p.cycle - 0.35) * 6) }); ctx.restore(); }
-    p.fx.drawAbove(ctx);
-    ctx.restore();
-    if (p.fx.screenFlash > 0.01) { ctx.globalAlpha = p.fx.screenFlash * 0.6; ctx.fillStyle = p.fx.flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
-  }
+function reveal(kind, id) {
+  const it = item(profile, kind, id);
+  $('#rv-rar').textContent = `${RARITY[it.rarity].name} ${KINDS[kind].label}`; $('#rv-rar').style.color = RARITY[it.rarity].color;
+  $('#rv-name').textContent = it.name;
+  $('#rv-equip').dataset.equip = KINDS[kind].equip ? `${kind}:${id}` : '';
+  $('#rv-equip').textContent = KINDS[kind].equip ? 'Equip now' : 'Nice';
+  const m = $('#m-reveal'); m.style.setProperty('--rc', RARITY[it.rarity].color); m.classList.remove('hidden');
+  armoryPreviews.reveal = makePreview($('#rv-canvas'), kind, id, { skin: profile.skin, big: true, rays: true });
+  sfx.buy(); if (it.rarity === 'legendary' || it.rarity === 'epic') setTimeout(() => sfx.levelup(), 250); uiFlash(); haptic([20, 30, 40, 30, 60]);
 }
 function onArmoryClick(e) {
-  const tab = e.target.closest('.tab'); if (tab) { armoryTab = tab.dataset.tab; sfx.tap(); renderArmory(); return; }
+  const tab = e.target.closest('.tab'); if (tab) { armoryTab = tab.dataset.tab; sfx.tap(); renderArmory(); $('#s-armory .scroll').scrollTop = 0; return; }
   const b = e.target.closest('button'); if (!b) return;
-  const d = b.dataset;
-  const buy = (list, ownedKey, eqKey, k, label) => {
-    const price = list[k].price;
-    if (profile.marks < price) { sfx.error(); toast(`You need ${price - profile.marks} more Marks`); return; }
-    if (!b.classList.contains('confirm-buy')) { $$('.confirm-buy').forEach((x) => { x.classList.remove('confirm-buy'); x.textContent = x.dataset.lbl; }); b.dataset.lbl = b.textContent; b.textContent = `Confirm ${price}?`; b.classList.add('confirm-buy'); sfx.select(); return; }
-    profile.marks -= price; profile[ownedKey].push(k); profile[eqKey] = k; save(); sfx.buy(); uiFlash(); haptic([20, 30, 40]);
-    toast(`${label} unlocked`); renderArmory();
-    const card = $(`[data-card="${k}"]`); if (card) card.classList.add('unlocked-anim');
+  const confirmStep = (price) => {
+    if (profile.marks < price) { sfx.error(); toast(`You need ${price - profile.marks} more Marks`); return false; }
+    if (!b.classList.contains('confirm-buy')) { $$('.confirm-buy').forEach((x) => { x.classList.remove('confirm-buy'); x.innerHTML = x.dataset.lbl; }); b.dataset.lbl = b.innerHTML; b.innerHTML = `Confirm ${price}?`; b.classList.add('confirm-buy'); sfx.select(); return false; }
+    return true;
   };
-  if (d.buySkin) buy(SKINS, 'owned', 'skin', d.buySkin, SKINS[d.buySkin].name);
-  else if (d.buyBoard) buy(BOARDS, 'ownedBoards', 'board', d.buyBoard, BOARDS[d.buyBoard].name);
-  else if (d.buyFin) buy(FINISHERS, 'ownedFinishers', 'finisher', d.buyFin, FINISHERS[d.buyFin].name);
-  else if (d.equipSkin) { profile.skin = d.equipSkin; save(); sfx.select(); renderArmory(); }
-  else if (d.equipBoard) { profile.board = d.equipBoard; save(); sfx.select(); renderArmory(); }
-  else if (d.equipFin) { profile.finisher = d.equipFin; save(); sfx.select(); renderArmory(); }
+  if (b.dataset.buy) {
+    const [kind, id] = b.dataset.buy.split(':'); const price = +b.dataset.price;
+    if (!confirmStep(price)) return;
+    profile.marks -= price; grant(profile, kind, id); save(); renderArmory(); reveal(kind, id);
+  } else if (b.dataset.bundle) {
+    const info = bundleInfo(profile, b.dataset.bundle); const price = info.price;
+    if (!confirmStep(price)) return;
+    profile.marks -= price; for (const i of info.missing) grant(profile, i.kind, i.id); save(); renderArmory();
+    const best = info.missing.slice().sort((a, b2) => ['common', 'rare', 'epic', 'legendary'].indexOf(b2.rarity) - ['common', 'rare', 'epic', 'legendary'].indexOf(a.rarity))[0];
+    if (best) reveal(best.kind, best.id); toast(`${info.name} unlocked`);
+  } else if (b.dataset.equip) {
+    const [kind, id] = b.dataset.equip.split(':'); equip(profile, kind, id); save(); sfx.select(); renderArmory();
+  }
 }
-
 function renderPlay() {
   const ICON = { royale: ['king', 'gilded'], blitz: ['knight', 'ember'], duel: ['rook', 'glacier'], daily: ['queen', 'celestial'] };
   const dailyDone = profile.daily.date === today();
@@ -309,7 +339,7 @@ function renderPlay() {
 }
 function dailyLoadout() {
   const seed = dailySeed(today()); const keys = Object.keys(PRESETS); const preset = keys[seed % keys.length];
-  const equips = {}; PIECE_ORDER.forEach((pc, i) => { equips[pc] = PIECES[pc].equips[(seed >> (i * 2)) % 3]; });
+  const equips = {}; PIECE_ORDER.forEach((pc, i) => { equips[pc] = PIECES[pc].equips[(seed >>> (i * 2)) % 3]; });
   return { preset, pts: { ...PRESETS[preset].pts }, passive: PRESETS[preset].passive, equips, seed };
 }
 function renderSoloMini() {
@@ -395,7 +425,7 @@ function startLesson(id) {
   $('#m-lesson').classList.add('hidden');
   if (id === 'graduation') {
     const keep = profile.botLevel; profile.botLevel = 'easy';
-    matchKey = 'm' + Date.now(); startSolo(2); profile.botLevel = keep; session.graduation = true;
+    matchKey = 'm' + Date.now(); startSolo(2, 'royale'); profile.botLevel = keep; session.graduation = true;
     return;
   }
   const lesson = LESSONS.find((l) => l.id === id);
@@ -436,9 +466,10 @@ function botPlayer(i, used) {
   const keys = Object.keys(PRESETS), p = PRESETS[keys[Math.floor(Math.random() * keys.length)]];
   const equips = {}; for (const pc of PIECE_ORDER) { const list = PIECES[pc].equips; equips[pc] = list[Math.floor(Math.random() * list.length)]; }
   const skins = Object.keys(SKINS).filter((k) => k !== profile.skin), fins = Object.keys(FINISHERS);
-  return { pid: 'bot' + i + Math.random().toString(36).slice(2, 6), name, isBot: true, botLevel: profile.botLevel || 'normal', skin: skins[Math.floor(Math.random() * skins.length)], finisher: fins[Math.floor(Math.random() * fins.length)], build: { pts: { ...p.pts }, passive: p.passive, equips } };
+  const trails = Object.keys(TRAILS);
+  return { trail: trails[Math.floor(Math.random() * trails.length)], pid: 'bot' + i + Math.random().toString(36).slice(2, 6), name, isBot: true, botLevel: profile.botLevel || 'normal', skin: skins[Math.floor(Math.random() * skins.length)], finisher: fins[Math.floor(Math.random() * fins.length)], build: { pts: { ...p.pts }, passive: p.passive, equips } };
 }
-const me = () => ({ pid: 'me', name: profile.name || 'Player', title: profile.title, skin: profile.skin, finisher: profile.finisher, build: { pts: { ...profile.build.pts }, passive: profile.build.passive, equips: { ...profile.build.equips } } });
+const me = () => ({ pid: 'me', name: profile.name || 'Player', title: profile.title, skin: profile.skin, finisher: profile.finisher, trail: profile.trail, build: { pts: { ...profile.build.pts }, passive: profile.build.passive, equips: { ...profile.build.equips } } });
 
 // ---------- sessions ----------
 let session = null;
@@ -479,7 +510,8 @@ function startSolo(bots = null, modeArg = null) {
   let seed;
   const keepLvl = profile.botLevel;
   if (mode === 'daily') { const L = dailyLoadout(); players[0].build = { pts: L.pts, passive: L.passive, equips: L.equips }; seed = L.seed; profile.botLevel = 'hard'; }
-  for (let i = 0; i < n; i++) players.push(botPlayer(i, players.map((p) => p.name)));
+  if (mode === 'daily') { const rr = Math.random; let st = seed >>> 0; Math.random = () => { st = (Math.imul(st, 1664525) + 1013904223) >>> 0; return st / 4294967296; }; try { for (let i = 0; i < n; i++) players.push(botPlayer(i, players.map((p) => p.name))); } finally { Math.random = rr; } }
+  else for (let i = 0; i < n; i++) players.push(botPlayer(i, players.map((p) => p.name)));
   profile.botLevel = keepLvl;
   const sess = { mode: 'solo', myPid: 'me', bots: n, gameMode: mode, hard: mode === 'daily' || profile.botLevel === 'hard' };
   session = sess;
@@ -524,16 +556,17 @@ function startHostLobby() {
         if (!m || typeof m !== 'object') return;
         if (m.t === 'join') {
           if (conn.pid) return;
-          if (sess.started || sess.players.length >= sess.maxP) { conn.send({ t: 'full' }); return; }
+          if (sess.started || sess.players.length >= sess.maxP) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 200); return; }
           const pid = 'c' + Math.random().toString(36).slice(2, 8);
           conn.pid = pid; sess.conns.set(pid, conn);
           const b = m.build || {};
           const equips = {}; for (const pc of PIECE_ORDER) equips[pc] = PIECES[pc].equips.includes(b.equips && b.equips[pc]) ? b.equips[pc] : PIECES[pc].equips[0];
-          sess.players.push({ pid, title: String(m.title || '').replace(/[<>]/g, '').slice(0, 24), name: String(m.name || 'Player').replace(/[<>]/g, '').slice(0, 14), skin: SKINS[m.skin] ? m.skin : 'ivory', finisher: FINISHERS[m.finisher] ? m.finisher : 'shatter', build: { pts: sanitizePts(b.pts), passive: PASSIVES[b.passive] ? b.passive : 'regen', equips } });
+          sess.players.push({ pid, title: String(m.title || '').replace(/[<>]/g, '').slice(0, 24), name: String(m.name || 'Player').replace(/[<>]/g, '').slice(0, 14), skin: SKINS[m.skin] ? m.skin : 'ivory', finisher: FINISHERS[m.finisher] ? m.finisher : 'shatter', trail: TRAILS[m.trail] ? m.trail : 'none', build: { pts: sanitizePts(b.pts), passive: PASSIVES[b.passive] ? b.passive : 'regen', equips } });
           conn.send({ t: 'welcome', pid });
           sfx.select(); renderLobby();
         } else if (m.t === 'act' && sess.host && conn.pid && m.a && typeof m.a === 'object') { try { sess.host.act(conn.pid, m.a); } catch (err) { console.warn('bad action', err); } }
         else if (m.t === 'emote' && conn.pid) hostEmote(sess, conn.pid, m.k);
+        else if (m.t === 'leave' && conn.pid && sess.host) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> forfeited - a bot takes over`); }
       });
       conn.onClose(() => {
         if (!conn.pid) return;
@@ -556,8 +589,9 @@ function hostAddBot() {
 }
 function startHost() {
   const sess = session; if (!sess || sess.players.length < 2) return;
-  sess.started = true;
   sess.players = sess.players.filter((p) => p.isBot || p.pid === 'me' || sess.conns.has(p.pid));
+  if (sess.players.length < 2) { toast('Need at least 2 players'); sess.renderLobby(); return; }
+  sess.started = true;
   sess.players[0] = { ...me() };
   sess.host = new GameHost(sess.players, (m) => { hostEmit(sess, m); botChatter(sess, m); }, { mode: sess.gameMode });
   sess.send = (a) => sess.host.act('me', a);
@@ -576,18 +610,18 @@ function joinGame() {
   const sess = { mode: 'client', myPid: null, code };
   session = sess;
   sess.client = openClient(code, {
-    onOpen: () => { st.textContent = 'Connected. Joining lobby...'; sess.client.send({ t: 'join', name: profile.name, title: profile.title, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
+    onOpen: () => { st.textContent = 'Connected. Joining lobby...'; sess.client.send({ t: 'join', name: profile.name, title: profile.title, trail: profile.trail, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
     onData: (m) => {
       if (session !== sess) return;
       if (m.t === 'welcome') { sess.myPid = m.pid; st.textContent = 'In the lobby.'; sfx.select(); }
-      else if (m.t === 'lobby') { $('#join-lobby-panel').classList.remove('hidden'); $('#join-lobby').innerHTML = lobbyHTML(m.players, false); }
+      else if (m.t === 'lobby') { $('#join-lobby-panel').classList.remove('hidden'); $('#join-lobby').innerHTML = lobbyHTML(m.players, false); $('#join-lobby-panel .lbl').textContent = `Lobby - ${(MODES[m.mode] || MODES.royale).name}`; }
       else if (m.t === 'full') { st.textContent = 'That match is full or already started.'; st.classList.add('err'); }
       else if (m.t === 'start') { sess.myPid = m.pid; matchKey = 'm' + Date.now(); game.enter(); }
       else if (m.t === 'state' || m.t === 'emote') game.onMsg(m);
     },
     onClose: () => {
       if (session !== sess) return;
-      if (screen === 'game' && game.s && !game.s.over) { toast('The host left the match'); game.showResults(true); }
+      if (screen === 'game' && game.s && !game.s.over) { toast('The host left the match'); game.showResults(true, 'hostleft'); }
       else if (screen === 'join') { st.textContent = 'Disconnected from host.'; st.classList.add('err'); }
     },
     onError: (t) => {
@@ -616,6 +650,7 @@ const game = {
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
       if (screen === 'game') { this.r.frame(dt); this.tickTimer(); this.heartbeat(dt); }
       if (armoryPreviews.active) for (const p of armoryPreviews.list) drawPreview(p, dt);
+      if (armoryPreviews.reveal && !$('#m-reveal').classList.contains('hidden')) drawPreview(armoryPreviews.reveal, dt);
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -635,7 +670,8 @@ const game = {
       const b = e.target.closest('.popt'); if (!b || b.disabled) return;
       session.send({ type: 'promote', to: b.dataset.to }); $('#m-promote').classList.add('hidden');
     });
-    $('#emote-menu').innerHTML = Object.entries(EMOTES).map(([k, t]) => `<button data-emote="${k}">${t}</button>`).join('');
+    this.renderEmotes = () => { $('#emote-menu').innerHTML = Object.entries(activeEmotes(profile)).map(([k, t]) => `<button data-emote="${k}">${t}</button>`).join(''); };
+    this.renderEmotes();
     $('#h-portrait').parentElement.addEventListener('click', () => { const u = this.me; if (u) { this.r.closeup(); this.r.follow = false; this.r.focus(u.x, u.y); sfx.tap(); } });
     $('#ult-btn').addEventListener('click', () => { if (this.suppress) { this.suppress = false; return; } this.onAction('ult'); });
     $('#gm-tip').addEventListener('click', () => $('#gm-tip').classList.add('hidden'));
@@ -698,6 +734,7 @@ const game = {
     const alive = alivePlayers(this.s).length;
     const lvl = this.s.over ? 1 : alive <= 2 ? 3 : (this.s.storm.ring > 0 || this.s.storm.crack || alive <= 4) ? 2 : 1;
     if (!this.resultsShown) music.set(lvl, lvl === 3 ? 'final' : 'fight');
+    if (first) this.lastAlive = alive;
     if (alive === 2 && this.lastAlive > 2 && !this.s.over) this.after(() => this.banner('Final Two', 'Only one walks away', 'red'), 900);
     this.lastAlive = alive;
     this.refresh();
@@ -705,7 +742,7 @@ const game = {
   handleEvents(ev, first) {
     const s = this.s, myId = this.r.myId;
     const tut = session && session.mode === 'tutorial';
-    if (first) { if (!tut) this.after(() => this.banner('Round 1', 'Last piece standing wins', ''), 1500); return; }
+    if (first) { if (!tut) { this.showContenders(); this.after(() => this.banner('Round 1', 'Last piece standing wins', ''), 2900); } return; }
     if (!tut) this.checkDiscoveries(ev);
     if (!tut) this.tips(ev);
     for (const e of ev) {
@@ -734,9 +771,21 @@ const game = {
       if (e.e === 'over') this.after(() => this.showResults(), 4800);
     }
   },
+  showContenders() {
+    const s = this.s, el = $('#contenders'); const ps = s.units.filter((u) => u.kind === 'player');
+    const card = (u, i) => `<div class="ct ${session && u.pid === session.myPid ? 'me' : ''}" style="--c:${u.color};animation-delay:${0.1 + i * 0.08}s"><img src="${pieceIcon('pawn', u.skin, u.color, 56)}" alt=""><b>${esc(u.name)}</b>${u.title ? `<span>${esc(u.title)}</span>` : ''}</div>`;
+    const M = MODES[s.mode] || MODES.royale;
+    el.innerHTML = ps.length === 2
+      ? `<div class="ct-mode">${M.name}</div><div class="ct-duel">${card(ps[0], 0)}<div class="vs">VS</div>${card(ps[1], 2)}</div>`
+      : `<div class="ct-mode">${M.name}</div><div class="ct-grid">${ps.map(card).join('')}</div><div class="ct-sub">${ps.length} enter. One leaves.</div>`;
+    el.classList.remove('hidden'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    sfx.whoosh(); this.after(() => sfx.stinger(1), 400);
+    clearTimeout(this.ctT); this.ctT = setTimeout(() => el.classList.add('hidden'), 2700);
+    el.onclick = () => el.classList.add('hidden');
+  },
   tip(id, html) {
     profile.tips = profile.tips || [];
-    if (profile.tips.includes(id) || (session && session.mode === 'tutorial')) return;
+    if (profile.tips.includes(id) || this.resultsShown || (session && session.mode === 'tutorial')) return;
     if ($('#h-banner').classList.contains('show') && performance.now() - (this.bannerAt || 0) < 1700) { this.after(() => this.tip(id, html), 1800); return; }
     profile.tips.push(id); save();
     const el = $('#gm-tip'); el.querySelector('img').src = pieceIcon('king', 'gilded', null, 34);
@@ -905,7 +954,7 @@ const game = {
     if (s.meteors && s.meteors.length) { chip.textContent = 'Meteors incoming'; chip.className = 'event-chip red'; }
     else if (s.bloodMoon) { chip.textContent = 'Blood Moon - damage +30%'; chip.className = 'event-chip red'; }
     else chip.className = 'event-chip hidden';
-    $('#h-next').textContent = u.piece === 'king' ? 'Crowned' : nextEvo ? `${popts.filter((p) => p.type === 'evolve').map((p) => PIECES[p.to].name).join(' / ')} ${nextEvo.cost}` : popts.length ? `Hone ${minCost}` : 'Max';
+    $('#h-next').textContent = u.piece === 'king' ? 'Crowned' : nextEvo ? `${popts.filter((p) => p.type === 'evolve' && p.cost === nextEvo.cost).map((p) => PIECES[p.to].name).join(' / ')} ${nextEvo.cost}` : popts.length ? `Hone ${minCost}` : 'Max';
     const my = this.myTurn();
     $('#h-actions').classList.toggle('wait', !my);
     if (!my) $('#h-actions').classList.remove('myturn');
@@ -1009,12 +1058,21 @@ const game = {
     const u = this.me; const opts = promoteOptions(u);
     if (!opts.length) { sfx.error(); return; }
     const hone = u.hone[u.piece] || 0;
-    $('#promo-opts').innerHTML = opts.map((o) => {
+    const LADDER = [['pawn'], ['knight', 'bishop'], ['rook'], ['queen']];
+    const curTier = PIECES[u.piece].tier;
+    const path = LADDER.map((row, i) => `<div class="pl-step ${i + 1 < curTier ? 'past' : i + 1 === curTier ? 'cur' : ''}">${row.map((pc) => `<img src="${pieceIcon(pc, u.skin, null, 34)}" alt="" class="${pc === u.piece ? 'me' : ''}">`).join('')}</div>`).join('<i class="pl-arrow"></i>');
+    const card = (o) => {
       const piece = o.type === 'evolve' ? o.to : u.piece;
       const P = PIECES[piece], sig = ABILITIES[P.sig];
+      const can = u.shards >= o.cost;
       const desc = o.type === 'evolve' ? `${P.moveDesc} Signature: ${sig.name}.` : `+15% stats. ${sig.honed && hone === 0 ? 'Signature upgrade: ' + sig.honed : 'Level ' + o.level + ' of 3.'}`;
-      return `<button class="popt" data-to="${o.to}" ${u.shards < o.cost ? 'disabled' : ''}><img src="${pieceIcon(piece, u.skin, o.type === 'hone' ? '#7fe0ff' : null, 60)}" alt=""><div><b>${o.type === 'evolve' ? P.name : 'Hone ' + P.name}</b><span>${desc}</span></div><div class="cost"><span class="shard-ico"></span>${o.cost}</div></button>`;
-    }).join('');
+      const tag = o.type === 'evolve' && o.steps > 1 ? `<em class="skip">Skips ${o.steps - 1} step${o.steps > 2 ? 's' : ''}</em>` : '';
+      return `<button class="popt ${can ? '' : 'locked'}" data-to="${o.to}" ${can ? '' : 'disabled'}><img src="${pieceIcon(piece, u.skin, o.type === 'hone' ? '#7fe0ff' : null, 60)}" alt=""><div><b>${o.type === 'evolve' ? P.name : 'Hone ' + P.name}${tag}</b><span>${desc}</span>${can ? '' : `<span class="need">Need ${o.cost - u.shards} more shard${o.cost - u.shards > 1 ? 's' : ''}</span>`}</div><div class="cost"><span class="shard-ico"></span>${o.cost}</div></button>`;
+    };
+    const evo = opts.filter((o) => o.type === 'evolve'), hn = opts.find((o) => o.type === 'hone');
+    $('#promo-opts').innerHTML = `<div class="promo-path">${path}</div><div class="promo-have"><span class="shard-ico"></span> You have <b>${u.shards}</b> shards</div>`
+      + (evo.length ? `<div class="promo-sec">Evolve</div>${evo.map(card).join('')}` : '')
+      + (hn ? `<div class="promo-sec">Or stay a ${PIECES[u.piece].name}</div>${card(hn)}` : '');
     $('#m-promote').classList.remove('hidden'); sfx.select();
   },
   showDead() {
@@ -1024,15 +1082,23 @@ const game = {
     $('#m-dead').classList.remove('hidden');
     sfx.lose();
   },
-  showResults(aborted = false) {
+  showResults(aborted = false, reason = '') {
     if (this.resultsShown) return;
     this.resultsShown = true;
+    $('#gm-tip').classList.add('hidden'); $('#contenders').classList.add('hidden');
     $$('#s-game .modal').forEach((m) => m.classList.add('hidden'));
     const s = this.s, u = this.me;
     if (!s || !u) { go('title'); endSession(); return; }
     const place = u.alive ? (s.over ? 1 : alivePlayers(s).length) : u.place;
     const total = s.units.filter((v) => v.kind === 'player').length;
     const win = place === 1 && s.over;
+    const pod = $('#podium');
+    if (s.over) {
+      const top3 = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 1 : a.place) - (b.alive ? 1 : b.place)).slice(0, 3);
+      const order = [top3[1], top3[0], top3[2]];
+      pod.innerHTML = order.map((v, i) => v ? `<div class="pod p${[2, 1, 3][i]} ${v.id === u.id ? 'me' : ''}" style="--c:${v.color}"><img src="${pieceIcon(v.piece, v.skin, null, [2, 1, 3][i] === 1 ? 78 : 60)}" alt=""><span>${esc(v.name)}</span><div class="blk"><b>${[2, 1, 3][i]}</b></div></div>` : '<div class="pod empty"></div>').join('');
+      pod.classList.remove('hidden');
+    } else pod.classList.add('hidden');
     $('#r-title').textContent = win ? 'Checkmate' : aborted ? (u.alive && !s.over ? 'Forfeit' : 'Match Ended') : place <= 3 ? 'So Close' : 'Defeated';
     $('#r-place').textContent = `Placed ${place} of ${total}`;
     $('#r-stats').innerHTML = `<div><b id="rs-k">0</b><span>Eliminations</span></div><div><b id="rs-d">0</b><span>Damage</span></div><div><b>${PIECES[u.piece].name}</b><span>Final piece</span></div>`;
@@ -1040,8 +1106,8 @@ const game = {
     let earned = 0, xpGain = 0, levels = 0;
     const startLvl = profile.level, startXp = profile.xp;
     const quit = aborted && u.alive && !s.over;
-    if (quit && session && session.mode !== 'client') { try { if (session.mode === 'host') session.host.setBot('me'); else session.host.stop(); } catch {} }
-    if (quit) { profile.played = [...profile.played.slice(-30), matchKey]; if (session && session.mode === 'client') { profile.marks += 15; earned = 15; } save(); this.seasonGain = []; this.achGain = []; this.dailyScore = null; }
+    if (quit && session) { try { if (session.mode === 'host') session.host.setBot('me'); else if (session.mode === 'client') { if (reason !== 'hostleft') { session.client.send({ t: 'leave' }); setTimeout(() => endSession(), 300); } } else session.host.stop(); } catch {} }
+    if (quit) { profile.played = [...profile.played.slice(-30), matchKey]; if (reason === 'hostleft') { profile.marks += 15; earned = 15; } else recordMatch(profile, { kills: 0, hollows: 0, ults: 0, shards: 0, crown: false, queen: false, win: false, hard: false, minHpRatio: 0, mode: (session && session.gameMode) || 'royale' }); save(); this.seasonGain = []; this.achGain = []; this.dailyScore = null; }
     if (!profile.played.includes(matchKey)) {
       earned = 20 + u.kills * 15 + Math.max(0, total - place) * 8 + (win ? 60 : 0);
       xpGain = 40 + u.kills * 30 + Math.max(0, total - place) * 15 + Math.round((u.dmgDealt || 0) / 6) + (win ? 100 : 0);
@@ -1089,7 +1155,7 @@ const game = {
     const rankOf = (v) => (v.id === u.id ? place : v.alive ? (s.over ? 1 : 0) : v.place);
     const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (rankOf(a) || 0.5) - (rankOf(b) || 0.5));
     $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${rankOf(v) || '-'}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
-    $('#btn-rematch').classList.toggle('hidden', session && session.mode === 'client');
+    $('#btn-rematch').classList.toggle('hidden', !!(session && (session.mode === 'client' || (session.mode === 'host' && !s.over))));
     $('#m-results').classList.remove('hidden');
     music.set(0, 'menu');
     if (win) { sfx.win(); confetti(); haptic([50, 50, 50, 50, 150]); } else sfx.lose();
@@ -1176,7 +1242,8 @@ $('#set-cb').addEventListener('change', (e) => { settings.cb = e.target.checked;
 $('#set-bigtext').addEventListener('change', (e) => { settings.bigtext = e.target.checked; saveSettings(); document.body.classList.toggle('bigtext', settings.bigtext); });
 $('#set-quality').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); game.r.setQuality(settings.quality); $$('#set-quality button').forEach((x) => x.classList.toggle('on', x === b)); sfx.tap(); });
 function info(title, html) { $('#info-title').textContent = title; $('#info-body').innerHTML = html; $('#m-info').classList.remove('hidden'); }
-const WHATS_NEW = `<h4>Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
+const WHATS_NEW = `<h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
+<h4>2.0 Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
 <h4>Progression</h4><ul><li><b>Crown Path</b>: a free 30-tier season track with exclusive cosmetics and titles.</li><li><b>Trophies</b>: 21 achievements, each with Marks and a title.</li><li>Pick a title to show in lobbies and results.</li></ul>
 <h4>Balance</h4><ul><li>Heavy is the Head: the King no longer attunes, charges ultimates at half speed and takes 10% more damage. The Crown appears at a random safe spot.</li><li>Tank preset reworked. Regen scales with attunement.</li></ul>
 <h4>Comfort</h4><ul><li>Graphics quality, reduced motion, one-tap attacks, colorblind colors, larger text.</li><li>Profile backup codes.</li></ul>
@@ -1197,11 +1264,11 @@ document.addEventListener('click', (e) => {
     case 'settings': openSettings(); sfx.tap(); break;
     case 'close-settings': $('#m-settings').classList.add('hidden'); sfx.tap(); break;
     case 'close-info': $('#m-info').classList.add('hidden'); sfx.tap(); break;
-    case 'whatsnew': e.preventDefault(); info('What\'s New in 2.0', WHATS_NEW); break;
+    case 'whatsnew': e.preventDefault(); info('What\'s New', WHATS_NEW); break;
     case 'credits': e.preventDefault(); info('Credits', `<p><b>Chess Complex</b><br>Created by Diante Clark.</p><p>Built with plain HTML, Canvas and the Web Audio API. Every sound and piece of art is generated in code.</p><p>Fonts: Cinzel and Chakra Petch (SIL Open Font License). Online play uses PeerJS (MIT).</p>`); break;
     case 'export-profile': { const code = btoa(unescape(encodeURIComponent(JSON.stringify(profile)))); copy(code, 'Backup code copied'); info('Backup Code', `<p>Keep this somewhere safe. Paste it into Restore Backup on any device.</p><textarea readonly>${code}</textarea>`); break; }
     case 'import-profile': info('Restore Backup', `<p>Paste a backup code. This replaces your current progress.</p><textarea id="import-code"></textarea><button class="btn wide gold" data-act="do-import">Restore</button>`); break;
-    case 'do-import': try { const d = JSON.parse(decodeURIComponent(escape(atob($('#import-code').value.trim())))); if (!d || typeof d !== 'object' || !d.build) throw 0; profile = { ...defaultProfile(), ...d }; ensureProgress(profile); save(); renderProfile(); $('#m-info').classList.add('hidden'); toast('Progress restored'); sfx.buy(); } catch { toast('That code did not work'); sfx.error(); } break;
+    case 'do-import': try { const d = JSON.parse(decodeURIComponent(escape(atob($('#import-code').value.trim())))); if (!d || typeof d !== 'object' || !d.build) throw 0; profile = normalizeProfile(d); save(); renderProfile(); $('#m-info').classList.add('hidden'); toast('Progress restored'); sfx.buy(); } catch { toast('That code did not work'); sfx.error(); } break;
     case 'start-solo': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startSolo(null, profile.mode); break;
     case 'copy-code': copy(session && session.code, 'Code copied'); break;
     case 'copy-link': copy(session && `${location.origin}${location.pathname}?join=${session.code}`, 'Invite link copied'); break;
@@ -1214,7 +1281,8 @@ document.addEventListener('click', (e) => {
     case 'menu': $('#m-menu').classList.remove('hidden'); sfx.tap(); break;
     case 'close-menu': $('#m-menu').classList.add('hidden'); break;
     case 'close-promote': $('#m-promote').classList.add('hidden'); break;
-    case 'emotes': $('#emote-menu').classList.toggle('hidden'); sfx.tap(); break;
+    case 'emotes': game.renderEmotes(); $('#emote-menu').classList.toggle('hidden'); sfx.tap(); break;
+    case 'close-reveal': $('#m-reveal').classList.add('hidden'); break;
     case 'forfeit': if (session && session.mode === 'tutorial') { $('#m-menu').classList.add('hidden'); endSession(); go('tutorial'); break; }
       $('#m-menu').classList.add('hidden'); game.showResults(!!(game.s && !game.s.over && game.me && game.me.alive)); break;
     case 'spectate': $('#m-dead').classList.add('hidden'); game.r.overview(); break;
@@ -1224,7 +1292,7 @@ document.addEventListener('click', (e) => {
     case 'to-tutorial': endSession(); go('tutorial'); break;
     case 'rematch':
       if (!session || session.mode === 'solo') { const n = session ? session.bots : 7; const gm = session ? session.gameMode : profile.mode; matchKey = 'm' + Date.now(); startSolo(n, gm); }
-      else if (session.mode === 'host') { try { session.host.stop(); } catch {} session.host = null; session.started = false; session.rematch = true; go('host'); }
+      else if (session.mode === 'host') { if (game.s && !game.s.over) { toast('Wait for the match to finish'); break; } try { session.host.stop(); } catch {} session.host = null; session.started = false; session.rematch = true; go('host'); }
       break;
   }
 });
@@ -1247,6 +1315,7 @@ $('#in-code').addEventListener('input', (e) => { e.target.value = e.target.value
 $('#in-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinGame(); });
 document.addEventListener('pointerover', (e) => { if (e.pointerType === 'mouse' && e.target.closest && e.target.closest('.btn:not(:disabled), .tab, .preset, .choice')) { const el = e.target.closest('.btn, .tab, .preset, .choice'); if (el !== document.__lastHover) { document.__lastHover = el; sfx.hover(); } } });
 
+$('#rv-equip').addEventListener('click', () => { const v = $('#rv-equip').dataset.equip; if (v) { const [k, id] = v.split(':'); equip(profile, k, id); save(); sfx.select(); } $('#m-reveal').classList.add('hidden'); if (screen === 'armory') renderArmory(); });
 $('#lesson-list').addEventListener('click', (e) => { const b = e.target.closest('[data-lesson]'); if (!b) return; sfx.select(); uiFlash(); startLesson(b.dataset.lesson); });
 $('#codex-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-ctab]'); if (!b) return; codexTab = b.dataset.ctab; sfx.tap(); renderCodexTab(); });
 $('#coach-next').addEventListener('click', () => { sfx.select(); if (tutorial) tutorial.next(); });
@@ -1261,7 +1330,7 @@ bgInit();
 game.init();
 renderProfile();
 document.body.classList.toggle('bigtext', !!settings.bigtext); document.body.classList.toggle('reduced', !!settings.motion);
-setTimeout(() => { $('#splash').classList.add('out'); if (profile.seenVersion !== '2.0' && (profile.games || profile.tutorial.length)) { info('What\'s New in 2.0', WHATS_NEW); } profile.seenVersion = '2.0'; save(); }, 700);
+setTimeout(() => { $('#splash').classList.add('out'); if (profile.seenVersion !== '3.0' && (profile.games || profile.tutorial.length)) { info('What\'s New in 3.0', WHATS_NEW); } profile.seenVersion = '3.0'; save(); }, 700);
 const q = new URLSearchParams(location.search);
 if (q.get('join')) { go('join'); $('#in-code').value = q.get('join').toUpperCase().slice(0, 5); }
 window.__cc = { game, profile, get session() { return session; }, startSolo };
