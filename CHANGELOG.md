@@ -1,5 +1,29 @@
 # Changelog
 
+## 3.1 (October 2026)
+**Online: spectating and leaving** (from a real match report)
+- Getting eliminated no longer risks ending the match. Results opened mid-match have a Spectate button. A spectator bar lets you follow any surviving player or the action (Auto). Final results with a podium appear when the match ends.
+- Hosts get a clear warning before leaving a live match ("the match runs on your device"), with Keep Spectating as the default. Friends see "Host Ended the Match" rather than "Forfeit". Closing the tab while hosting asks for confirmation.
+- A host who forfeits keeps spectating while a bot plays their piece.
+- **Rejoin:** a player who reloads or drops can rejoin with the same code and take their piece back from the bot.
+- Clear messages for a full lobby, a match that has already started, being removed by the host, or the host ending the match.
+- New automated online suite (`tests/online`): 22 lifecycle scenarios, all passing.
+
+**Economy rework** (from a 1,000-match analysis per config)
+- Promotion costs: Knight or Bishop 2, Rook +4, Queen +7 (Pawn to Rook 6, Pawn to Queen 13). Climbing step by step always costs the same as jumping, and the Promote menu now says so.
+- Hone costs scale with tier and start cheap: Pawn 1/2/3, Knight or Bishop 3/4/5, Rook 4/6/8, Queen 6/8/10.
+- Everyone starts with 1 shard, plus a starter shard two tiles from each spawn. Board content scales with player count. Shard Rain scales with players alive.
+- **Steadfast:** before round 6, a player at full HP cannot be eliminated by a single hit. They are left at 1 HP with a callout. In simulation, full-HP one-shots before round 6 went from about 1 per 100 games to 0.
+- No Blood Moon or Meteor Storm before round 6.
+- Result in simulation: almost every player reaches Knight or Bishop by round 3 (was 67% by round 6), and Rook reach went from 17% to 37%, Queen from 2% to 8%. Pawn deaths fell from 2.4 per game to 0.3.
+- Preset pass: Tank 4/2/2/2, Scout 3/3/1/3, Assassin 2/5/0/3.
+
+**Life and readability**
+- **Lethal Range warning:** on your turn, if an enemy can eliminate you next turn, a red banner names them, threatening pieces get pulsing red rings, and it tells you how much HP evolving would add.
+- Knights face the way they move. Pieces have idle personalities: Knights toss their heads, Bishops sway, Rooks breathe, Queens and Kings float, Pawns hop.
+- New first-match tip for Steadfast; the shard tip explains the 2-shard Knight.
+
+
 ## 3.0 (October 2026)
 **Promotion ladder**
 - The Promote menu shows the whole fixed ladder with a path strip, your shard count and the total cost of every rung. Climb several rungs in one tap: Pawn to Rook for 8, Pawn to Queen for 15, Knight or Bishop to Queen for 12. Unaffordable rungs show how many shards you still need. Bots climb the ladder too.

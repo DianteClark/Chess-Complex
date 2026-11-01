@@ -499,7 +499,7 @@ function botChatter(sess, m) {
   for (const e of m.ev) {
     if (e.e !== 'death' || !e.by) continue;
     const k = sess.host.s.units.find((v) => v.id === e.by);
-    if (k && k.bot && Math.random() < 0.45) setTimeout(() => hostEmote(sess, k.pid, ['check', 'gg', 'come', 'nice'][Math.floor(Math.random() * 4)]), 900);
+    if (k && k.bot && Math.random() < 0.45) setTimeout(() => session === sess && hostEmote(sess, k.pid, ['check', 'gg', 'come', 'nice'][Math.floor(Math.random() * 4)]), 900);
   }
 }
 
@@ -559,9 +559,19 @@ function startHostLobby() {
         if (!m || typeof m !== 'object') return;
         if (m.t === 'join') {
           if (conn.pid) return;
-          if (sess.started || sess.players.length >= sess.maxP) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 200); return; }
+          const tok = typeof m.token === 'string' ? m.token.slice(0, 40) : '';
+          const back = tok && Object.entries(sess.tokens || {}).find(([pid, t]) => t === tok && !sess.conns.has(pid) && sess.players.some((p) => p.pid === pid));
+          if (back) {
+            const pid = back[0]; conn.pid = pid; sess.conns.set(pid, conn);
+            conn.send({ t: 'welcome', pid });
+            if (sess.started && sess.host) { const u = sess.host.s.units.find((v) => v.pid === pid); if (u) u.bot = false; conn.send({ t: 'start', pid }); sess.host.publish([]); sess.host.schedule(); if (u) game.feed(`<b>${esc(u.name)}</b> reconnected`); }
+            else renderLobby();
+            return;
+          }
+          if (sess.started || sess.players.length >= sess.maxP) { conn.send({ t: 'bye', reason: sess.started ? 'started' : 'full' }); setTimeout(() => conn.close(), 200); return; }
           const pid = 'c' + Math.random().toString(36).slice(2, 8);
           conn.pid = pid; sess.conns.set(pid, conn);
+          (sess.tokens ||= {})[pid] = tok;
           const b = m.build || {};
           const equips = {}; for (const pc of PIECE_ORDER) equips[pc] = PIECES[pc].equips.includes(b.equips && b.equips[pc]) ? b.equips[pc] : PIECES[pc].equips[0];
           sess.players.push({ pid, title: String(m.title || '').replace(/[<>]/g, '').slice(0, 24), name: String(m.name || 'Player').replace(/[<>]/g, '').slice(0, 14), skin: SKINS[m.skin] ? m.skin : 'ivory', finisher: FINISHERS[m.finisher] ? m.finisher : 'shatter', trail: TRAILS[m.trail] ? m.trail : 'none', build: { pts: sanitizePts(b.pts), passive: PASSIVES[b.passive] ? b.passive : 'regen', equips } });
@@ -575,7 +585,7 @@ function startHostLobby() {
         if (!conn.pid) return;
         sess.conns.delete(conn.pid);
         if (!sess.started) { sess.players = sess.players.filter((p) => p.pid !== conn.pid); renderLobby(); }
-        else if (sess.host && !conn.left) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> disconnected - a bot takes over`); }
+        else if (sess.host && !conn.left) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u && u.alive && !sess.host.s.over) game.feed(`<b>${esc(u.name)}</b> disconnected - a bot takes over`); }
       });
     },
   });
@@ -613,19 +623,19 @@ function joinGame() {
   const sess = { mode: 'client', myPid: null, code };
   session = sess;
   sess.client = openClient(code, {
-    onOpen: () => { st.textContent = 'Connected. Joining lobby...'; sess.client.send({ t: 'join', name: profile.name, title: profile.title, trail: profile.trail, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
+    onOpen: () => { st.textContent = 'Connected. Joining lobby...'; let tok = ''; try { tok = localStorage.getItem('cc_tok_' + code) || Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('cc_tok_' + code, tok); } catch {} sess.client.send({ token: tok, t: 'join', name: profile.name, title: profile.title, trail: profile.trail, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
     onData: (m) => {
       if (session !== sess) return;
       if (m.t === 'welcome') { sess.myPid = m.pid; st.textContent = 'In the lobby.'; sfx.select(); }
       else if (m.t === 'lobby') { $('#join-lobby-panel').classList.remove('hidden'); $('#join-lobby').innerHTML = lobbyHTML(m.players, false); $('#join-lobby-panel .lbl').textContent = `Lobby - ${(MODES[m.mode] || MODES.royale).name}`; }
-      else if (m.t === 'full') { st.textContent = 'That match is full or already started.'; st.classList.add('err'); }
+      else if (m.t === 'full' || m.t === 'bye') { sess.byeReason = m.reason || 'full'; st.textContent = { full: 'That lobby is full.', started: 'That match has already started.', kicked: 'The host removed you from the lobby.', ended: 'The host ended the match.' }[sess.byeReason] || 'Disconnected.'; st.classList.add('err'); $('#join-lobby-panel').classList.add('hidden'); $('#join-lobby').innerHTML = ''; if (screen === 'game') { toast(st.textContent); game.showResults(true, 'hostleft'); } }
       else if (m.t === 'start') { sess.myPid = m.pid; matchKey = 'm' + Date.now(); game.enter(); }
       else if (m.t === 'state' || m.t === 'emote') game.onMsg(m);
     },
     onClose: () => {
       if (session !== sess) return;
       if (screen === 'game' && game.s && !game.s.over) { toast('The host left the match'); game.showResults(true, 'hostleft'); }
-      else if (screen === 'join') { st.textContent = 'Disconnected from host.'; st.classList.add('err'); }
+      else if (screen === 'join' && !sess.byeReason) { st.textContent = 'Disconnected from host.'; st.classList.add('err'); $('#join-lobby-panel').classList.add('hidden'); }
     },
     onError: (t) => {
       if (session !== sess) return;
@@ -687,6 +697,7 @@ const game = {
     this.r.reduced = settings.motion; this.r.setQuality(settings.quality);
     document.body.classList.toggle('bigtext', !!settings.bigtext);
     this.s = null; this.mode = 'move'; this.preview = null; this.lastTurnNo = -1; this.resultsShown = false; this.lastHp = null; this.lastAlive = 99;
+    this.forfeited = false;
     $('#s-game').classList.remove('tut'); $('#s-game').classList.remove('spectating'); $('#spec-bar').classList.add('hidden'); this.spec = null;
     this.r.reset(); this.r.setBounds(null); this.r.setTheme(profile.board); this.turnVault = false;
     $('#coach').classList.add('hidden'); $('#abinfo').classList.add('hidden'); this.r.shakeOn = settings.shake; this.r.resize();
@@ -789,7 +800,7 @@ const game = {
     $('#m-results').classList.remove('hidden');
   },
   startSpectate() {
-    const me = this.me; if (!this.s || (me && me.alive && !this.s.over)) return;
+    const me = this.me; if (!this.s || (me && me.alive && !this.s.over && !this.forfeited)) return;
     this.spec = { id: null };
     $('#s-game').classList.add('spectating');
     $('#spec-bar').classList.remove('hidden');
@@ -1180,7 +1191,7 @@ const game = {
       pod.innerHTML = order.map((v, i) => v ? `<div class="pod p${[2, 1, 3][i]} ${v.id === u.id ? 'me' : ''}" style="--c:${v.color}"><img src="${pieceIcon(v.piece, v.skin, null, [2, 1, 3][i] === 1 ? 78 : 60)}" alt=""><span>${esc(v.name)}</span><div class="blk"><b>${[2, 1, 3][i]}</b></div></div>` : '<div class="pod empty"></div>').join('');
       pod.classList.remove('hidden');
     } else pod.classList.add('hidden');
-    $('#r-title').textContent = win ? 'Checkmate' : aborted ? (u.alive && !s.over ? 'Forfeit' : 'Match Ended') : place <= 3 ? 'So Close' : 'Defeated';
+    $('#r-title').textContent = win ? 'Checkmate' : reason === 'hostleft' ? 'Host Ended the Match' : aborted ? (u.alive && !s.over ? 'Forfeit' : 'Match Ended') : place <= 3 ? 'So Close' : 'Defeated';
     $('#r-place').textContent = `Placed ${place} of ${total}`;
     $('#r-stats').innerHTML = `<div><b id="rs-k">0</b><span>Eliminations</span></div><div><b id="rs-d">0</b><span>Damage</span></div><div><b>${PIECES[u.piece].name}</b><span>Final piece</span></div>`;
     setTimeout(() => { countUp($('#rs-k'), 0, u.kills, 600); countUp($('#rs-d'), 0, u.dmgDealt || 0, 900); }, 400);
@@ -1236,7 +1247,8 @@ const game = {
     const rankOf = (v) => (v.id === u.id ? place : v.alive ? (s.over ? 1 : 0) : v.place);
     const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (rankOf(a) || 0.5) - (rankOf(b) || 0.5));
     $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${rankOf(v) || '-'}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
-    const liveSpec = !s.over && !u.alive && !(session && session.mode === 'client' && aborted);
+    if (quit && session && session.mode === 'host') this.forfeited = true;
+    const liveSpec = !s.over && (!u.alive || this.forfeited) && !(session && session.mode === 'client' && aborted);
     $('#btn-keepspec').classList.toggle('hidden', !liveSpec);
     $('#btn-menu').textContent = liveSpec && session && session.mode === 'host' ? 'Leave' : 'Menu';
     $('#btn-rematch').classList.toggle('hidden', !!(liveSpec || (session && (session.mode === 'client' || (session.mode === 'host' && !s.over)))));
@@ -1328,7 +1340,7 @@ $('#set-bigtext').addEventListener('change', (e) => { settings.bigtext = e.targe
 $('#set-quality').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); game.r.setQuality(settings.quality); $$('#set-quality button').forEach((x) => x.classList.toggle('on', x === b)); sfx.tap(); });
 function sig(str) { let h1 = 0x811c9dc5, h2 = 0x1b873593; for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 ^ (c + i), 2246822519); } return ((h1 >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 12); }
 function info(title, html) { $('#info-title').textContent = title; $('#info-body').innerHTML = html; $('#m-info').classList.remove('hidden'); }
-const WHATS_NEW = `<h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
+const WHATS_NEW = `<h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
 <h4>2.0 Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
 <h4>Progression</h4><ul><li><b>Crown Path</b>: a free 30-tier season track with exclusive cosmetics and titles.</li><li><b>Trophies</b>: 21 achievements, each with Marks and a title.</li><li>Pick a title to show in lobbies and results.</li></ul>
 <h4>Balance</h4><ul><li>Heavy is the Head: the King no longer attunes, charges ultimates at half speed and takes 10% more damage. The Crown appears at a random safe spot.</li><li>Tank preset reworked. Regen scales with attunement.</li></ul>
@@ -1388,20 +1400,21 @@ document.addEventListener('click', (e) => {
 $('#host-lobby').addEventListener('click', (e) => {
   const b = e.target.closest('[data-kick]'); if (!b || !session) return;
   const pid = b.dataset.kick; const c = session.conns.get(pid);
-  if (c) { c.send({ t: 'full' }); c.close(); session.conns.delete(pid); }
+  if (c) { c.send({ t: 'bye', reason: 'kicked' }); setTimeout(() => c.close(), 200); session.conns.delete(pid); }
+  if (session.tokens) delete session.tokens[pid];
   session.players = session.players.filter((p) => p.pid !== pid); session.renderLobby();
 });
-function confirmBox(title, body, yes, no, onYes) {
+function confirmBox(title, body, yes, no, onYes, onNo) {
   $('#cf-title').textContent = title; $('#cf-body').textContent = body; $('#cf-yes').textContent = yes; $('#cf-no').textContent = no;
   $('#m-confirm').classList.remove('hidden');
   $('#cf-yes').onclick = () => { $('#m-confirm').classList.add('hidden'); onYes(); };
-  $('#cf-no').onclick = () => { $('#m-confirm').classList.add('hidden'); sfx.tap(); };
+  $('#cf-no').onclick = () => { $('#m-confirm').classList.add('hidden'); sfx.tap(); if (onNo) onNo(); };
 }
 function leaveToTitle() {
   const live = session && session.mode === 'host' && game.s && !game.s.over && screen === 'game';
   const friends = live ? [...session.conns.values()].length : 0;
   if (live && friends > 0) {
-    confirmBox('End the match?', `You are hosting. The match runs on your device, so leaving ends it for ${friends === 1 ? 'your friend' : `all ${friends} friends`}. Keep spectating to let them finish.`, 'End match for everyone', 'Keep spectating', () => { endSession(); go('title'); });
+    confirmBox('End the match?', `You are hosting. The match runs on your device, so leaving ends it for ${friends === 1 ? 'your friend' : `all ${friends} friends`}. Keep spectating to let them finish.`, 'End match for everyone', 'Keep spectating', () => { for (const c of session.conns.values()) c.send({ t: 'bye', reason: 'ended' }); setTimeout(() => { endSession(); go('title'); }, 250); }, () => { $('#m-results').classList.add('hidden'); game.startSpectate(); });
     return;
   }
   endSession(); go('title');
@@ -1429,12 +1442,13 @@ $('#title-list').addEventListener('click', (e) => { const b = e.target.closest('
 $('#seg-diff').addEventListener('click', (e) => { const b = e.target.closest('[data-diff]'); if (!b) return; profile.botLevel = b.dataset.diff; save(); sfx.select(); renderSoloMini(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; const open = [...document.querySelectorAll('.modal:not(.hidden)')].pop(); if (open && open.id !== 'm-results' && open.id !== 'm-lesson') open.classList.add('hidden'); });
+addEventListener('beforeunload', (e) => { if (session && session.mode === 'host' && game.s && !game.s.over && screen === 'game' && session.conns.size) { e.preventDefault(); e.returnValue = ''; } });
 addEventListener('pagehide', () => endSession());
 bgInit();
 game.init();
 renderProfile();
 document.body.classList.toggle('bigtext', !!settings.bigtext); document.body.classList.toggle('reduced', !!settings.motion);
-setTimeout(() => { $('#splash').classList.add('out'); if (profile.seenVersion !== '3.0' && (profile.games || profile.tutorial.length)) { info('What\'s New in 3.0', WHATS_NEW); } profile.seenVersion = '3.0'; save(); }, 700);
+setTimeout(() => { $('#splash').classList.add('out'); if (profile.seenVersion !== '3.1' && (profile.games || profile.tutorial.length)) { info('What\'s New in 3.1', WHATS_NEW); } profile.seenVersion = '3.1'; save(); }, 700);
 const q = new URLSearchParams(location.search);
 if (q.get('join')) { go('join'); $('#in-code').value = q.get('join').toUpperCase().slice(0, 5); }
 window.__cc = { game, profile, get session() { return session; }, startSolo };
