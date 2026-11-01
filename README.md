@@ -17,6 +17,11 @@ A turn-based chess battle royale for up to 8 players. Everyone starts as a Pawn 
 - **Progression:** XP and levels with titles from Recruit to Legend; every level-up pays out Marks.
 - **Juice:** hit-stop, slow-motion eliminations, camera punches, lunging attacks, per-ability VFX, shattering pieces, collapsing storm tiles, damage previews with KO markers, kill streak callouts, emotes, haptics and a generative soundtrack that intensifies as the match closes in.
 
+## What's in 3.0
+- **Full promotion ladder:** see every rung and climb several at once.
+- **The Store:** a daily Featured shop, Bundles, rarity tiers, item reveals, Trails and Emote packs, plus 11 new cosmetics.
+- **Showtime:** contender reveals, results podium and a title-screen showcase.
+
 ## What's in 2.0
 - **Four modes:** Battle Royale, Blitz, Duel and a seeded Daily Challenge.
 - **Crown Path:** a free 30-tier season track with exclusive cosmetics and titles. **Trophies:** 21 achievements.
@@ -51,6 +56,7 @@ node tools/modesim.mjs      # every mode terminates, average lengths
 - `js/render.js`, `js/pieces.js` - canvas renderer and vector piece art
 - `js/net.js` - friend-code rooms and the authoritative match host
 - `js/main.js` - menus, loadout, armory, HUD, sessions
+- `js/store.js` - store catalog, daily featured offers, bundles, item previews
 - `js/progression.js` - Crown Path, trophies, career stats, daily challenge seeding
 - `js/tutorial.js`, `js/codex.js` - guided lessons and the Codex
 - `js/audio.js` - synthesised sound effects
