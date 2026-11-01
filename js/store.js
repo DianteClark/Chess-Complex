@@ -37,8 +37,7 @@ export function featured(p, date) {
   const pool = [];
   for (const kind of Object.keys(KINDS)) for (const id of Object.keys(KINDS[kind].table)) { const t = KINDS[kind].table[id]; if (t.price) pool.push([kind, id]); }
   let h = hash('feat-' + date); const out = [];
-  const avail = pool.filter(([k, id]) => !isOwned(p, k, id));
-  const src = avail.length >= 4 ? avail : pool;
+  const src = pool; // fixed for the whole day; owned offers show as Owned
   const used = new Set();
   while (out.length < Math.min(4, src.length)) { h = (Math.imul(h, 1103515245) + 12345) >>> 0; const i = h % src.length; if (used.has(i)) continue; used.add(i); out.push(src[i]); }
   return out.map(([k, id], i) => { const it = item(p, k, id); it.off = i === 0 ? 0.3 : 0; it.deal = i === 0; it.final = Math.round(it.price * (1 - it.off)); return it; });
@@ -58,7 +57,7 @@ export function activeEmotes(p) { const out = {}; for (const id of p.ownedEmotes
 export function makePreview(cv, kind, id, opts = {}) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const r = cv.getBoundingClientRect(); cv.width = Math.max(10, (r.width || 150) * dpr); cv.height = Math.max(10, (r.height || 110) * dpr);
-  return { cv, ctx: cv.getContext('2d'), dpr, kind, id, t: Math.random() * 2, cycle: 0, fx: new FX(), skin: opts.skin || 'ivory', big: !!opts.big, rays: !!opts.rays, color: rarityColor(kind, id) };
+  return { cv, ctx: cv.getContext('2d'), dpr, kind, id, t: Math.random() * 2, cycle: Math.random() * 2.4, fx: new FX(), skin: opts.skin || 'ivory', big: !!opts.big, rays: !!opts.rays, color: rarityColor(kind, id) };
 }
 export function drawPreview(p, dt) {
   const { ctx, cv, dpr } = p; const W = cv.width / dpr, H = cv.height / dpr;
@@ -95,12 +94,12 @@ export function drawPreview(p, dt) {
     ctx.save(); ctx.scale(ts, ts);
     const cx = W / ts / 2, by = 1.75;
     p.cycle += dt;
-    if (p.cycle > 2.8) { p.cycle = 0; p.shown = false; }
-    if (!p.shown && p.cycle > 0.5) { p.shown = true; p.fx.finisher(p.id, cx, by, 'rook', 'obsidian', '#7f6bff'); }
+    if (p.cycle > 2.6) { p.cycle = 0; p.shown = false; }
+    if (!p.shown && p.cycle > 0.4) { p.shown = true; p.fx.finisher(p.id, cx, by, 'rook', 'ivory', '#ffe7a8'); }
     p.fx.update(dt);
     ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.beginPath(); ctx.ellipse(cx, by, 0.6, 0.15, 0, 0, Math.PI * 2); ctx.fill();
     p.fx.drawGround(ctx);
-    if (!p.shown) { ctx.save(); ctx.translate(cx, by); ctx.scale(0.92, 0.92); drawPiece(ctx, 'rook', 'obsidian', { t: p.t, flash: Math.max(0, (p.cycle - 0.35) * 6) }); ctx.restore(); }
+    if (!p.shown || p.cycle > 2.0) { const a = p.shown ? Math.min(1, (p.cycle - 2.0) / 0.3) : 1; ctx.save(); ctx.globalAlpha = a; ctx.translate(cx, by - (p.shown ? (1 - a) * 0.6 : 0)); ctx.scale(0.92, 0.92); drawPiece(ctx, 'rook', 'ivory', { t: p.t, flash: p.shown ? 0 : Math.max(0, (p.cycle - 0.25) * 6) }); ctx.restore(); ctx.globalAlpha = 1; }
     p.fx.drawAbove(ctx);
     ctx.restore();
     if (p.fx.screenFlash > 0.01) { ctx.globalAlpha = p.fx.screenFlash * 0.6; ctx.fillStyle = p.fx.flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
@@ -108,7 +107,7 @@ export function drawPreview(p, dt) {
     const ts = H / 2.2; ctx.save(); ctx.scale(ts, ts);
     const span = W / ts, x = 0.6 + ((Math.sin(p.t * 1.4) + 1) / 2) * (span - 1.2), by = 1.75;
     const cols = TRAILS[p.id].colors;
-    if (cols.length) for (let i = 0; i < 2; i++) p.fx.parts.push({ x: x + (Math.random() - 0.5) * 0.3, y: by - 0.2 - Math.random() * 0.4, vx: (Math.random() - 0.5) * 0.4, vy: -0.3, g: p.id === 'royal' ? 2 : -0.2, life: 0.7, t: 0, color: cols[(Math.random() * cols.length) | 0], size: 0.035, kind: p.id === 'royal' ? 'coin' : p.id === 'petals' ? 'chunk' : 'spark', rot: Math.random() * 6, vr: 6, floor: p.id === 'royal' ? by : null });
+    if (cols.length) for (let i = 0; i < 2; i++) p.fx.parts.push({ x: x + (Math.random() - 0.5) * 0.3, y: by - 0.2 - Math.random() * 0.4, vx: (Math.random() - 0.5) * 0.4, vy: -0.3, g: p.id === 'royal' ? 2 : -0.2, life: 0.7, t: 0, color: cols[(Math.random() * cols.length) | 0], size: 0.055, kind: p.id === 'royal' ? 'coin' : p.id === 'petals' ? 'chunk' : 'spark', rot: Math.random() * 6, vr: 6, floor: p.id === 'royal' ? by : null });
     p.fx.update(dt);
     p.fx.drawAbove(ctx);
     ctx.translate(x, by); ctx.scale(0.92, 0.92); drawPiece(ctx, 'knight', p.skin, { t: p.t });

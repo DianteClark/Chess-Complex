@@ -447,7 +447,7 @@ export class Renderer {
     for (const f of this.labelQ) f();
     this.labelQ = [];
 
-    if (!this.lowQ) this.drawWeather(ctx, T);
+    this.drawWeather(ctx, T);
     this.fx.drawAbove(ctx);
     ctx.restore();
 
@@ -525,7 +525,8 @@ export class Renderer {
 
   drawWeather(ctx, T) {
     const th = this.theme, w = th.weather || 'dust';
-    for (const m of this.motes) {
+    for (let mi = 0; mi < this.motes.length; mi += this.lowQ ? 2 : 1) {
+      const m = this.motes[mi];
       const a = 0.5 + 0.5 * Math.sin(m.p * 2);
       if (w === 'petals') {
         const x = m.x + Math.sin(m.p * 0.7) * 0.8, y = SIZE - m.y;
@@ -768,9 +769,9 @@ export class Renderer {
       const col = sk.fx === 'ember' ? '#ff8a3d' : sk.fx === 'frost' ? '#d6f7ff' : sk.fx === 'leaf' ? '#8de37a' : sk.fx === 'spark' ? '#00f0ff' : sk.fx === 'star' ? '#d6a6ff' : '#ffe9a8';
       this.fx.parts.push({ x: cx + (Math.random() - 0.5) * 0.4, y: base - 0.3 - Math.random() * 0.5, vx: (Math.random() - 0.5) * 0.2, vy: -0.4, g: -0.1, life: 0.9, t: 0, color: col, size: 0.025, kind: 'spark', rot: 0, vr: 0 });
     }
-    if (u.trail && u.trail !== 'none' && (d.moving || d.lunge) && TRAILS[u.trail] && !this.lowQ) {
+    if (u.trail && u.trail !== 'none' && (d.moving || d.lunge) && TRAILS[u.trail]) {
       const cols = TRAILS[u.trail].colors;
-      for (let i = 0; i < 2; i++) this.fx.parts.push({ x: cx + (Math.random() - 0.5) * 0.3, y: base - 0.15 - d.lift - Math.random() * 0.4, vx: (Math.random() - 0.5) * 0.4, vy: -0.2 - Math.random() * 0.4, g: u.trail === 'royal' ? 2 : -0.2, life: 0.6 + Math.random() * 0.4, t: 0, color: cols[(Math.random() * cols.length) | 0], size: u.trail === 'petals' ? 0.05 : 0.035, kind: u.trail === 'royal' ? 'coin' : u.trail === 'petals' ? 'chunk' : 'spark', rot: Math.random() * 6, vr: (Math.random() - 0.5) * 8, floor: u.trail === 'royal' ? base : null });
+      for (let i = 0; i < (this.lowQ ? 1 : 2); i++) this.fx.parts.push({ x: cx + (Math.random() - 0.5) * 0.3, y: base - 0.15 - d.lift - Math.random() * 0.4, vx: (Math.random() - 0.5) * 0.4, vy: -0.2 - Math.random() * 0.4, g: u.trail === 'royal' ? 2 : -0.2, life: 0.6 + Math.random() * 0.4, t: 0, color: cols[(Math.random() * cols.length) | 0], size: u.trail === 'petals' ? 0.05 : 0.035, kind: u.trail === 'royal' ? 'coin' : u.trail === 'petals' ? 'chunk' : 'spark', rot: Math.random() * 6, vr: (Math.random() - 0.5) * 8, floor: u.trail === 'royal' ? base : null });
     }
     if (u.kind === 'hollow' && Math.random() < 0.1) this.fx.parts.push({ x: cx + (Math.random() - 0.5) * 0.3, y: base - 0.1, vx: 0, vy: -0.3, g: -0.1, life: 0.8, t: 0, color: '#8f8cff', size: 0.03, kind: 'spark', rot: 0, vr: 0 });
     // attunement crystals orbit

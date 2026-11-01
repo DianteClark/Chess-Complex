@@ -257,13 +257,13 @@ function storeCard(it, opts = {}) {
     : it.season ? `<button class="btn small" disabled>Crown Path reward</button>`
     : `<button class="btn small gold" data-buy="${it.kind}:${it.id}" data-price="${price}">${opts.off ? `<s>${it.price}</s> ` : ''}${priceTag(price)}</button>`;
   const visual = it.kind === 'skin' && !opts.canvas ? `<div class="row"><img src="${pieceIcon('knight', it.id, null, 48)}" alt=""><img class="mid" src="${pieceIcon('queen', it.id, null, 72)}" alt=""><img src="${pieceIcon('rook', it.id, null, 48)}" alt=""></div>` : `<canvas class="preview" data-kind="${it.kind}" data-id="${it.id}"></canvas>`;
-  return `<div class="skin r-${it.rarity} ${it.equipped && KINDS[it.kind].equip ? 'equipped' : ''} ${it.owned ? '' : 'locked'}" data-card="${it.kind}:${it.id}" style="--rc:${col}">
+  return `<div class="skin r-${it.rarity} ${opts.hero ? 'hero' : ''} ${it.equipped && KINDS[it.kind].equip ? 'equipped' : ''} ${it.owned ? '' : 'locked'}" data-card="${it.kind}:${it.id}" style="--rc:${col}">
     ${opts.deal ? '<div class="deal">DEAL OF THE DAY -30%</div>' : ''}<div class="glow" style="background:${col}"></div>
-    ${visual}<div class="rar">${RARITY[it.rarity].name} ${KINDS[it.kind].label}</div><h4>${it.name}</h4>${it.kind === 'finisher' ? `<div class="desc">${FINISHERS[it.id].desc}</div>` : ''}${btn}</div>`;
+    ${visual}<div class="rar">${RARITY[it.rarity].name} ${KINDS[it.kind].label}</div><h4>${it.name}</h4>${opts.off && !it.owned ? `<div class="save">You save ${it.price - price}</div>` : ''}${(it.id === 'none' || it.id === 'basic') ? '<div class="desc">Default</div>' : ''}${it.kind === 'finisher' ? `<div class="desc">${FINISHERS[it.id].desc}</div>` : ''}${btn}</div>`;
 }
 function renderArmory() {
   renderProfile();
-  $$('#armory-tabs .tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === armoryTab));
+  $$('#armory-tabs .tab').forEach((t) => { t.classList.toggle('on', t.dataset.tab === armoryTab); const k = TAB_KIND[t.dataset.tab]; if (k) { const all = listKind(profile, k); t.innerHTML = `${t.dataset.label || (t.dataset.label = t.textContent)}<em>${all.filter((i) => i.owned).length}/${all.length}</em>`; } });
   armoryPreviews.list = [];
   const el = $('#skins'); const hint = $('#armory-hint');
   if (armoryTab === 'featured') {
@@ -272,7 +272,7 @@ function renderArmory() {
     hint.innerHTML = `New offers in ${hrs}h ${mins}m`;
     const feat = featured(profile, today());
     if (profile.storeSeen !== today()) { profile.storeSeen = today(); save(); }
-    el.innerHTML = feat.map((it) => storeCard(it, { canvas: true, off: it.off, final: it.final, deal: it.deal })).join('')
+    el.innerHTML = feat.map((it) => storeCard(it, { canvas: true, off: it.off, final: it.final, deal: it.deal, hero: it.deal })).join('')
       + `<div class="supporter"><div class="sup-h"><b>Founder's Pack</b><span>Support the game</span></div><p>An exclusive Founder piece set, 2,000 Marks and a Founder title. Coming with the app store release.</p><button class="btn small" disabled>Coming soon</button></div>`;
   } else if (armoryTab === 'bundles') {
     hint.textContent = 'Bundles only charge for the items you do not own yet.';
@@ -294,7 +294,8 @@ function reveal(kind, id) {
   $('#rv-rar').textContent = `${RARITY[it.rarity].name} ${KINDS[kind].label}`; $('#rv-rar').style.color = RARITY[it.rarity].color;
   $('#rv-name').textContent = it.name;
   $('#rv-equip').dataset.equip = KINDS[kind].equip ? `${kind}:${id}` : '';
-  $('#rv-equip').textContent = KINDS[kind].equip ? 'Equip now' : 'Nice';
+  $('#rv-equip').textContent = KINDS[kind].equip ? 'Equip now' : 'Awesome';
+  $('#m-reveal [data-act=close-reveal]').textContent = armoryPreviews.queue && armoryPreviews.queue.length ? `Next (${armoryPreviews.queue.length} more)` : 'Later';
   const m = $('#m-reveal'); m.style.setProperty('--rc', RARITY[it.rarity].color); m.classList.remove('hidden');
   armoryPreviews.reveal = makePreview($('#rv-canvas'), kind, id, { skin: profile.skin, big: true, rays: true });
   sfx.buy(); if (it.rarity === 'legendary' || it.rarity === 'epic') setTimeout(() => sfx.levelup(), 250); uiFlash(); haptic([20, 30, 40, 30, 60]);
@@ -304,7 +305,7 @@ function onArmoryClick(e) {
   const b = e.target.closest('button'); if (!b) return;
   const confirmStep = (price) => {
     if (profile.marks < price) { sfx.error(); toast(`You need ${price - profile.marks} more Marks`); return false; }
-    if (!b.classList.contains('confirm-buy')) { $$('.confirm-buy').forEach((x) => { x.classList.remove('confirm-buy'); x.innerHTML = x.dataset.lbl; }); b.dataset.lbl = b.innerHTML; b.innerHTML = `Confirm ${price}?`; b.classList.add('confirm-buy'); sfx.select(); return false; }
+    if (!b.classList.contains('confirm-buy')) { $$('.confirm-buy').forEach((x) => { x.classList.remove('confirm-buy'); x.innerHTML = x.dataset.lbl; }); b.dataset.lbl = b.innerHTML; b.innerHTML = `Confirm: ${profile.marks - price} left`; b.classList.add('confirm-buy'); sfx.select(); return false; }
     return true;
   };
   if (b.dataset.buy) {
@@ -316,6 +317,8 @@ function onArmoryClick(e) {
     if (!confirmStep(price)) return;
     profile.marks -= price; for (const i of info.missing) grant(profile, i.kind, i.id); save(); renderArmory();
     const best = info.missing.slice().sort((a, b2) => ['common', 'rare', 'epic', 'legendary'].indexOf(b2.rarity) - ['common', 'rare', 'epic', 'legendary'].indexOf(a.rarity))[0];
+    const q = info.missing.slice().sort((a, b2) => ['common', 'rare', 'epic', 'legendary'].indexOf(b2.rarity) - ['common', 'rare', 'epic', 'legendary'].indexOf(a.rarity));
+    armoryPreviews.queue = q.slice(1).map((i) => [i.kind, i.id]);
     if (best) reveal(best.kind, best.id); toast(`${info.name} unlocked`);
   } else if (b.dataset.equip) {
     const [kind, id] = b.dataset.equip.split(':'); equip(profile, kind, id); save(); sfx.select(); renderArmory();
@@ -465,7 +468,7 @@ function botPlayer(i, used) {
   const name = names[Math.floor(Math.random() * names.length)] || 'Bot' + i;
   const keys = Object.keys(PRESETS), p = PRESETS[keys[Math.floor(Math.random() * keys.length)]];
   const equips = {}; for (const pc of PIECE_ORDER) { const list = PIECES[pc].equips; equips[pc] = list[Math.floor(Math.random() * list.length)]; }
-  const skins = Object.keys(SKINS).filter((k) => k !== profile.skin), fins = Object.keys(FINISHERS);
+  const skins = Object.keys(SKINS).filter((k) => k !== profile.skin && SKINS[k].price != null), fins = Object.keys(FINISHERS).filter((k) => FINISHERS[k].price != null);
   const trails = Object.keys(TRAILS);
   return { trail: trails[Math.floor(Math.random() * trails.length)], pid: 'bot' + i + Math.random().toString(36).slice(2, 6), name, isBot: true, botLevel: profile.botLevel || 'normal', skin: skins[Math.floor(Math.random() * skins.length)], finisher: fins[Math.floor(Math.random() * fins.length)], build: { pts: { ...p.pts }, passive: p.passive, equips } };
 }
@@ -566,13 +569,13 @@ function startHostLobby() {
           sfx.select(); renderLobby();
         } else if (m.t === 'act' && sess.host && conn.pid && m.a && typeof m.a === 'object') { try { sess.host.act(conn.pid, m.a); } catch (err) { console.warn('bad action', err); } }
         else if (m.t === 'emote' && conn.pid) hostEmote(sess, conn.pid, m.k);
-        else if (m.t === 'leave' && conn.pid && sess.host) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> forfeited - a bot takes over`); }
+        else if (m.t === 'leave' && conn.pid && sess.host) { conn.left = true; sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> forfeited - a bot takes over`); }
       });
       conn.onClose(() => {
         if (!conn.pid) return;
         sess.conns.delete(conn.pid);
         if (!sess.started) { sess.players = sess.players.filter((p) => p.pid !== conn.pid); renderLobby(); }
-        else if (sess.host) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> disconnected - a bot takes over`); }
+        else if (sess.host && !conn.left) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> disconnected - a bot takes over`); }
       });
     },
   });
@@ -941,8 +944,11 @@ const game = {
     const minCost = popts.length ? Math.min(...popts.map((p) => p.cost)) : 0;
     const shEl = $('#h-shards');
     if (shEl.textContent !== String(u.shards)) { const prev = +shEl.textContent || 0; if (u.shards > prev) setTimeout(() => countUp(shEl, prev, u.shards, 500), 500); else shEl.textContent = u.shards; }
-    $('#h-shardprog').style.width = (minCost ? Math.min(1, u.shards / minCost) * 100 : 100) + '%';
-    const nextEvo = popts.find((p) => p.type === 'evolve');
+    const evos = popts.filter((p) => p.type === 'evolve');
+    const affordable = evos.filter((p) => p.cost <= u.shards);
+    const target = affordable.length ? affordable[affordable.length - 1] : evos[0] || popts.find((p) => p.type === 'hone');
+    const nextEvo = target && target.type === 'evolve' ? target : null;
+    $('#h-shardprog').style.width = (target ? Math.min(1, u.shards / target.cost) * 100 : 100) + '%';
     $('#h-attune').textContent = `ATT ${u.attune || 0}`;
     const ub = $('#ult-btn'), up = Math.min(100, Math.round(u.ult || 0));
     $('#ult-fg').style.strokeDashoffset = 176 * (1 - up / 100);
@@ -954,7 +960,7 @@ const game = {
     if (s.meteors && s.meteors.length) { chip.textContent = 'Meteors incoming'; chip.className = 'event-chip red'; }
     else if (s.bloodMoon) { chip.textContent = 'Blood Moon - damage +30%'; chip.className = 'event-chip red'; }
     else chip.className = 'event-chip hidden';
-    $('#h-next').textContent = u.piece === 'king' ? 'Crowned' : nextEvo ? `${popts.filter((p) => p.type === 'evolve' && p.cost === nextEvo.cost).map((p) => PIECES[p.to].name).join(' / ')} ${nextEvo.cost}` : popts.length ? `Hone ${minCost}` : 'Max';
+    $('#h-next').textContent = u.piece === 'king' ? 'Crowned' : target ? `${target.type === 'hone' ? 'Hone' : (affordable.length ? '' : evos.filter((p) => p.cost === target.cost).map((p) => PIECES[p.to].name).join(' / ')) || PIECES[target.to].name} ${target.cost}` : 'Max';
     const my = this.myTurn();
     $('#h-actions').classList.toggle('wait', !my);
     if (!my) $('#h-actions').classList.remove('myturn');
@@ -963,7 +969,7 @@ const game = {
     set('atk', ABILITIES[slotAbility(u, 'atk')].name);
     set('sig', ABILITIES[slotAbility(u, 'sig')].name);
     const eqId = slotAbility(u, 'eq'); set('eq', eqId ? ABILITIES[eqId].name : 'None');
-    set('promo', popts.length ? `${u.shards}/${minCost}` : '--');
+    set('promo', target ? `${u.shards}/${target.cost}` : '--');
     for (const b of $$('#h-actions .act')) {
       const slot = b.dataset.slot;
       b.classList.toggle('on', my && slot === this.mode);
@@ -982,7 +988,8 @@ const game = {
     }
     const a = unitById(s, s.active);
     let tip = '';
-    if (!u.alive) tip = 'You are spectating.';
+    if (s.over) tip = 'Match over.';
+    else if (!u.alive) tip = 'You are spectating.';
     else if (!my) tip = a ? (a.kind === 'hollow' ? 'A Hollow stirs...' : `<b>${esc(a.name)}</b> is taking their turn`) : '';
     else if (this.mode === 'move') tip = canMove(s, u) ? `<b>Move:</b> ${PIECES[u.piece].moveDesc} Tap a blue tile.` : canAct(s, u) ? 'Choose an action, or end your turn.' : '';
     else { const id = slotAbility(u, this.mode), ab = ABILITIES[id]; tip = `<b>${ab.name}:</b> ${ab.desc}${honedTip(u, id)} ${this.preview ? '<b>Tap again to confirm.</b>' : 'Tap a target.'}`; }
@@ -1073,6 +1080,7 @@ const game = {
     $('#promo-opts').innerHTML = `<div class="promo-path">${path}</div><div class="promo-have"><span class="shard-ico"></span> You have <b>${u.shards}</b> shards</div>`
       + (evo.length ? `<div class="promo-sec">Evolve</div>${evo.map(card).join('')}` : '')
       + (hn ? `<div class="promo-sec">Or stay a ${PIECES[u.piece].name}</div>${card(hn)}` : '');
+    $('#gm-tip').classList.add('hidden'); $('#h-inspect').classList.add('hidden'); $('#abinfo').classList.add('hidden');
     $('#m-promote').classList.remove('hidden'); sfx.select();
   },
   showDead() {
@@ -1241,6 +1249,7 @@ $('#set-onetap').addEventListener('change', (e) => { settings.onetap = e.target.
 $('#set-cb').addEventListener('change', (e) => { settings.cb = e.target.checked; saveSettings(); });
 $('#set-bigtext').addEventListener('change', (e) => { settings.bigtext = e.target.checked; saveSettings(); document.body.classList.toggle('bigtext', settings.bigtext); });
 $('#set-quality').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); game.r.setQuality(settings.quality); $$('#set-quality button').forEach((x) => x.classList.toggle('on', x === b)); sfx.tap(); });
+function sig(str) { let h1 = 0x811c9dc5, h2 = 0x1b873593; for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 ^ (c + i), 2246822519); } return ((h1 >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 12); }
 function info(title, html) { $('#info-title').textContent = title; $('#info-body').innerHTML = html; $('#m-info').classList.remove('hidden'); }
 const WHATS_NEW = `<h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
 <h4>2.0 Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
@@ -1266,9 +1275,9 @@ document.addEventListener('click', (e) => {
     case 'close-info': $('#m-info').classList.add('hidden'); sfx.tap(); break;
     case 'whatsnew': e.preventDefault(); info('What\'s New', WHATS_NEW); break;
     case 'credits': e.preventDefault(); info('Credits', `<p><b>Chess Complex</b><br>Created by Diante Clark.</p><p>Built with plain HTML, Canvas and the Web Audio API. Every sound and piece of art is generated in code.</p><p>Fonts: Cinzel and Chakra Petch (SIL Open Font License). Online play uses PeerJS (MIT).</p>`); break;
-    case 'export-profile': { const code = btoa(unescape(encodeURIComponent(JSON.stringify(profile)))); copy(code, 'Backup code copied'); info('Backup Code', `<p>Keep this somewhere safe. Paste it into Restore Backup on any device.</p><textarea readonly>${code}</textarea>`); break; }
+    case 'export-profile': { const body = btoa(unescape(encodeURIComponent(JSON.stringify(profile)))); const code = body + '.' + sig(body); copy(code, 'Backup code copied'); info('Backup Code', `<p>Keep this somewhere safe. Paste it into Restore Backup on any device.</p><textarea readonly>${code}</textarea>`); break; }
     case 'import-profile': info('Restore Backup', `<p>Paste a backup code. This replaces your current progress.</p><textarea id="import-code"></textarea><button class="btn wide gold" data-act="do-import">Restore</button>`); break;
-    case 'do-import': try { const d = JSON.parse(decodeURIComponent(escape(atob($('#import-code').value.trim())))); if (!d || typeof d !== 'object' || !d.build) throw 0; profile = normalizeProfile(d); save(); renderProfile(); $('#m-info').classList.add('hidden'); toast('Progress restored'); sfx.buy(); } catch { toast('That code did not work'); sfx.error(); } break;
+    case 'do-import': try { const [body, mac] = $('#import-code').value.trim().split('.'); if (!mac || sig(body) !== mac) throw 0; const d = JSON.parse(decodeURIComponent(escape(atob(body)))); if (!d || typeof d !== 'object' || !d.build) throw 0; profile = normalizeProfile(d); save(); renderProfile(); $('#m-info').classList.add('hidden'); toast('Progress restored'); sfx.buy(); } catch { toast('That code did not work'); sfx.error(); } break;
     case 'start-solo': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startSolo(null, profile.mode); break;
     case 'copy-code': copy(session && session.code, 'Code copied'); break;
     case 'copy-link': copy(session && `${location.origin}${location.pathname}?join=${session.code}`, 'Invite link copied'); break;
@@ -1282,7 +1291,7 @@ document.addEventListener('click', (e) => {
     case 'close-menu': $('#m-menu').classList.add('hidden'); break;
     case 'close-promote': $('#m-promote').classList.add('hidden'); break;
     case 'emotes': game.renderEmotes(); $('#emote-menu').classList.toggle('hidden'); sfx.tap(); break;
-    case 'close-reveal': $('#m-reveal').classList.add('hidden'); break;
+    case 'close-reveal': $('#m-reveal').classList.add('hidden'); if (armoryPreviews.queue && armoryPreviews.queue.length) { const [k, id] = armoryPreviews.queue.shift(); setTimeout(() => reveal(k, id), 150); } break;
     case 'forfeit': if (session && session.mode === 'tutorial') { $('#m-menu').classList.add('hidden'); endSession(); go('tutorial'); break; }
       $('#m-menu').classList.add('hidden'); game.showResults(!!(game.s && !game.s.over && game.me && game.me.alive)); break;
     case 'spectate': $('#m-dead').classList.add('hidden'); game.r.overview(); break;
@@ -1315,7 +1324,7 @@ $('#in-code').addEventListener('input', (e) => { e.target.value = e.target.value
 $('#in-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinGame(); });
 document.addEventListener('pointerover', (e) => { if (e.pointerType === 'mouse' && e.target.closest && e.target.closest('.btn:not(:disabled), .tab, .preset, .choice')) { const el = e.target.closest('.btn, .tab, .preset, .choice'); if (el !== document.__lastHover) { document.__lastHover = el; sfx.hover(); } } });
 
-$('#rv-equip').addEventListener('click', () => { const v = $('#rv-equip').dataset.equip; if (v) { const [k, id] = v.split(':'); equip(profile, k, id); save(); sfx.select(); } $('#m-reveal').classList.add('hidden'); if (screen === 'armory') renderArmory(); });
+$('#rv-equip').addEventListener('click', () => { const v = $('#rv-equip').dataset.equip; if (v) { const [k, id] = v.split(':'); equip(profile, k, id); save(); sfx.select(); } $('#m-reveal').classList.add('hidden'); if (screen === 'armory') renderArmory(); if (armoryPreviews.queue && armoryPreviews.queue.length) { const [k, id] = armoryPreviews.queue.shift(); setTimeout(() => reveal(k, id), 150); } });
 $('#lesson-list').addEventListener('click', (e) => { const b = e.target.closest('[data-lesson]'); if (!b) return; sfx.select(); uiFlash(); startLesson(b.dataset.lesson); });
 $('#codex-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-ctab]'); if (!b) return; codexTab = b.dataset.ctab; sfx.tap(); renderCodexTab(); });
 $('#coach-next').addEventListener('click', () => { sfx.select(); if (tutorial) tutorial.next(); });

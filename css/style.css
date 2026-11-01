@@ -697,3 +697,15 @@ body.bigtext .scroll, body.bigtext .modal-box, body.bigtext .feed, body.bigtext 
 .pod.me span { color: var(--gold2); }
 .pod.empty { width: 92px; }
 @keyframes podUp { from { transform: scaleY(0); } }
+
+/* QA 3.0 */
+#s-game .modal { z-index: 12; }
+#armory-tabs { flex-wrap: wrap; overflow: visible; max-width: 640px; }
+#armory-tabs .tab { flex: 1 1 22%; padding: 9px 6px; font-size: 11px; }
+#armory-tabs .tab em { font-style: normal; opacity: .6; margin-left: 3px; font-size: 10px; }
+.bundle .btn .mark-ico, .skin .btn .mark-ico { display: inline-block; margin: 0 5px 0 2px; }
+.skin.hero { grid-column: 1 / -1; }
+.skin.hero canvas.preview { height: 150px; }
+.skin .save { font-size: 11px; color: var(--green); font-weight: 700; margin: -4px 0 6px; }
+.skin.owned-offer { opacity: .75; }
+#armory-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; } #armory-tabs .tab { flex: none; white-space: nowrap; }

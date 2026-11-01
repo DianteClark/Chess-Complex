@@ -18,6 +18,9 @@ Written for the v2.0 release (October 2026). It summarizes the market research a
 3. **Name clearance.** No conflicting "Chess Complex" game was found in a quick search, but that is not clearance. Run USPTO/EUIPO searches (classes 9 and 41), plus store, domain and social-handle checks, before investing in branding.
 4. **Custom domain.** Required for the Google Play TWA (`/.well-known/assetlinks.json`) and good for the brand anyway.
 
+## Economy integrity
+Marks, unlocks and backup codes live on the device. Backup codes carry a checksum that stops casual editing, but anything stored in the browser can be modified by a determined player. Before the Founder's Pack or any real-money item ships, purchases and owned items must be recorded and verified on the server (see accounts above).
+
 ## Monetization (cosmetic only, never pay to win)
 - **Supporter Pack** ($2.99-4.99): an exclusive piece set, a bonus Marks bundle and a supporter title.
 - **Crown Path premium track** ($4.99 a season), alongside the existing free track.

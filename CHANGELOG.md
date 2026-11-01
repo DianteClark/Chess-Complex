@@ -17,6 +17,16 @@
 - A podium on the results screen once a match ends.
 - Your equipped piece set and trail on a pedestal on the title screen.
 
+**Fixes and polish from 3.0 QA**
+- The Featured shop is now fixed for the whole day. Buying an offer no longer reshuffles the shop or rolls a new 30% deal.
+- Paid trails and board weather stay visible when graphics drop to Low (just lighter).
+- Coaching tips and info cards no longer sit above menus or eat taps.
+- Store tabs sit in a grid with owned/total counts. The Deal of the Day is a full-width hero card with "You save". Confirm shows your balance after purchase. Bundles reveal every item in turn.
+- Finisher previews keep the victim visible between loops, with staggered timing and a lighter piece.
+- The HUD's next-promotion text matches the ladder (for example "Rook 8" when you can afford it).
+- Queen base HP raised to 150, so evolving from Rook no longer lowers max HP.
+- Bots no longer wear Crown Path exclusives. Backup codes carry a checksum, so edited codes are rejected. Duplicate forfeit lines in the feed and "is taking their turn" after a match are gone.
+
 **Fixes from the 3.0 code review**
 - A host pressing Play Again mid-match could leave friends frozen. Rematch is now only available after the match ends.
 - A friend's forfeit left their piece human-controlled, wasting turn timers, and paid 15 Marks. A bot now takes over and nothing is paid. Forfeits count as a loss and reset win streaks.
