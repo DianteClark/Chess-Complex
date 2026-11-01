@@ -308,6 +308,176 @@ S['S7-lobby-full-kick-rejoin'] = async (run) => {
   run.check((await view(c2)).screen === 's-game', 'c2: did not start duel');
 };
 
+
+// ---------- 5.0: Squads and Siege ----------
+// Team-aware elimination: mirrors engine kill() for Squads/Siege (soul when a teammate lives, team placement, shared victory).
+async function teamKill(host, pid, { soul = true } = {}) {
+  return host.evaluate(async ([pid, soul]) => {
+    if (window.__protect) window.__protect.delete(pid);
+    const E = await import('/js/engine.js'); const h = window.__cc.session.host, s = h.s;
+    const v = s.units.find((u) => u.pid === pid && u.kind === 'player'); if (!v || !v.alive || s.over) return false;
+    v.alive = false; v.hp = 0;
+    const ev = [{ e: 'death', id: v.id, by: null, x: v.x, y: v.y, cause: null }];
+    const mates = s.units.filter((w) => w.kind === 'player' && w.alive && E.ally(w, v));
+    if (s.siege) {
+      v.place = 0;
+      if (E.alivePlayers(s).length) { if (soul) { s.items.push({ x: v.x, y: v.y, k: 'soul', n: 1, id: v.id, team: v.team, exp: s.round + 3 }); ev.push({ e: 'soul', id: v.id, x: v.x, y: v.y }); } }
+      else { s.over = true; s.winner = null; s.items = s.items.filter((i) => i.k !== 'soul'); for (const p of s.units) if (p.kind === 'player') p.place = 2; ev.push({ e: 'over', winner: null, siege: true, wave: s.siege.wave }); }
+    } else {
+      if (mates.length) { v.place = 0; if (soul) { s.items.push({ x: v.x, y: v.y, k: 'soul', n: 1, id: v.id, team: v.team, exp: s.round + 3 }); ev.push({ e: 'soul', id: v.id, x: v.x, y: v.y }); } }
+      else { const place = E.teamsAlive(s).size + 1; for (const w of s.units) if (w.kind === 'player' && (w === v || (v.team != null && w.team === v.team))) w.place = place; s.items = s.items.filter((i) => !(i.k === 'soul' && i.team === v.team)); }
+      const left = E.teamsAlive(s);
+      if (left.size <= 1) { const alive = E.alivePlayers(s); s.over = true; s.winner = alive[0] ? alive[0].id : null; for (const w of s.units) if (w.kind === 'player' && alive[0] && (w === alive[0] || E.ally(w, alive[0]))) w.place = 1; ev.push({ e: 'over', winner: s.winner, team: alive[0] ? alive[0].team : null }); }
+    }
+    if (!s.over && s.active === v.id) E.nextTurn(s, ev);
+    s.v++; h.publish(ev); h.schedule();
+    return true;
+  }, [pid, soul]);
+}
+const lobbyTags = (p, sel) => p.evaluate((sel) => [...document.querySelectorAll(sel + ' .team-tag')].map((t) => t.textContent), sel);
+const deadView = (p) => p.evaluate(() => ({ open: !document.querySelector('#m-dead').classList.contains('hidden'), title: document.querySelector('#m-dead h3').textContent, results: !document.querySelector('#m-dead [data-act="results"]').classList.contains('hidden'), body: document.querySelector('#m-dead').innerText.replace(/\s+/g, ' ').trim() }));
+// "Can this dead player open results right now?" - any visible results entry point, or results already open.
+const canOpenResults = (p) => p.evaluate(() => {
+  const vis = (sel) => { const e = document.querySelector(sel); if (!e || e.closest('.hidden')) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  return { deadBtn: vis('#m-dead [data-act="results"]'), specBtn: vis('#spec-bar [data-act="results"]'), open: !document.querySelector('#m-results').classList.contains('hidden') };
+});
+const mySoul = (p) => p.evaluate(() => { const g = window.__cc.game; return !!(g.s && g.me && g.s.items.some((i) => i.k === 'soul' && i.id === g.me.id)); });
+
+// 8. Squads: host + friend are Team 1 with 6 bots. Friend dies -> Downed, spectates, cannot open results while the host lives -> team wins -> both see Squad Victory.
+S['S8-squads-team-spectate'] = async (run) => {
+  const { host, code } = await L.hostLobby(run, { mode: 'squads' });
+  const c = await L.clientJoin(run, 'c1', code);
+  for (let i = 0; i < 6; i++) await tap(host, '[data-act="add-bot"]');
+  await sleep(500);
+  const tags = await lobbyTags(c, '#join-lobby');
+  const label = await c.evaluate(() => document.querySelector('#join-lobby-panel .lbl').textContent);
+  run.note(`c1 lobby: "${label}" tags ${JSON.stringify(tags)}`);
+  run.check(tags.length === 8 && tags[0] === 'Team 1' && tags[1] === 'Team 1' && tags[7] === 'Team 4', `c1: lobby team labels wrong ${JSON.stringify(tags)}`);
+  run.check(/Squads/.test(label), `c1: lobby label "${label}" does not name Squads`);
+  await run.shot('c1', 'lobby');
+  await L.startMatch(run, host, { clients: [c] });
+  const cpid = await L.clientPid(c);
+  run.before = { host: await view(host), c1: await view(c) };
+  const teams = await host.evaluate((cp) => { const s = window.__cc.session.host.s; const t = (pid) => s.units.find((u) => u.pid === pid).team; return { host: t('me'), c1: t(cp), mode: s.mode, teams: s.teams }; }, cpid);
+  run.check(teams.teams === 2 && teams.host === teams.c1, `host and c1 not on the same team ${JSON.stringify(teams)}`);
+  const hud = await c.evaluate(() => document.querySelector('#h-alive').innerText);
+  run.check(/HostH/i.test(hud), `c1: HUD does not show teammate HostH ("${hud}")`);
+  await autoplay(host); await autoplay(c); await L.protectHumans(host);
+  // friend goes down
+  await teamKill(host, cpid);
+  run.check(await waitDead(c), 'c1: Downed modal never appeared');
+  let d = await deadView(c);
+  run.note(`c1 dead modal: "${d.body}"`);
+  run.check(d.title === 'Downed', `c1: dead modal title "${d.title}" (expected Downed while soul is up)`);
+  run.check(!d.results, 'c1: See Results offered while teammate is alive');
+  await run.shot('c1', 'downed');
+  await tap(c, '#m-dead [data-act="spectate"]');
+  run.check(await L.visible(c, '#spec-bar'), 'c1: not spectating after Spectate');
+  let cr = await canOpenResults(c); run.check(!cr.specBtn && !cr.open, `c1: can open results while spectating with teammate alive ${JSON.stringify(cr)}`);
+  await expectAdvancing(run, 'c1', 3000, 'while downed teammate spectates');
+  await run.shot('c1', 'spectating');
+  // wait for the soul to resolve (fade after 3 rounds, or a revive)
+  await waitFor(c, () => { const g = window.__cc.game; return g.me.alive || !g.s.items.some((i) => i.k === 'soul' && i.id === g.me.id); }, null, 30000);
+  const cv = await view(c); run.note(`c1 soul resolved: alive=${cv.alive}`);
+  if (!cv.alive) {
+    await sleep(800);
+    cr = await canOpenResults(c); d = await deadView(c);
+    run.check(!cr.specBtn && !cr.deadBtn && !cr.open, `c1: after soul faded (host alive) results reachable ${JSON.stringify(cr)} modal "${d.body}"`);
+    await run.shot('c1', 'soul-faded');
+  }
+  // finish: eliminate every other team
+  const others = (await L.pids(host)).filter((u) => u.pid !== 'me' && u.pid !== cpid);
+  for (const u of others) { await teamKill(host, u.pid, { soul: false }); await sleep(80); }
+  run.check(await waitResults(host), 'host: no final results'); run.check(await waitResults(c), 'c1: no final results');
+  await sleep(1500);
+  const hv = await view(host), fv = await view(c);
+  const hp = await host.textContent('#r-place'), cpl = await c.textContent('#r-place');
+  run.note(`final: host "${hv.rTitle}" / "${hp}", c1 "${fv.rTitle}" / "${cpl}"`);
+  run.check(hv.rTitle === 'Squad Victory', `host: final title "${hv.rTitle}"`);
+  run.check(fv.rTitle === 'Squad Victory', `c1: final title "${fv.rTitle}" (team won, should share the victory)`);
+  run.check(/teams/i.test(hp) && /teams/i.test(cpl), `placement text lacks "teams": host "${hp}" c1 "${cpl}"`);
+  run.check(hv.rematchVisible, 'host: Play Again hidden after squads end');
+  await run.shot('host', 'results'); await run.shot('c1', 'results');
+  await rewardsOnce(run, 'host'); await rewardsOnce(run, 'c1');
+};
+
+// 8b. Squads: whole friend team wiped while other teams fight on -> results become available mid-match.
+S['S8b-squads-team-out'] = async (run) => {
+  const { host, c, cpid } = await match(run, { mode: 'squads', bots: 6 });
+  await teamKill(host, cpid, { soul: false });
+  run.check(await waitDead(c), 'c1: dead modal never appeared');
+  let cr = await canOpenResults(c); run.check(!cr.deadBtn, `c1: results offered while host teammate lives ${JSON.stringify(cr)}`);
+  await tap(c, '#m-dead [data-act="spectate"]');
+  await teamKill(host, 'me', { soul: false });
+  run.check(await waitDead(host), 'host: dead modal never appeared');
+  await sleep(800);
+  const hv = await view(host);
+  run.check(!hv.over, 'match ended although 3 teams remain');
+  cr = await canOpenResults(c); const hd = await deadView(host);
+  run.note(`after team wiped: c1 ${JSON.stringify(cr)}; host modal "${hd.body}"`);
+  run.check(cr.specBtn || cr.deadBtn, `c1: no way to open results after own team is out ${JSON.stringify(cr)}`);
+  run.check(hd.results, 'host: See Results hidden after own team is out');
+  await expectAdvancing(run, 'c1', 3000, 'after team 1 is out');
+  await tap(host, '#m-dead [data-act="results"]');
+  const r = await view(host); run.note(`host early results: "${r.rTitle}" ${await host.textContent('#r-place')}`);
+  await run.shot('host', 'team-out-results');
+  await finish(run, host, []);
+  run.check(await waitResults(c), 'c1: no final results');
+};
+
+// 9. Siege co-op: host + friend + 1 bot ally. Friend downed -> no results while the siege runs; then seats go to the AI and the siege plays out to the end.
+S['S9-siege-coop'] = async (run) => {
+  const { host, code } = await L.hostLobby(run, { mode: 'siege' });
+  const c = await L.clientJoin(run, 'c1', code);
+  await tap(host, '[data-act="add-bot"]'); await sleep(400);
+  const tags = await lobbyTags(c, '#join-lobby');
+  const label = await c.evaluate(() => document.querySelector('#join-lobby-panel .lbl').textContent);
+  run.note(`c1 lobby: "${label}" tags ${JSON.stringify(tags)}`);
+  run.check(/Siege/.test(label) && tags.length === 3 && tags.every((t) => t === 'Ally'), `c1: siege lobby label/tags wrong "${label}" ${JSON.stringify(tags)}`);
+  await L.startMatch(run, host, { clients: [c] });
+  const cpid = await L.clientPid(c);
+  run.before = { host: await view(host), c1: await view(c) };
+  const sg = await c.evaluate(() => ({ siege: window.__cc.game.s.siege, hud: document.querySelector('#h-alive').innerText }));
+  run.check(sg.siege && sg.siege.waves >= 1, `c1: no siege state ${JSON.stringify(sg)}`);
+  await autoplay(host); await autoplay(c);
+  // protect every defender so the run reaches the final wave deterministically
+  await host.evaluate(async () => { const E = await import('/js/engine.js'); window.__protect = new Set(window.__cc.session.host.s.units.filter((u) => u.kind === 'player').map((u) => u.pid)); clearInterval(window.__pt); window.__pt = setInterval(() => { const h = window.__cc.session && window.__cc.session.host; if (!h) return; for (const u of h.s.units) if (u.alive && window.__protect.has(u.pid) && u.hp < E.stats(u).maxHp * 0.6) u.hp = E.stats(u).maxHp; }, 30); });
+  await sleep(1500);
+  await teamKill(host, cpid);
+  if (!(await waitDead(c))) {
+    const st = await c.evaluate(() => { const g = window.__cc.game; return { alive: g.me.alive, soul: g.s.items.some((i) => i.k === 'soul' && i.id === g.me.id), feed: document.querySelector('#h-feed').innerText.replace(/\s+/g, ' ') }; });
+    run.note(`c1 downed then back before the modal showed: ${JSON.stringify(st)}`);
+    run.check(st.alive, 'c1: siege dead modal never appeared and c1 is not alive');
+    if (st.alive) { await teamKill(host, cpid, { soul: false }); run.check(await waitDead(c), 'c1: siege dead modal never appeared (no soul)'); }
+  }
+  const d = await deadView(c); run.note(`c1 siege dead modal: "${d.body}"`);
+  run.check(!d.results, 'c1: See Results offered during a live siege');
+  await tap(c, '#m-dead [data-act="spectate"]');
+  let cr = await canOpenResults(c); run.check(!cr.specBtn && !cr.open, `c1: results reachable while the siege runs ${JSON.stringify(cr)}`);
+  await run.shot('c1', 'siege-spectate');
+  // hand both human seats to the AI and let the siege play out
+  await autoplay(host, false); await autoplay(c, false);
+  await host.evaluate((cp) => { const h = window.__cc.session.host; h.fast = true; h.setBot('me'); h.setBot(cp); }, cpid);
+  let last = -1; const t0 = Date.now();
+  while (Date.now() - t0 < 9 * 60000) {
+    const st = await host.evaluate(() => { const s = window.__cc.session.host.s; return { over: s.over, wave: s.siege.wave, round: s.round }; });
+    if (st.wave !== last) { last = st.wave; run.note(`wave ${st.wave} at round ${st.round} (${Math.round((Date.now() - t0) / 1000)}s)`); }
+    if (st.over) break;
+    await sleep(1000);
+  }
+  run.check(await waitResults(host, 15000), 'host: no siege results'); run.check(await waitResults(c, 15000), 'c1: no siege results');
+  await sleep(1500);
+  const out = {}; for (const [l, p] of [['host', host], ['c1', c]]) out[l] = { title: await p.textContent('#r-title'), place: await p.textContent('#r-place'), stat: await p.evaluate(() => document.querySelector('#r-stats').innerText.replace(/\s+/g, ' ')) };
+  run.note(`siege results ${JSON.stringify(out)}`);
+  for (const l of ['host', 'c1']) {
+    run.check(out[l].title === 'The Line Held', `${l}: siege title "${out[l].title}"`);
+    run.check(/Survived (\d+) of \1 waves/i.test(out[l].place), `${l}: siege text "${out[l].place}"`);
+    run.check(/Hollows/i.test(out[l].stat), `${l}: siege stats do not count Hollows "${out[l].stat}"`);
+  }
+  await run.shot('host', 'siege-results'); await run.shot('c1', 'siege-results');
+  await rewardsOnce(run, 'host'); await rewardsOnce(run, 'c1');
+};
+
 // ---------- runner ----------
 (async () => {
   const args = process.argv.slice(2); const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };

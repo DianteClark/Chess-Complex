@@ -38,12 +38,26 @@ export function hiSprite(piece, skin, tint = null) {
   return c;
 }
 const rnd = (a, b) => a + Math.random() * (b - a);
+// cached gradient sprites (no per-frame gradient objects)
+const SHOCK = new Map(), PILLAR = new Map();
+function shockSprite(color) {
+  let c = SHOCK.get(color); if (c) return c;
+  c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 32, 64, 64, 64); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.8, color); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128); if (SHOCK.size > 64) SHOCK.clear(); SHOCK.set(color, c); return c;
+}
+function pillarSprite(color) {
+  let c = PILLAR.get(color); if (c) return c;
+  c = document.createElement('canvas'); c.width = 4; c.height = 256; const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 256); g.addColorStop(0, color + '00'); g.addColorStop(0.7, color + 'cc'); g.addColorStop(1, '#ffffff');
+  x.fillStyle = g; x.fillRect(0, 0, 4, 256); if (PILLAR.size > 64) PILLAR.clear(); PILLAR.set(color, c); return c;
+}
 
 export class FX {
   constructor() { this.reset(); }
   reset() {
     this.parts = []; this.shards = []; this.rings = []; this.beams = []; this.bolts = []; this.flashes = [];
-    this.meteors = []; this.fireworks = []; this.shocks = []; this.falls = []; this.pillars = []; this.decals = []; this.slashes = []; this.projs = []; this.implodes = []; this.glyphs = [];
+    this.meteors = []; this.fireworks = []; this.shocks = []; this.falls = []; this.pillars = []; this.decals = []; this.slashes = []; this.projs = []; this.implodes = []; this.glyphs = []; this.thrusts = [];
     this.screenFlash = 0; this.flashColor = '#ffffff'; this.time = 0; this.pending = []; this.crowns = [];
   }
   after(t, fn) { this.pending.push({ at: this.time + t, fn }); }
@@ -69,6 +83,12 @@ export class FX {
   slash(x, y, color, ang = -0.6, r = 0.45, life = 0.28) { this.slashes.push({ x, y, color, ang, r, life, t: 0 }); }
   glyph(x, y, color, kind, life = 0.9) { this.glyphs.push({ x, y, color, kind, life, t: 0 }); }
   proj(a, b, color, life = 0.26) { this.projs.push({ a, b, color, life, t: 0 }); }
+  // spear streak from a to b (world units): shoots out fast, lingers, fades
+  thrust(a, b, color, w = 0.16, life = 0.32) { this.thrusts.push({ a, b, color, w, life, t: 0 }); }
+  // particles that flow from a to b along a wavy path (drain / lifesteal streams)
+  stream(a, b, color, n = 14, life = 0.5, spread = 0.35) {
+    for (let i = 0; i < n; i++) this.parts.push({ kind: 'seek', ax: a.x, ay: a.y, bx: b.x, by: b.y, x: a.x, y: a.y, off: rnd(-spread, spread), ph: rnd(0, 6.28), t: -i * (life / n) * 0.9, life, color, size: rnd(0.035, 0.06), vx: 0, vy: 0, g: 0 });
+  }
   flash(a = 0.6, color = '#ffffff') { this.screenFlash = Math.max(this.screenFlash, a); this.flashColor = color; }
   bolt(x, y, color = '#cfe8ff') {
     const pts = [[x, y - 9]]; let cx = x;
@@ -175,6 +195,20 @@ export class FX {
           this.decal(x, y - 0.1, 'rgba(10,14,40,0.7)', 0.5);
         });
         break;
+      case 'soulfire': { // violet soulflame swallows the piece and carries it skyward
+        const vio = pieceSprite(piece, skin, 'rgba(150,70,255,0.8)');
+        this.implodes.push({ img: vio, x, y, t: 0, life: 0.35, hold: true });
+        for (let i = 0; i < 5; i++) this.after(i * 0.07, () => this.burst(x + rnd(-0.15, 0.15), y - 0.2 - i * 0.12, ['#f3e6ff', '#c99bff', '#a05cff', '#7a2cff', '#3a1060'][i], 16, 2, 'fire', { c0: '#f3e6ff', c1: '#2a0a4a' }));
+        this.ring(x, y, '#b06bff', 2.4, 0.6, 0.1);
+        this.after(0.35, () => {
+          this.implodes.push({ img: vio, x, y, t: 0, life: 1.0, rise: true });
+          this.pillar(x, y, '#a05cff', 0.9, 1.2, 9); this.flash(0.35, '#c99bff');
+          for (let i = 0; i < 30; i++) { const a = Math.random() * 6.28; this.parts.push({ x: x + Math.cos(a) * 0.3, y: y - 0.3, vx: Math.cos(a) * 0.5, vy: -rnd(2, 5), g: -1, life: rnd(0.6, 1.1), t: 0, color: i % 3 ? '#b06bff' : '#f3e6ff', size: rnd(0.04, 0.08), kind: 'fire', rot: 0, vr: 0, c0: '#f3e6ff', c1: '#2a0a4a' }); }
+          this.decal(x, y - 0.1, 'rgba(60,20,110,0.45)', 0.5);
+        });
+        this.after(1.0, () => { this.burst(x, y - 3, '#e6c8ff', 30, 3); this.ring(x, y - 3, '#c99bff', 2.6, 0.6, 0.08); });
+        break;
+      }
       default: // shatter
         this.shatterSprite(base, x, y, 1.1);
         this.shatterSprite(pieceSprite(piece, skin, 'white'), x, y, 0.4, { life: 0.25 });
@@ -247,6 +281,66 @@ export class FX {
       case 'transpose': this.glyph(fx, fy, glow, 'swap'); this.glyph(ax, ay, glow, 'swap'); return 0.1;
       case 'rampart': this.after(0.05, () => this.burst(ax, ay + 0.3, '#b8b2c8', 14, 2.5, 'chunk')); return 0.05;
       case 'blink': this.glyph(ax, ay, '#c9a6ff', 'swap'); return 0.1;
+      // ---------- 5.0 ----------
+      case 'tripwire': // only the owner's side sees the placement (render.js swaps the anchor for others)
+        this.after(0.06, () => { this.burst(ax, ay + 0.3, '#c8d2e0', 5, 0.8, 'dust'); this.ring(ax, ay + 0.35, 'rgba(255,90,70,0.8)', 0.9, 0.35, 0.03); });
+        return 0.05;
+      case 'lance': {
+        const last = tiles[tiles.length - 1] || anchor, ex = last.x + 0.5, ey = last.y + 0.45;
+        const dx = Math.sign(last.x - from.x), dy = Math.sign(last.y - from.y);
+        this.after(0.08, () => {
+          this.thrust({ x: fx - dx * 0.1, y: fy - 0.25 }, { x: ex + dx * 0.35, y: ey - 0.2 + dy * 0.35 }, '#ffe2a8', 0.15, 0.34);
+          this.thrust({ x: fx, y: fy - 0.25 }, { x: ex + dx * 0.2, y: ey - 0.2 + dy * 0.2 }, glow, 0.08, 0.28);
+          tiles.forEach((t, i) => this.after(i * 0.035, () => { this.burst(t.x + 0.5, t.y + 0.45, '#fff1d6', 7, 3); this.flashTile(t.x, t.y, '#ffd27a', 0.3); }));
+          this.burst(ex + dx * 0.3, ey - 0.2, '#ffffff', 10, 4);
+        });
+        return 0.1;
+      }
+      case 'penance': {
+        const tx = ax, ty = ay - 0.3;
+        this.glyph(fx, fy - 0.3, '#fff3c4', 'holy', 0.5);
+        this.proj({ x: fx, y: fy - 0.35 }, { x: tx, y: ty }, '#fff1b0', 0.22);
+        this.beam({ x: fx, y: fy - 0.35 }, { x: tx, y: ty }, 'rgba(255,236,170,0.6)', 0.08, 0.35);
+        this.after(0.22, () => {
+          this.burst(tx, ty, '#fff6d0', 18, 3.5); this.ring(tx, ty + 0.5, '#ffe9a8', 1.8, 0.45, 0.08); this.glyph(tx, ty - 0.2, '#ffe9a8', 'holy', 0.7);
+          this.shock(tx, ty + 0.3, 'rgba(255,240,190,0.45)', 1, 0.3);
+        });
+        this.after(0.32, () => { this.stream({ x: tx, y: ty }, { x: fx, y: fy - 0.3 }, '#6dffa8', 18, 0.55); this.stream({ x: tx, y: ty }, { x: fx, y: fy - 0.3 }, '#d6ffe6', 6, 0.5, 0.15); });
+        this.after(0.85, () => { this.ring(fx, fy + 0.35, '#6dffa8', 1.4, 0.45); this.burst(fx, fy, '#6dffa8', 10, 1.4, 'up'); });
+        return 0.24;
+      }
+      case 'quake': {
+        this.shock(fx, fy + 0.3, 'rgba(210,180,130,0.5)', 1.2, 0.3); this.burst(fx, fy + 0.35, '#b9a27e', 14, 2.5, 'dust');
+        for (const t of tiles) {
+          const d = Math.max(Math.abs(t.x - from.x), Math.abs(t.y - from.y));
+          this.after(0.06 + d * 0.09, () => {
+            this.shock(t.x + 0.5, t.y + 0.6, 'rgba(225,190,140,0.55)', 0.95, 0.3);
+            this.burst(t.x + 0.5, t.y + 0.7, '#9c8a6e', 7, 3, 'chunk'); this.burst(t.x + 0.5, t.y + 0.8, '#d9cfb8', 5, 1.4, 'dust');
+            this.flashTile(t.x, t.y, '#d2a86a', 0.35); this.decal(t.x + 0.5, t.y + 0.45, 'rgba(20,14,8,0.45)', 0.34, 4);
+            this.impactKick = (this.impactKick || 0) + 1.5;
+          });
+        }
+        return 0.12;
+      }
+      case 'gambit':
+        this.flash(0.22, '#ff1a2a');
+        this.pillar(fx, fy + 0.36, '#ff2a3a', 0.8, 0.7, 4);
+        this.ring(fx, fy + 0.35, '#ff3b2a', 2.2, 0.55, 0.1); this.ring(fx, fy + 0.35, '#ffb03d', 1.4, 0.5, 0.06, 0.12);
+        this.burst(fx, fy, '#ff2a3a', 22, 2.2, 'up'); this.burst(fx, fy - 0.2, '#ff9a3d', 10, 1.6, 'fire');
+        this.glyph(fx, fy - 0.6, '#ff5a3a', 'sword', 0.9);
+        for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2, r = 1.1; this.parts.push({ kind: 'spiral', cx: fx, cy: fy - 0.2, a, r, x: fx, y: fy, life: 0.45, t: 0, color: i % 2 ? '#ff2a3a' : '#ffb03d', size: 0.045, vx: 0, vy: 0, g: 0 }); }
+        return 0.1;
+      case 'colossusSlam':
+        this.burst(fx, fy - 0.6, '#c08bff', 16, 1.2, 'up');
+        this.after(0.26, () => {
+          this.flash(0.45, '#b06bff'); this.impactKick = (this.impactKick || 0) + 15;
+          this.shock(fx, fy + 0.3, 'rgba(160,90,255,0.55)', 3.6, 0.5); this.shock(fx, fy + 0.3, 'rgba(255,220,170,0.4)', 2.2, 0.3);
+          this.ring(fx, fy + 0.35, '#c08bff', 5.4, 0.7, 0.18); this.ring(fx, fy + 0.35, '#ffffff', 3.2, 0.5, 0.1, 0.06);
+          this.burst(fx, fy + 0.3, '#5a4a6e', 26, 4.5, 'chunk'); this.burst(fx, fy + 0.4, '#b9a27e', 20, 2.5, 'dust'); this.burst(fx, fy, '#e0c8ff', 24, 5);
+          this.decal(fx, fy + 0.3, 'rgba(25,10,40,0.6)', 1.3, 6);
+          for (const t of tiles) { const dd = Math.hypot(t.x - from.x, t.y - from.y); this.flashTile(t.x, t.y, '#a06bff', 0.55, dd * 0.04); this.after(dd * 0.05, () => this.burst(t.x + 0.5, t.y + 0.7, '#8d8aa0', 5, 2.5, 'chunk')); }
+        });
+        return 0.3;
     }
     return 0.08;
   }
@@ -256,6 +350,7 @@ export class FX {
     if (this.pending.length) { const due = this.pending.filter((p) => p.at <= this.time); this.pending = this.pending.filter((p) => p.at > this.time); due.forEach((p) => p.fn()); }
     for (const p of this.parts) {
       p.t += dt;
+      if (p.kind === 'seek') { const k = Math.max(0, p.t / p.life), e = k * k * (3 - 2 * k), dx = p.bx - p.ax, dy = p.by - p.ay, l = Math.hypot(dx, dy) || 1, w = Math.sin(k * Math.PI) * p.off + Math.sin(p.ph + k * 9) * 0.04; p.x = p.ax + dx * e - dy / l * w; p.y = p.ay + dy * e + dx / l * w; continue; }
       if (p.kind === 'spiral') { const k = p.t / p.life; const r = p.r * (1 - k * k); p.a += dt * (4 + k * 10); p.x = p.cx + Math.cos(p.a) * r; p.y = p.cy + Math.sin(p.a) * r * 0.6; continue; }
       p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= 1 - dt * 1.5; p.rot += p.vr * dt;
       if (p.floor != null && p.y > p.floor && p.vy > 0) { p.y = p.floor; p.vy *= -0.35; p.vx *= 0.6; p.vr *= 0.5; }
@@ -271,7 +366,7 @@ export class FX {
     this.shards = this.shards.filter((s) => s.t < s.life);
     this.rings = step(this.rings); this.beams = step(this.beams); this.bolts = step(this.bolts); this.flashes = step(this.flashes);
     this.shocks = step(this.shocks); this.falls = step(this.falls); this.pillars = step(this.pillars); this.decals = step(this.decals);
-    this.slashes = step(this.slashes); this.projs = step(this.projs); this.implodes = step(this.implodes); this.glyphs = step(this.glyphs);
+    this.slashes = step(this.slashes); this.projs = step(this.projs); this.implodes = step(this.implodes); this.glyphs = step(this.glyphs); this.thrusts = step(this.thrusts);
     for (const m of this.meteors) { m.t += dt; if (!m.done && m.t >= m.life) { m.done = true; this.shock(m.x, m.y + 0.2, 'rgba(255,170,90,0.55)', 1.8, 0.4); this.burst(m.x, m.y, m.color, 26, 4.5); this.burst(m.x, m.y, '#3a2a24', 16, 1.5, 'dust'); this.decal(m.x, m.y + 0.1, 'rgba(20,10,6,0.7)', 0.55, 10); this.ring(m.x, m.y + 0.3, '#ffd27a', 2.6, 0.5, 0.1); if (m.onHit) m.onHit(); this.impactKick = (this.impactKick || 0) + 8; } }
     this.meteors = this.meteors.filter((m) => m.t < m.life + 0.05);
     if (this.crowns) { for (const c of this.crowns) c.t += dt; this.crowns = this.crowns.filter((c) => c.t < c.life + 0.05); }
@@ -291,9 +386,7 @@ export class FX {
     for (const s of this.shocks) {
       const k = s.t / s.life, r = s.r * (0.2 + 0.8 * (1 - Math.pow(1 - k, 3)));
       ctx.globalAlpha = 1 - k;
-      const g = ctx.createRadialGradient(s.x, s.y, r * 0.5, s.x, s.y, r);
-      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.8, s.color); g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(s.x, s.y, r, r * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.drawImage(shockSprite(s.color), s.x - r, s.y - r * 0.6, r * 2, r * 1.2);
     }
     ctx.globalAlpha = 1;
   }
@@ -316,7 +409,7 @@ export class FX {
       for (const c of this.crowns) {
         c.t += 0; const k = Math.min(1, c.t / c.life), yy = c.y - (1 - k * k) * 6;
         ctx.save(); ctx.translate(c.x, yy); ctx.scale(0.9, 0.9);
-        ctx.shadowColor = '#ffd24d'; ctx.shadowBlur = 16;
+        if (!this.lowQ) { ctx.shadowColor = '#ffd24d'; ctx.shadowBlur = 16; }
         ctx.fillStyle = '#ffd24d'; ctx.strokeStyle = '#7a5208'; ctx.lineWidth = 0.03;
         ctx.beginPath(); ctx.moveTo(-0.32, 0.16); ctx.lineTo(-0.36, -0.2); ctx.lineTo(-0.16, -0.03); ctx.lineTo(0, -0.28); ctx.lineTo(0.16, -0.03); ctx.lineTo(0.36, -0.2); ctx.lineTo(0.32, 0.16); ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
         ctx.restore();
@@ -337,9 +430,7 @@ export class FX {
     ctx.lineCap = 'butt';
     for (const p of this.pillars) {
       const a = Math.sin((p.t / p.life) * Math.PI);
-      const g = ctx.createLinearGradient(0, p.y - p.h, 0, p.y + 0.3);
-      g.addColorStop(0, p.color + '00'); g.addColorStop(0.7, p.color + 'cc'); g.addColorStop(1, '#ffffff');
-      ctx.globalAlpha = a; ctx.fillStyle = g; ctx.fillRect(p.x - p.w * 0.5 * a, p.y - p.h, p.w * a, p.h + 0.3);
+      ctx.globalAlpha = a; ctx.drawImage(pillarSprite(p.color), p.x - p.w * 0.5 * a, p.y - p.h, p.w * a, p.h + 0.3);
       ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(p.x - p.w * 0.12 * a, p.y - p.h, p.w * 0.24 * a, p.h + 0.3);
     }
     ctx.globalAlpha = 1;
@@ -406,12 +497,26 @@ export class FX {
       if (g.kind === 'shield') { ctx.beginPath(); for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2 + Math.PI / 6; ctx[i ? 'lineTo' : 'moveTo'](Math.cos(an) * 0.42, Math.sin(an) * 0.42); } ctx.closePath(); ctx.stroke(); ctx.globalAlpha = a * 0.2; ctx.fill(); }
       else if (g.kind === 'heal') { ctx.fillRect(-0.06, -0.24, 0.12, 0.48); ctx.fillRect(-0.24, -0.06, 0.48, 0.12); }
       else if (g.kind === 'speed') { for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(-0.35 + k * 0.2, i * 0.15); ctx.lineTo(0.35 + k * 0.2, i * 0.15); ctx.stroke(); } }
+      else if (g.kind === 'holy') { ctx.lineWidth = 0.07; ctx.beginPath(); ctx.moveTo(0, -0.34); ctx.lineTo(0, 0.34); ctx.moveTo(-0.2, -0.12); ctx.lineTo(0.2, -0.12); ctx.stroke(); }
+      else if (g.kind === 'sword') { ctx.beginPath(); ctx.moveTo(0, -0.42); ctx.lineTo(0.06, -0.3); ctx.lineTo(0.06, 0.12); ctx.lineTo(-0.06, 0.12); ctx.lineTo(-0.06, -0.3); ctx.closePath(); ctx.fill(); ctx.fillRect(-0.2, 0.12, 0.4, 0.06); ctx.fillRect(-0.03, 0.18, 0.06, 0.16); }
       else if (g.kind === 'swap') { ctx.rotate(T * 3); ctx.beginPath(); ctx.arc(0, 0, 0.35, 0, Math.PI * 1.4); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, 0.22, Math.PI, Math.PI * 2.4); ctx.stroke(); }
       ctx.restore();
     }
+    for (const th of this.thrusts) {
+      const k = th.t / th.life, out = Math.min(1, th.t / 0.07), a = k < 0.35 ? 1 : 1 - (k - 0.35) / 0.65;
+      const dx = th.b.x - th.a.x, dy = th.b.y - th.a.y, l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l;
+      const tx = th.a.x + dx * out, ty = th.a.y + dy * out, tail = Math.max(0, out - 0.75 - k * 0.4);
+      const sx = th.a.x + dx * tail, sy = th.a.y + dy * tail, w = th.w * (1 - k * 0.5);
+      ctx.globalAlpha = a * 0.45; ctx.fillStyle = th.color;
+      ctx.beginPath(); ctx.moveTo(sx + nx * w * 1.6, sy + ny * w * 1.6); ctx.lineTo(tx + dx / l * 0.25, ty + dy / l * 0.25); ctx.lineTo(sx - nx * w * 1.6, sy - ny * w * 1.6); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = a; ctx.beginPath(); ctx.moveTo(sx + nx * w * 0.6, sy + ny * w * 0.6); ctx.lineTo(tx + dx / l * 0.18, ty + dy / l * 0.18); ctx.lineTo(sx - nx * w * 0.6, sy - ny * w * 0.6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(sx + nx * w * 0.2, sy + ny * w * 0.2); ctx.lineTo(tx + dx / l * 0.14, ty + dy / l * 0.14); ctx.lineTo(sx - nx * w * 0.2, sy - ny * w * 0.2); ctx.closePath(); ctx.fill();
+    }
     for (const p of this.parts) {
+      if (p.t < 0) continue;
       const a = 1 - p.t / p.life; ctx.globalAlpha = Math.max(0, a);
-      if (p.kind === 'fire') { const k = p.t / p.life; ctx.fillStyle = k < 0.3 ? '#fff2a8' : k < 0.6 ? p.color : '#5a1a08'; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (1 + k), 0, Math.PI * 2); ctx.fill(); continue; }
+      if (p.kind === 'seek') { ctx.globalAlpha = Math.min(1, a * 2.5); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 1.8, 0, Math.PI * 2); ctx.globalAlpha *= 0.35; ctx.fill(); ctx.globalAlpha = Math.min(1, a * 2.5); ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.8, 0, Math.PI * 2); ctx.fill(); continue; }
+      if (p.kind === 'fire') { const k = p.t / p.life; ctx.fillStyle = k < 0.3 ? p.c0 || '#fff2a8' : k < 0.6 ? p.color : p.c1 || '#5a1a08'; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (1 + k), 0, Math.PI * 2); ctx.fill(); continue; }
       ctx.fillStyle = p.color;
       if (p.kind === 'chunk') { ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.7); ctx.restore(); }
       else if (p.kind === 'coin') { ctx.save(); ctx.translate(p.x, p.y); ctx.scale(Math.abs(Math.cos(p.rot)) + 0.15, 1); ctx.beginPath(); ctx.arc(0, 0, p.size, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff6d0'; ctx.beginPath(); ctx.arc(-p.size * 0.3, -p.size * 0.3, p.size * 0.35, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }

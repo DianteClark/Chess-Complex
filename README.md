@@ -11,11 +11,19 @@ A turn-based chess battle royale for up to 8 players. Everyone starts as a Pawn 
 - **Signature + equipped abilities with AOE shapes:** Knight T-Strike, Bishop Transpose, Rook Battering Charge, Queen Royal Decree, and more.
 - **Living board:** walls, breakable rubble and crates, brambles, healing shrines, and Hollows that guard shard caches.
 - **The storm:** the outer ring cracks and collapses every few rounds, then sudden death.
-- **The Crown:** appears on round 7. Whoever takes it becomes King until someone takes it from them.
+- **The Crown:** appears on round 7. Whoever takes it becomes King. Topple the King and the Crown shatters into 4 shards.
 - **Online friend codes:** host a room, share a 5-letter code or invite link, fill empty seats with bots.
 - **Armory:** earn Marks every match and unlock piece sets, board themes (Marble Court, Neon Grid, Ember Forge, Moonlit Garden) and finishers (Inferno, Thunderclap, Void Rift, Midas Touch) that play when you eliminate someone.
 - **Progression:** XP and levels with titles from Recruit to Legend; every level-up pays out Marks.
 - **Juice:** hit-stop, slow-motion eliminations, camera punches, lunging attacks, per-ability VFX, shattering pieces, collapsing storm tiles, damage previews with KO markers, kill streak callouts, emotes, haptics and a generative soundtrack that intensifies as the match closes in.
+
+## What's in 5.0
+- **Squads:** teams of two with no friendly fire, a Bond bonus for sticking together, and revives from a fallen teammate's soul.
+- **Siege:** co-op for 1-4 players against eight waves of hunting Hollows, with Colossus bosses on waves 4 and 8.
+- **Map hazards:** Magma Rift, Frostbite and Warpgates.
+- **Five new abilities and two new base abilities**, an **Announcer**, **Play of the Match** replays and **Piece Mastery**.
+- **Season 2: The Middlegame** with new piece sets, a board and a finisher.
+- **Balance:** the Crown shatters into 4 shards when the King falls (one King per match), so the King now wins about 30% of bot games instead of about 50%. All four presets land between 23% and 28%.
 
 ## What's in 3.0
 - **Full promotion ladder:** see every rung and climb several at once.

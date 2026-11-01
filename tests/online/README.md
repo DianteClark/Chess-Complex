@@ -1,6 +1,6 @@
 # Online lifecycle suite
 
-22 scenarios covering host and client deaths, spectating, results, forfeits, tab closes, reloads and rejoining, rematches, Duel and Blitz variants, and lobby full/kick/rejoin. Pages talk over `?net=local` (BroadcastChannel), so no network is needed.
+25 scenarios covering host and client deaths, spectating, results, forfeits, tab closes, reloads and rejoining, rematches, Duel and Blitz variants, lobby full/kick/rejoin, and 5.0 modes: Squads (S8: team labels, Downed/soul, no results while a teammate lives, shared Squad Victory; S8b: whole team out mid-match) and Siege co-op (S9: downed player cannot open results, seats handed to the AI, both see "The Line Held"). Pages talk over `?net=local` (BroadcastChannel), so no network is needed.
 
 ```
 python3 -m http.server 8141 &          # from the repo root

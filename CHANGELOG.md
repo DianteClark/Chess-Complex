@@ -1,5 +1,33 @@
 # Changelog
 
+## 5.0 (November 2026)
+**New modes**
+- **Squads:** teams of two (up to four teams). No friendly fire, shared victory, teammates share a colour. Starting a turn within 2 tiles of your teammate grants Bond (+15% DEF). A fallen teammate leaves a soul for 3 rounds: step on it to revive them at 40% HP, or as an enemy shatter it for a shard.
+- **Siege (co-op, 1-4 players):** eight waves of Hollows that hunt you down from the edges, with a Colossus boss on waves 4 and 8 (the first drops the Crown). The next wave arrives one round after you clear the last, or after 4 rounds; Hollows still standing count against its size, so the board never floods. Clearing a wave heals everyone 20%. The final Elder Colossus must be beaten to win. Difficulty scales with the number of defenders.
+
+**New content**
+- **Map hazards:** each Royale, Blitz or Squads match rolls Classic, Magma Rift (lava burns 8% max HP at turn start), Frostbite (ice keeps you sliding) or Warpgates (paired portals across the board).
+- **Five new equippable abilities:** Tripwire (Pawn: hidden traps), Lance (Knight: 2-tile thrust with knockback), Penance (Bishop: diagonal strike that heals you), Quake (Rook: shockwaves down four lines), Gambit (Queen: pay HP for +40% ATK).
+- **Two new base abilities:** Lifesteal and Last Stand.
+- **The Announcer:** First Blood, kill streaks, Double/Triple Take, Shutdown, Regicide, Final Two, revives and boss waves get big callouts with their own stingers.
+- **Play of the Match:** the most dramatic action of every game is replayed in slow motion from the results screen.
+- **Piece Mastery:** every piece levels from 1 to 10. Titles at 3, 6 and 10, Marks every level.
+- **Season 2: The Middlegame:** a new 30-tier Crown Path with the Warden and Colossus piece sets, the Riftgate board and the Soulfire finisher. Six new trophies and two new daily quests.
+
+**Balance** (balance lab, about 25,000 simulated matches)
+- The ~50% King win rate came from the Crown being recycled: a dead King dropped it and the endgame winner usually picked it up. Now the Crown **shatters into 4 shards** when the King falls, so there is one King per match and a real bounty for toppling them.
+- A Knight or Bishop who claims the Crown with 4+ players left is lifted to about 85% of Rook stats, so the Crown is no longer a trap that ends their evolution.
+- Thorns 20% to 30%. First Strike now triggers above 60% HP. Regen 2 to 1 base HP per turn. Lifesteal 10%.
+- Result at 8 players: King wins 53% to 29%. Tank / Bruiser / Scout / Assassin 33 / 21 / 28 / 18% to 27 / 23 / 27 / 23%.
+- Siege: an independent playtest caught an early build where nobody ever cleared a wave and Hollows piled up past 40. Waves are now sized to the defenders, leftovers count against the next wave (never more than 14 Hollows), Hollows scale in speed and damage rather than HP, and the final Elder Colossus must be beaten. Bot squads of 2-4 win about 90%, a solo bot about 50%, in roughly 40-50 rounds.
+
+**Fixes from the 5.0 code scrub** (three review bots: rules fuzzing, client/online/mobile audit, balance lab)
+- Rules: a revived King no longer duplicates the Crown; Lance can't hit the same piece twice; evolving a honed piece no longer drops HP to 1; Steadfast now protects against every hit of a multi-hit action; picking up the Crown mid-ability no longer locks Royal Guard; T-Strike and Stagger no longer reach through walls; crate loot never lands in the void; storm collapse moves the Crown somewhere safe instead of the next ring to fall; bots read each mode's own storm timing; the AI uses its own dice so replays are exact.
+- Online safety: lobby messages and imported backups are validated against real item lists (a crafted join could previously crash the host's lobby).
+- Stability: the game and menu render loops survive any single error instead of freezing.
+- Mobile: the title screen scrolls in landscape, tap targets are at least 40px, small HUD text is larger.
+- Performance: the static board, background and walls are cached instead of redrawn every frame (about 20-40% less frame time in profiling).
+
 ## 3.1 (October 2026)
 **Online: spectating and leaving** (from a real match report)
 - Getting eliminated no longer risks ending the match. Results opened mid-match have a Spectate button. A spectator bar lets you follow any surviving player or the action (Auto). Final results with a podium appear when the match ends.

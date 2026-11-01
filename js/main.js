@@ -1,7 +1,7 @@
 // Chess Complex — app shell: menus, loadout, armory, sessions, in-game HUD, progression.
-import { TRAILS, PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES, RARITY, BUNDLES, MODES, SEASON, SEASON_REWARDS, ACHIEVEMENTS } from './data.js';
-import { ensureProgress, seasonTier, seasonProgress, rewardLabel, addSeasonXp, checkAchievements, recordMatch, dailySeed, dailyScore, achievementValue } from './progression.js';
-import { previewDamage, legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM, createTutorial, ARENA, isVoid, isCracked } from './engine.js';
+import { TRAILS, PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES, RARITY, BUNDLES, MODES, SEASON, SEASON_REWARDS, ACHIEVEMENTS, TEAM_COLORS, MUTATORS } from './data.js';
+import { ensureProgress, seasonTier, seasonProgress, rewardLabel, addSeasonXp, checkAchievements, recordMatch, dailySeed, dailyScore, achievementValue, addMastery, masteryLevel } from './progression.js';
+import { previewDamage, legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM, createTutorial, ARENA, isVoid, isCracked, ally } from './engine.js';
 import { LESSONS, Tutorial } from './tutorial.js';
 import { renderCodex, diagram } from './codex.js';
 import { KINDS, ensureStore, item, listKind, featured, bundleInfo, grant, equip, activeEmotes, makePreview, drawPreview } from './store.js';
@@ -32,24 +32,31 @@ function defaultProfile() {
 }
 let profile = defaultProfile();
 try { const raw = localStorage.getItem(PKEY); if (raw) { const d = defaultProfile(); profile = { ...d, ...JSON.parse(raw) }; for (const k of ['ownedBoards', 'ownedFinishers', 'owned', 'tutorial', 'discovered']) if (!Array.isArray(profile[k])) profile[k] = d[k]; } } catch {}
+const own = (T, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(T, k);
 function normalizeProfile(d) {
   const def = defaultProfile();
   const p = { ...def, ...(d && typeof d === 'object' ? d : {}) };
   for (const k of ['owned', 'ownedBoards', 'ownedFinishers', 'tutorial', 'discovered', 'played']) if (!Array.isArray(p[k])) p[k] = def[k] || [];
+  p.owned = p.owned.filter((k) => own(SKINS, k)); p.ownedBoards = p.ownedBoards.filter((k) => own(BOARDS, k)); p.ownedFinishers = p.ownedFinishers.filter((k) => own(FINISHERS, k));
+  for (const k of DEFAULT_SKINS) if (!p.owned.includes(k)) p.owned.push(k);
   if (typeof p.marks !== 'number' || !isFinite(p.marks)) p.marks = def.marks;
   if (typeof p.name !== 'string' || !p.name) p.name = def.name;
   const b = p.build && typeof p.build === 'object' ? p.build : def.build;
   const pts = { hp: 0, atk: 0, def: 0, spd: 0 }; let left = STAT_POINTS;
   for (const k of Object.keys(pts)) { const v = Math.max(0, Math.min(left, Math.floor(+((b.pts || {})[k]) || 0))); pts[k] = v; left -= v; }
   const equips = {}; for (const pc of PIECE_ORDER) equips[pc] = PIECES[pc].equips.includes(b.equips && b.equips[pc]) ? b.equips[pc] : def.build.equips[pc];
-  p.build = { preset: PRESETS[b.preset] ? b.preset : null, pts, passive: PASSIVES[b.passive] ? b.passive : def.build.passive, equips };
-  if (!SKINS[p.skin]) p.skin = 'ivory'; if (!BOARDS[p.board]) p.board = 'hall'; if (!FINISHERS[p.finisher]) p.finisher = 'shatter';
-  if (!MODES[p.mode]) p.mode = 'royale';
+  p.build = { preset: own(PRESETS, b.preset) ? b.preset : null, pts, passive: own(PASSIVES, b.passive) ? b.passive : def.build.passive, equips };
+  if (!own(SKINS, p.skin)) p.skin = 'ivory'; if (!own(BOARDS, p.board)) p.board = 'hall'; if (!own(FINISHERS, p.finisher)) p.finisher = 'shatter';
+  if (!own(MODES, p.mode)) p.mode = 'royale';
+  if (typeof p.name !== 'string') p.name = def.name; p.name = p.name.replace(/[<>]/g, '').slice(0, 14) || def.name;
+  if (typeof p.title !== 'string') p.title = '';
+  for (const k of ['level', 'xp']) if (typeof p[k] !== 'number' || !isFinite(p[k]) || p[k] < 0) p[k] = def[k] ?? 0;
+  p.level = Math.max(1, Math.floor(p.level)); p.marks = Math.max(0, Math.floor(p.marks));
   if (!['easy', 'normal', 'hard'].includes(p.botLevel)) p.botLevel = 'normal';
   if (p.quests && (!Array.isArray(p.quests.list) || p.quests.list.some((q) => !q || !QUESTS[q.id]))) p.quests = null;
   if (p.daily && (typeof p.daily !== 'object' || !Array.isArray(p.daily.days))) p.daily = null;
   ensureProgress(p); ensureStore(p);
-  if (!TRAILS[p.trail]) p.trail = 'none';
+  if (!own(TRAILS, p.trail)) p.trail = 'none';
   return p;
 }
 profile = normalizeProfile(profile);
@@ -75,7 +82,7 @@ function applyQuests(ms) {
   for (const q of dailyQuests()) {
     if (q.done) continue;
     const Q = QUESTS[q.id];
-    const val = { win: ms.win ? 1 : 0, kills: ms.kills, rook: ms.rook ? 1 : 0, queen: ms.queen ? 1 : 0, crown: ms.crown ? 1 : 0, shards: ms.shards, top3: ms.place <= 3 ? 1 : 0, damage: ms.dmg, ults: ms.ults, hollows: ms.hollows, attune: Math.floor(ms.shards / 5) }[q.id] || 0;
+    const val = { revive: ms.revives || 0, waves: ms.cleared || 0, win: ms.win ? 1 : 0, kills: ms.kills, rook: ms.rook ? 1 : 0, queen: ms.queen ? 1 : 0, crown: ms.crown ? 1 : 0, shards: ms.shards, top3: ms.place <= 3 ? 1 : 0, damage: ms.dmg, ults: ms.ults, hollows: ms.hollows, attune: Math.floor(ms.shards / 5) }[q.id] || 0;
     q.prog = Q.best ? Math.max(q.prog, val) : q.prog + val;
     if (q.prog >= Q.goal) { q.prog = Q.goal; q.done = true; profile.marks += Q.reward; done.push(Q); }
   }
@@ -130,7 +137,8 @@ function bgInit() {
   bg.parts.sort((a, b) => a.depth - b.depth);
   let last = performance.now(); let mx = 0, my = 0;
   addEventListener('pointermove', (e) => { mx = e.clientX / innerWidth - 0.5; my = e.clientY / innerHeight - 0.5; });
-  const loop = (now) => {
+  const loop = (now) => { requestAnimationFrame(loop); try { loopBody(now); } catch (err) { console.error(err); } };
+  const loopBody = (now) => {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     bg.acc = (bg.acc || 0) + dt;
     const modalUp = !!document.querySelector('.modal.global:not(.hidden)');
@@ -179,7 +187,7 @@ function bgInit() {
         }
       }
     }
-    requestAnimationFrame(loop);
+
   };
   requestAnimationFrame(loop);
 }
@@ -325,10 +333,14 @@ function onArmoryClick(e) {
   }
 }
 function renderPlay() {
-  const ICON = { royale: ['king', 'gilded'], blitz: ['knight', 'ember'], duel: ['rook', 'glacier'], daily: ['queen', 'celestial'] };
+  const ICON = { royale: ['king', 'gilded'], blitz: ['knight', 'ember'], duel: ['rook', 'glacier'], squads: ['bishop', 'jade'], siege: ['rook', 'obsidian'], daily: ['queen', 'celestial'] };
   const dailyDone = profile.daily.date === today();
-  $('#modes').innerHTML = Object.entries(MODES).map(([k, m]) => `<button class="mode ${profile.mode === k ? 'on' : ''}" data-mode="${k}"><img class="mi" src="${pieceIcon(ICON[k][0], ICON[k][1], null, 74)}" alt=""><b>${m.name}</b><p>${m.desc}</p>${k === 'daily' && !dailyDone ? '<span class="chip">NEW</span>' : ''}</button>`).join('');
+  $('#modes').innerHTML = Object.entries(MODES).map(([k, m]) => `<button class="mode ${profile.mode === k ? 'on' : ''}" data-mode="${k}"><img class="mi" src="${pieceIcon(ICON[k][0], ICON[k][1], null, 74)}" alt=""><b>${m.name}</b><p>${m.desc}</p>${k === 'daily' && !dailyDone ? '<span class="chip">NEW</span>' : k === 'squads' || k === 'siege' ? '<span class="chip">5.0</span>' : ''}</button>`).join('');
   const M = profile.mode;
+  const rb = $('#in-bots'), lb = $('#opt-bots .lbl');
+  const cfg = M === 'siege' ? { min: 0, max: 3, step: 1, def: 3, label: 'Bot Allies' } : M === 'squads' ? { min: 3, max: 7, step: 2, def: 7, label: 'Bots (you get a bot teammate)' } : { min: 1, max: 7, step: 1, def: 7, label: 'Opponents' };
+  if (rb.dataset.mode !== M) { rb.min = cfg.min; rb.max = cfg.max; rb.step = cfg.step; rb.value = cfg.def; rb.dataset.mode = M; }
+  lb.firstChild.textContent = cfg.label + ' '; $('#bot-n').textContent = rb.value;
   $('#opt-bots').classList.toggle('hidden', M === 'duel' || M === 'daily');
   $('#opt-diff').classList.toggle('hidden', M === 'daily');
   $('#opt-daily').classList.toggle('hidden', M !== 'daily');
@@ -381,6 +393,7 @@ function renderTrophies() {
   $('#ach-list').innerHTML = ids.map((id) => { const a = ACHIEVEMENTS[id], done = profile.achievements.includes(id), v = Math.min(a.goal, achievementValue(profile, a)); return `<div class="ach ${done ? 'done' : ''}"><div class="ai"><svg><use href="#i-trophy"/></svg></div><div><b>${a.name}</b><p>${a.desc}</p>${done ? '' : `<div class="qbar"><i style="width:${(v / a.goal) * 100}%"></i></div>`}</div><div class="rw"><i class="mark-ico"></i>${a.reward}</div></div>`; }).join('');
   $('#title-count').textContent = `${profile.titles.length} unlocked`;
   $('#title-list').innerHTML = [`<button class="${!profile.title ? 'on' : ''}" data-title="">None</button>`, ...profile.titles.map((t) => `<button class="${profile.title === t ? 'on' : ''}" data-title="${esc(t)}">${esc(t)}</button>`)].join('') + (profile.titles.length ? '' : '<p class="hint" style="margin:6px 0 0">Earn titles from trophies and the Crown Path.</p>');
+  $('#mastery-list').innerHTML = [...PIECE_ORDER, 'king'].map((pc) => { const m = masteryLevel(profile.mastery[pc] || 0); const pct = m.need ? Math.round(m.into / m.need * 100) : 100; return `<div class="ms-row ${m.lv >= 10 ? 'max' : ''}"><img src="${pieceIcon(pc, profile.skin, null, 34)}" alt=""><div><b>${PIECES[pc].name}</b><span>Level ${m.lv}${m.lv >= 10 ? ' - Master' : ` - ${m.into}/${m.need}`}</span><div class="xpbar"><i style="width:${pct}%"></i></div></div></div>`; }).join('');
   const st = profile.stats;
   $('#career2').innerHTML = `<div><b>${st.games}</b><span>Games</span></div><div><b>${st.wins}</b><span>Wins</span></div><div><b>${st.kills}</b><span>KOs</span></div><div><b>${st.bestStreak}</b><span>Best streak</span></div>`;
 }
@@ -468,9 +481,10 @@ function botPlayer(i, used) {
   const name = names[Math.floor(Math.random() * names.length)] || 'Bot' + i;
   const keys = Object.keys(PRESETS), p = PRESETS[keys[Math.floor(Math.random() * keys.length)]];
   const equips = {}; for (const pc of PIECE_ORDER) { const list = PIECES[pc].equips; equips[pc] = list[Math.floor(Math.random() * list.length)]; }
+  const pks = Object.keys(PASSIVES), passive = Math.random() < 0.3 ? pks[Math.floor(Math.random() * pks.length)] : p.passive;
   const skins = Object.keys(SKINS).filter((k) => k !== profile.skin && SKINS[k].price != null), fins = Object.keys(FINISHERS).filter((k) => FINISHERS[k].price != null);
   const trails = Object.keys(TRAILS);
-  return { trail: trails[Math.floor(Math.random() * trails.length)], pid: 'bot' + i + Math.random().toString(36).slice(2, 6), name, isBot: true, botLevel: profile.botLevel || 'normal', skin: skins[Math.floor(Math.random() * skins.length)], finisher: fins[Math.floor(Math.random() * fins.length)], build: { pts: { ...p.pts }, passive: p.passive, equips } };
+  return { trail: trails[Math.floor(Math.random() * trails.length)], pid: 'bot' + i + Math.random().toString(36).slice(2, 6), name, isBot: true, botLevel: profile.botLevel || 'normal', skin: skins[Math.floor(Math.random() * skins.length)], finisher: fins[Math.floor(Math.random() * fins.length)], build: { pts: { ...p.pts }, passive, equips } };
 }
 const me = () => ({ pid: 'me', name: profile.name || 'Player', title: profile.title, skin: profile.skin, finisher: profile.finisher, trail: profile.trail, build: { pts: { ...profile.build.pts }, passive: profile.build.passive, equips: { ...profile.build.equips } } });
 
@@ -485,9 +499,20 @@ function endSession() {
   try { session.client && session.client.close(); } catch {}
   session = null;
 }
-function hostEmit(sess, m) { for (const c of sess.conns ? sess.conns.values() : []) c.send(m); game.onMsg(m); }
+// Hidden traps stay hidden: each friend only receives traps owned by their own side.
+function hostEmit(sess, m) {
+  const hasTraps = m.t === 'state' && m.state && m.state.items.some((i) => i.k === 'trap');
+  for (const c of sess.conns ? sess.conns.values() : []) {
+    if (!hasTraps) { c.send(m); continue; }
+    const u = m.state.units.find((v) => v.pid === c.pid);
+    const items = m.state.items.filter((i) => i.k !== 'trap' || (u && (i.owner === u.id || (u.team != null && i.team === u.team))));
+    const ev = (m.ev || []).filter((e) => e.e !== 'trapSet' || (u && (e.id === u.id || (u.team != null && (m.state.units.find((v) => v.id === e.id) || {}).team === u.team))));
+    c.send({ ...m, state: { ...m.state, items }, ev });
+  }
+  game.onMsg(m);
+}
 function hostEmote(sess, pid, k) {
-  if (!EMOTES[k] || !sess.host) return;
+  if (!own(EMOTES, k) || !sess.host) return;
   const u = sess.host.s.units.find((v) => v.pid === pid && v.alive); if (!u) return;
   const now = Date.now(); sess.emoteAt = sess.emoteAt || {};
   if (now - (sess.emoteAt[pid] || 0) < 1500) return;
@@ -509,6 +534,8 @@ function startSolo(bots = null, modeArg = null) {
   let n = bots ?? +$('#in-bots').value;
   if (mode === 'duel') n = 1;
   if (mode === 'daily') n = 7;
+  if (mode === 'squads') { n = Math.max(3, Math.min(7, n)); if (n % 2 === 0) n++; }
+  if (mode === 'siege') n = Math.max(0, Math.min(3, n));
   const players = [me()];
   let seed;
   const keepLvl = profile.botLevel;
@@ -525,8 +552,9 @@ function startSolo(bots = null, modeArg = null) {
   sess.host.start();
 }
 
-function lobbyHTML(players, host) {
-  return players.map((p, i) => `<li style="--c:${(settings.cb ? CB_COLORS : PLAYER_COLORS)[i]}"><img src="${pieceIcon('pawn', p.skin, null, 34)}" alt=""><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${p.pid === 'me' ? 'Host' : p.isBot ? 'Bot' : 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}">Remove</button>` : ''}</li>`).join('');
+function lobbyHTML(players, host, gm = 'royale') {
+  const T = (MODES[gm] || {}).teams;
+  return players.map((p, i) => `<li style="--c:${T ? TEAM_COLORS[Math.floor(i / T) % 4] : (settings.cb ? CB_COLORS : PLAYER_COLORS)[i]}">${T ? `<span class="team-tag">Team ${Math.floor(i / T) + 1}</span>` : gm === 'siege' ? '<span class="team-tag">Ally</span>' : ''}<img src="${pieceIcon('pawn', p.skin, null, 34)}" alt=""><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${p.pid === 'me' ? 'Host' : p.isBot ? 'Bot' : 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}">Remove</button>` : ''}</li>`).join('');
 }
 function startHostLobby() {
   if (session && session.mode === 'host' && session.rematch) { session.rematch = false; session.players = session.players.filter((p) => p.isBot || p.pid === 'me' || session.conns.has(p.pid)); session.renderLobby(); return; }
@@ -539,9 +567,9 @@ function startHostLobby() {
   $('#host-status').textContent = 'Opening room...'; $('#host-status').classList.remove('err');
   const sess = session;
   const renderLobby = () => {
-    $('#host-lobby').innerHTML = lobbyHTML(sess.players, true);
+    $('#host-lobby').innerHTML = lobbyHTML(sess.players, true, sess.gameMode);
     $('#lobby-count').textContent = `${MODES[sess.gameMode].short} - ${sess.players.length}/${sess.maxP}`;
-    $('#btn-start-host').disabled = sess.players.length < 2;
+    $('#btn-start-host').disabled = sess.players.length < Math.max(2, MODES[sess.gameMode].players[0]);
     const pub = sess.players.map(({ pid, name, skin, isBot, title }) => ({ pid, name, skin, isBot, title }));
     for (const c of sess.conns.values()) c.send({ t: 'lobby', players: pub, code, mode: sess.gameMode });
   };
@@ -574,7 +602,7 @@ function startHostLobby() {
           (sess.tokens ||= {})[pid] = tok;
           const b = m.build || {};
           const equips = {}; for (const pc of PIECE_ORDER) equips[pc] = PIECES[pc].equips.includes(b.equips && b.equips[pc]) ? b.equips[pc] : PIECES[pc].equips[0];
-          sess.players.push({ pid, title: String(m.title || '').replace(/[<>]/g, '').slice(0, 24), name: String(m.name || 'Player').replace(/[<>]/g, '').slice(0, 14), skin: SKINS[m.skin] ? m.skin : 'ivory', finisher: FINISHERS[m.finisher] ? m.finisher : 'shatter', trail: TRAILS[m.trail] ? m.trail : 'none', build: { pts: sanitizePts(b.pts), passive: PASSIVES[b.passive] ? b.passive : 'regen', equips } });
+          sess.players.push({ pid, title: (typeof m.title === 'string' ? m.title : '').replace(/[<>]/g, '').slice(0, 24), name: (typeof m.name === 'string' && m.name.trim() ? m.name : 'Player').replace(/[<>]/g, '').slice(0, 14), skin: own(SKINS, m.skin) ? m.skin : 'ivory', finisher: own(FINISHERS, m.finisher) ? m.finisher : 'shatter', trail: own(TRAILS, m.trail) ? m.trail : 'none', build: { pts: sanitizePts(b.pts), passive: own(PASSIVES, b.passive) ? b.passive : 'regen', equips } });
           conn.send({ t: 'welcome', pid });
           sfx.select(); renderLobby();
         } else if (m.t === 'act' && sess.host && conn.pid && m.a && typeof m.a === 'object') { try { sess.host.act(conn.pid, m.a); } catch (err) { console.warn('bad action', err); } }
@@ -603,7 +631,8 @@ function hostAddBot() {
 function startHost() {
   const sess = session; if (!sess || sess.players.length < 2) return;
   sess.players = sess.players.filter((p) => p.isBot || p.pid === 'me' || sess.conns.has(p.pid));
-  if (sess.players.length < 2) { toast('Need at least 2 players'); sess.renderLobby(); return; }
+  const minP = Math.max(2, MODES[sess.gameMode].players[0]);
+  if (sess.players.length < minP) { toast(`${MODES[sess.gameMode].name} needs at least ${minP} players. Add bots to fill.`); sess.renderLobby(); return; }
   sess.started = true;
   sess.players[0] = { ...me() };
   sess.host = new GameHost(sess.players, (m) => { hostEmit(sess, m); botChatter(sess, m); }, { mode: sess.gameMode });
@@ -627,7 +656,7 @@ function joinGame() {
     onData: (m) => {
       if (session !== sess) return;
       if (m.t === 'welcome') { sess.myPid = m.pid; st.textContent = 'In the lobby.'; sfx.select(); }
-      else if (m.t === 'lobby') { $('#join-lobby-panel').classList.remove('hidden'); $('#join-lobby').innerHTML = lobbyHTML(m.players, false); $('#join-lobby-panel .lbl').textContent = `Lobby - ${(MODES[m.mode] || MODES.royale).name}`; }
+      else if (m.t === 'lobby') { $('#join-lobby-panel').classList.remove('hidden'); $('#join-lobby').innerHTML = lobbyHTML(m.players, false, m.mode); $('#join-lobby-panel .lbl').textContent = `Lobby - ${(MODES[m.mode] || MODES.royale).name}`; }
       else if (m.t === 'full' || m.t === 'bye') { sess.byeReason = m.reason || 'full'; st.textContent = { full: 'That lobby is full.', started: 'That match has already started.', kicked: 'The host removed you from the lobby.', ended: 'The host ended the match.' }[sess.byeReason] || 'Disconnected.'; st.classList.add('err'); $('#join-lobby-panel').classList.add('hidden'); $('#join-lobby').innerHTML = ''; if (screen === 'game') { toast(st.textContent); game.showResults(true, 'hostleft'); } }
       else if (m.t === 'start') { sess.myPid = m.pid; matchKey = 'm' + Date.now(); game.enter(); }
       else if (m.t === 'state' || m.t === 'emote') game.onMsg(m);
@@ -659,12 +688,13 @@ const game = {
       shard: (x, y, n) => this.flyShards(x, y, n),
     });
     let last = performance.now();
-    const loop = (now) => {
+    const loop = (now) => { requestAnimationFrame(loop); try { loopBody(now); } catch (err) { console.error(err); } };
+    const loopBody = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
-      if (screen === 'game') { this.r.frame(dt); this.tickTimer(); this.heartbeat(dt); }
+      if (screen === 'game') { if (this.potmOn && this.potmR) this.potmR.frame(dt); else this.r.frame(dt); this.tickTimer(); this.heartbeat(dt); }
       if (armoryPreviews.active) for (const p of armoryPreviews.list) drawPreview(p, dt);
       if (armoryPreviews.reveal && !$('#m-reveal').classList.contains('hidden')) drawPreview(armoryPreviews.reveal, dt);
-      requestAnimationFrame(loop);
+
     };
     requestAnimationFrame(loop);
     this.bindInput();
@@ -693,7 +723,7 @@ const game = {
   after(fn, ms) { const g = this.gen; return setTimeout(() => { if (g === this.gen) fn(); }, ms); },
   enter() {
     this.gen = (this.gen || 0) + 1;
-    this.ms = { kills: 0, hollows: 0, ults: 0, crown: false, rook: false, queen: false }; this.minHp = 1; this.taken = {}; this.since = {}; this.killedBy = null; this.danger = false; this.r.danger = null; $('#btn-danger').classList.remove('on');
+    this.ms = { kills: 0, hollows: 0, ults: 0, crown: false, rook: false, queen: false, pieces: ["pawn"], revives: 0, colossi: 0 }; this.best = null; this.potmOn = false; this.minHp = 1; this.taken = {}; this.since = {}; this.killedBy = null; this.danger = false; this.r.danger = null; $('#btn-danger').classList.remove('on');
     this.r.reduced = settings.motion; this.r.setQuality(settings.quality);
     document.body.classList.toggle('bigtext', !!settings.bigtext);
     this.s = null; this.mode = 'move'; this.preview = null; this.lastTurnNo = -1; this.resultsShown = false; this.lastHp = null; this.lastAlive = 99;
@@ -712,6 +742,8 @@ const game = {
     const top = coach.classList.contains('hidden') ? $('.hud-top').getBoundingClientRect().bottom : coach.getBoundingClientRect().bottom;
     const bot = $('.hud-bottom').getBoundingClientRect();
     const ub = $('#ult-btn').getBoundingClientRect();
+    const side = bot.top < innerHeight * 0.5 && bot.left > innerWidth * 0.3; // landscape: HUD is a right-hand column
+    if (side) { this.r.setPad(top + 4, 4, Math.max(0, innerWidth - bot.left + 4)); $('#s-game').style.setProperty('--hb', '0px'); return; }
     const lowest = Math.min(bot.top, ub.top > 0 ? ub.top : bot.top);
     this.r.setPad(top + 4, Math.max(0, innerHeight - lowest - 4));
     $('#s-game').style.setProperty('--hb', Math.round(innerHeight - bot.top) + 'px');
@@ -723,8 +755,9 @@ const game = {
     if (m.t === 'emote') { const u = this.s && unitById(this.s, m.id); if (u) { this.r.emote(m.id, EMOTES[m.k]); sfx.emote(); } return; }
     if (m.t !== 'state') return;
     const first = !this.s;
+    const prevS = this.s;
     this.s = m.state;
-    if (settings.cb) for (const u of this.s.units) if (u.kind === 'player') u.color = CB_COLORS[u.slot % 8];
+    if (settings.cb) for (const u of this.s.units) if (u.kind === 'player') u.color = CB_COLORS[(this.s.teams ? u.team * 2 : u.slot) % 8];
     { const mu = this.s.units.find((u) => session && u.pid === session.myPid); if (mu && mu.alive) this.minHp = Math.min(this.minHp ?? 1, mu.hp / stats(mu).maxHp); }
     this.deadline = m.dl < 0 ? 0 : Date.now() + m.dl;
     const mine = this.me;
@@ -733,6 +766,7 @@ const game = {
     if (first && this.s.arena) this.r.setBounds(this.s.arena);
     if (first) { this.r.startIntro(this.s, this.r.myId); this.after(() => this.fitPad(), 50); }
     this.handleEvents(m.ev, first);
+    if (!first) this.scoreMoment(prevS, this.s, m.ev);
     if (this.s.turnNo !== this.lastTurnNo) {
       this.lastTurnNo = this.s.turnNo; this.mode = 'move'; this.preview = null;
       const a = unitById(this.s, this.s.active);
@@ -747,7 +781,8 @@ const game = {
     // music intensity
     const alive = alivePlayers(this.s).length;
     const lvl = this.s.over ? 1 : alive <= 2 ? 3 : (this.s.storm.ring > 0 || this.s.storm.crack || alive <= 4) ? 2 : 1;
-    if (!this.resultsShown) music.set(lvl, lvl === 3 ? 'final' : 'fight');
+    const boss = this.s.siege && this.s.units.some((v) => v.alive && v.boss);
+    if (!this.resultsShown) { if (this.s.siege) music.set(boss ? 3 : this.s.siege.wave >= 7 ? 2 : 1, boss ? 'boss' : 'siege'); else music.set(lvl, lvl === 3 ? 'final' : 'fight'); }
     if (this.spec) this.updateSpec();
     if (first) this.lastAlive = alive;
     if (alive === 2 && this.lastAlive > 2 && !this.s.over) this.after(() => this.banner('Final Two', 'Only one walks away', 'red'), 900);
@@ -757,11 +792,18 @@ const game = {
   handleEvents(ev, first) {
     const s = this.s, myId = this.r.myId;
     const tut = session && session.mode === 'tutorial';
-    if (first) { if (!tut) { this.showContenders(); this.after(() => this.banner('Round 1', 'Last piece standing wins', ''), 2900); } return; }
+    if (first) {
+      if (!tut) {
+        this.showContenders();
+        this.after(() => s.siege ? this.banner('Hold the Line', `${s.siege.waves} waves. Survive together.`, 'cyan') : this.banner('Round 1', s.teams ? 'Last team standing wins' : 'Last piece standing wins', ''), 2900);
+        if (s.mutator && s.mutator !== 'none') this.after(() => this.banner(MUTATORS[s.mutator].name, MUTATORS[s.mutator].desc, 'cyan'), 4900);
+      }
+      return;
+    }
     if (!tut) this.checkDiscoveries(ev);
     if (!tut) this.tips(ev);
     for (const e of ev) {
-      if (e.e === 'dmg' && e.id === myId) { const src = e.storm ? 'The storm' : e.meteor ? 'Meteors' : (unitById(s, e.src) || {}).name || 'Unknown'; this.taken[src] = (this.taken[src] || 0) + e.n; this.since[src] = (this.since[src] || 0) + e.n; }
+      if (e.e === 'dmg' && e.id === myId) { if (e.self) continue; const src = e.storm ? 'The storm' : e.meteor ? 'Meteors' : e.lava ? 'Lava' : e.trap ? 'A trap' : (unitById(s, e.src) || {}).name || 'Unknown'; this.taken[src] = (this.taken[src] || 0) + e.n; this.since[src] = (this.since[src] || 0) + e.n; }
       if (e.e === 'timeout' && e.id === myId) { toast('Time ran out - turn skipped'); sfx.error(); }
       if (e.e === 'turn' && e.id === myId) { const lines = Object.entries(this.since).sort((a, b) => b[1] - a[1]); if (lines.length) this.after(() => this.feed(`<span class="x">Since your last turn:</span> ${lines.map(([n, v]) => `<b>${esc(n)}</b> -${v}`).join(', ')}`), 600); this.since = {}; const mu = unitById(s, myId); if (mu) { this.r.follow = true; this.after(() => this.r.focus(mu.x, mu.y), 350); } }
       if (e.e === 'turn' && e.id === myId) this.after(() => { if (!tut) this.banner('Your Turn', '', ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
@@ -769,7 +811,10 @@ const game = {
       if (e.e === 'crownSpawn') this.banner('The Crown', 'Has appeared at the centre', '');
       if (e.e === 'world' && !(e.kind === 'meteor' && e.phase === 'strike')) { const W = WORLD_EVENTS[e.kind]; this.after(() => this.banner(W.name, W.desc, e.kind === 'meteor' || e.kind === 'bloodMoon' ? 'red' : 'cyan'), 300); }
       if (e.e === 'ability' && e.id === myId && e.slot === 'ult') this.ms.ults++;
-      if (e.e === 'crowned' && e.id === myId) this.ms.crown = true;
+      if (e.e === 'crowned' && e.id === myId) { this.ms.crown = true; this.ms.pieces.push('king'); }
+      if (e.e === 'promote' && e.id === myId && e.type === 'evolve') this.ms.pieces.push(e.piece);
+      if (e.e === 'revive' && e.by === myId) this.ms.revives++;
+      if (e.e === 'death' && (unitById(s, e.id) || {}).boss && this.me && (this.me.alive || s.siege)) this.ms.colossi++;
       if (e.e === 'promote' && e.id === myId && e.piece === 'rook') this.ms.rook = true;
       if (e.e === 'promote' && e.id === myId && e.piece === 'queen') this.ms.queen = true;
       if (e.e === 'attune' && e.id === myId) { const p = $('#h-attune'); p.classList.remove('bump'); void p.offsetWidth; p.classList.add('bump'); }
@@ -780,21 +825,70 @@ const game = {
         const v = unitById(s, e.id); if (!v || v.kind !== 'player') continue;
         const k = e.by ? unitById(s, e.by) : null;
         const ico = (u) => `<img src="${pieceIcon(u.piece, u.skin, null, 18)}" alt="">`;
-        this.after(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : 'fell to the storm'}</span>`), 400);
+        this.after(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : e.cause === 'lava' ? 'burned in the lava' : e.cause === 'trap' ? 'was caught in a trap' : k && k.kind === 'hollow' ? 'was overrun by Hollows' : 'fell to the storm'}</span>`), 400);
+        if (e.shutdown && k) this.after(() => this.announce('Shutdown', `${k.name} ended ${v.name}'s streak`, k.color, 'shutdown'), 700);
+        if (e.regicide && k) this.after(() => this.announce('Regicide', `${k.name} toppled the King`, '#ffd24d', 'regicide'), 700);
+        if (s.teams && !s.over && e.id !== myId && this.me && ally(this.me, v) && this.me.alive) this.after(() => this.banner('Ally Down', 'Step on their soul within 3 rounds to revive them', 'red'), 900);
         if (e.id === myId) { this.killedBy = k && k.id !== myId ? k : null; if (!s.over) this.after(() => this.showDead(), 1700); }
       }
+      if (e.e === 'multi') { const k = unitById(s, e.id); if (k) this.after(() => this.announce(e.n >= 4 ? 'Massacre' : e.n === 3 ? 'Triple Take' : 'Double Take', `${k.name} - ${e.n} in one move`, k.color, 'multi'), 900); }
+      if (e.e === 'final') this.after(() => this.announce(e.teams ? 'Final Two Teams' : 'Final Two', 'One move from glory', '#ff6b6b', 'final'), 1300);
+      if (e.e === 'revive') { const v = unitById(s, e.id), b = unitById(s, e.by); if (v && b) { this.after(() => this.feed(`<b style="color:${b.color}">${esc(b.name)}</b><span class="x">revived</span><b style="color:${v.color}">${esc(v.name)}</b>`), 300); if (e.id === myId || e.by === myId) this.after(() => this.announce(e.id === myId ? 'You Are Back' : 'Revived', e.id === myId ? `${b.name} pulled you back` : `${v.name} rejoins the fight`, '#6dffa8', 'revive'), 500); if (e.id === myId) { $('#m-dead').classList.add('hidden'); if (this.spec) this.stopSpectate(); } } }
+      if ((e.e === 'soulDeny' || e.e === 'soulFade') && e.of === myId) this.after(() => this.showDead(true), 700);
+      if (e.e === 'death' && this.me && !this.me.alive && e.id !== myId && ally(this.me, unitById(s, e.id) || {})) this.after(() => this.showDead(true), 1900);
+      if (e.e === 'soulDeny') { const k = unitById(s, e.id), v = unitById(s, e.of); if (k && v) this.after(() => this.feed(`<b style="color:${k.color}">${esc(k.name)}</b><span class="x">shattered the soul of</span><b style="color:${v.color}">${esc(v.name)}</b>`), 300); }
+      if (e.e === 'trap' && e.id === myId) this.after(() => toast('Trapped! You lost initiative.'), 300);
+      if (e.e === 'wave' && e.phase === 'start') this.after(() => e.boss ? this.announce(`Wave ${e.n}`, (s.units.find((u) => u.alive && u.boss) || { name: 'The Colossus' }).name + ' has come', '#b98cff', 'boss') : this.banner(`Wave ${e.n} of ${e.of}`, 'Hollows incoming from the edges', 'red'), 300);
+      if (e.e === 'wave' && e.phase === 'clear') this.after(() => this.banner('Wave Cleared', e.boss ? 'A Colossus comes next. Evolve and heal.' : 'Everyone heals 20%. Next wave soon.', 'cyan'), 400);
       if (e.e === 'over') this.after(() => { if (this.resultsShown) this.refreshFinal(); else this.showResults(); }, 4800);
     }
   },
+  // Play of the Match: keep the single most dramatic action (before/after states + its events).
+  scoreMoment(prev, next, ev) {
+    if (!prev || !ev || !ev.length || (session && session.mode === 'tutorial')) return;
+    const ab = ev.find((e) => e.e === 'ability');
+    const actorId = ab ? ab.id : null;
+    const actor = actorId && unitById(next, actorId);
+    if (!actor || actor.kind !== 'player') return;
+    let sc = 0, dmg = 0, kos = 0;
+    for (const e of ev) {
+      if (e.e === 'dmg' && e.src === actorId && !e.self) { sc += e.n; dmg += e.n; if (e.crit) sc += 15; }
+      if (e.e === 'death' && e.by === actorId) { const v = unitById(next, e.id); if (v && v.kind === 'player') { sc += 90; kos++; } else sc += v && v.boss ? 120 : 20; if (e.shutdown) sc += 40; if (e.regicide) sc += 60; }
+      if (e.e === 'multi') sc += 80 * e.n;
+      if (e.e === 'revive' && e.by === actorId) sc += 70;
+      if (e.e === 'over') sc += 50;
+      if (e.e === 'ability' && e.slot === 'ult') sc += 30;
+    }
+    if (sc >= 60 && (!this.best || sc > this.best.score)) this.best = { score: sc, prev, next, ev, actor: actorId, name: actor.name, color: actor.color, piece: actor.piece, ab: ABILITIES[ab.ab].name, dmg, kos };
+  },
+  playPotm() {
+    const B = this.best; if (!B) return;
+    $('#m-results').classList.add('hidden'); $('#m-potm').classList.remove('hidden');
+    $('#potm-name').textContent = B.name; $('#potm-name').style.color = B.color;
+    $('#potm-sub').textContent = `${B.ab} - ${B.dmg} damage${B.kos ? ` - ${B.kos} elimination${B.kos > 1 ? 's' : ''}` : ''}`;
+    if (!this.potmR) this.potmR = new Renderer($('#potm-c'), { sfx: (n) => playNamed(n), haptic: () => {}, streak: () => {}, shard: () => {} });
+    const r = this.potmR;
+    if (r.reset) r.reset();
+    r.setBounds(B.prev.arena || null); r.setTheme(profile.board); r.resize();
+    r.myId = this.r.myId;
+    r.setState(structuredClone(B.prev), [], true);
+    const a = unitById(B.prev, B.actor); if (a) r.focus(a.x, a.y);
+    this.potmOn = true; sfx.whoosh();
+    clearTimeout(this.potmT);
+    this.potmT = setTimeout(() => { if (!this.potmOn) return; if (r.slowmo) r.slowmo(0.55, 2.4); r.setState(structuredClone(B.next), B.ev); }, 900);
+  },
+  closePotm() { this.potmOn = false; clearTimeout(this.potmT); $('#m-potm').classList.add('hidden'); $('#m-results').classList.remove('hidden'); },
   refreshFinal() {
     const s = this.s, u = this.me; if (!s || !u) return;
     const top3 = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 1 : a.place) - (b.alive ? 1 : b.place)).slice(0, 3);
     const order = [top3[1], top3[0], top3[2]];
-    $('#podium').innerHTML = order.map((v, i) => v ? `<div class="pod p${[2, 1, 3][i]} ${v.id === u.id ? 'me' : ''}" style="--c:${v.color}"><img src="${pieceIcon(v.piece, v.skin, null, [2, 1, 3][i] === 1 ? 78 : 60)}" alt=""><span>${esc(v.name)}</span><div class="blk"><b>${[2, 1, 3][i]}</b></div></div>` : '<div class="pod empty"></div>').join('');
-    $('#podium').classList.remove('hidden');
-    const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 1 : a.place) - (b.alive ? 1 : b.place));
-    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.2 + i * 0.05}s"><b>${v.alive ? 1 : v.place}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
+    $('#podium').innerHTML = order.map((v, i) => v ? `<div class="pod p${[2, 1, 3][i]} ${v.id === u.id ? 'me' : ''}" style="--c:${v.color}"><img src="${pieceIcon(v.piece, v.skin, null, [2, 1, 3][i] === 1 ? 78 : 60)}" alt=""><span>${esc(v.name)}</span><div class="blk"><b>${(v.alive && s.over ? 1 : v.place) || [2, 1, 3][i]}</b></div></div>` : '<div class="pod empty"></div>').join('');
+    $('#podium').classList.toggle('hidden', !!s.siege);
+    const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (s.siege ? (b.hk || 0) - (a.hk || 0) : (a.alive ? 1 : a.place) - (b.alive ? 1 : b.place)));
+    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.2 + i * 0.05}s"><b>${s.siege ? i + 1 : (v.alive ? 1 : v.place)}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${s.siege ? (v.hk || 0) + ' Hollows' : v.kills + ' KO'}</em></li>`).join('');
     $('#btn-keepspec').classList.add('hidden'); $('#btn-menu').textContent = 'Menu';
+    $('#btn-potm').classList.toggle('hidden', !this.best);
+    if (this.best) $('#btn-potm').innerHTML = `Play of the Match <small style="color:${this.best.color}">${esc(this.best.name)}</small>`;
     $('#btn-rematch').classList.toggle('hidden', !!(session && session.mode === 'client'));
     $('#spec-bar').classList.add('hidden');
     $('#m-results').classList.remove('hidden');
@@ -821,13 +915,19 @@ const game = {
     $('#spec-name').textContent = u ? u.name : `Auto${a && a.kind === 'player' ? ' - ' + a.name : ''}`;
     $('#spec-name').style.color = u ? u.color : '';
     $('#spec-label').textContent = this.s.over ? 'Match over' : `Spectating - ${alivePlayers(this.s).length} left`;
+    const me = this.me, pending = !this.s.over && me && !me.alive && (this.s.siege || (this.s.teams && alivePlayers(this.s).some((w) => ally(w, me))));
+    $('#spec-bar [data-act="results"]').classList.toggle('hidden', !!pending);
     if (a) this.r.focus(a.x, a.y);
   },
   showContenders() {
     const s = this.s, el = $('#contenders'); const ps = s.units.filter((u) => u.kind === 'player');
     const card = (u, i) => `<div class="ct ${session && u.pid === session.myPid ? 'me' : ''}" style="--c:${u.color};animation-delay:${0.1 + i * 0.08}s"><img src="${pieceIcon('pawn', u.skin, u.color, 56)}" alt=""><b>${esc(u.name)}</b>${u.title ? `<span>${esc(u.title)}</span>` : ''}</div>`;
     const M = MODES[s.mode] || MODES.royale;
-    el.innerHTML = ps.length === 2
+    const teamsOf = s.teams ? [...new Set(ps.map((u) => u.team))].map((t) => ps.filter((u) => u.team === t)) : null;
+    el.innerHTML = s.siege
+      ? `<div class="ct-mode">${M.name}</div><div class="ct-grid">${ps.map(card).join('')}</div><div class="ct-sub">${ps.length === 1 ? 'One defender' : ps.length + ' defenders'}. ${s.siege.waves} waves. Hold the line.</div>`
+      : teamsOf ? `<div class="ct-mode">${M.name}</div><div class="ct-teams">${teamsOf.map((tm, ti) => `<div class="ct-team" style="--c:${tm[0].color};animation-delay:${0.1 + ti * 0.12}s"><em>Team ${tm[0].team + 1}</em>${tm.map((u, j) => card(u, ti * 2 + j)).join('')}</div>`).join('')}</div><div class="ct-sub">${teamsOf.length} squads enter. One squad leaves.</div>`
+      : ps.length === 2
       ? `<div class="ct-mode">${M.name}</div><div class="ct-duel">${card(ps[0], 0)}<div class="vs">VS</div>${card(ps[1], 2)}</div>`
       : `<div class="ct-mode">${M.name}</div><div class="ct-grid">${ps.map(card).join('')}</div><div class="ct-sub">${ps.length} enter. One leaves.</div>`;
     el.classList.remove('hidden'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
@@ -852,7 +952,7 @@ const game = {
       if (e.e === 'storm' && e.phase === 'crack') this.after(() => this.tip('storm', '<b>The storm is coming.</b> Red cracked tiles collapse next round. Get toward the middle.'), 1800);
       if (e.e === 'world') this.after(() => this.tip('world', '<b>World event!</b> One hits every few rounds. Check the banner and adapt.'), 2000);
       if (e.e === 'ultReady' && e.id === me.id) this.after(() => this.tip('ult', '<b>Ultimate ready.</b> Tap the gold button on your turn. Save it for a crowd or a finishing blow.'), 1200);
-      if (e.e === 'crownSpawn') this.after(() => this.tip('crown', '<b>The Crown appeared.</b> Whoever holds it is tougher, but slow, and everyone will hunt them.'), 1800);
+      if (e.e === 'crownSpawn') this.after(() => this.tip('crown', '<b>The Crown appeared.</b> Whoever holds it is tougher, but slow, and everyone will hunt them. Kill the King and the Crown shatters into 4 shards.'), 1800);
       if (e.e === 'steadfast' && e.id === me.id) this.after(() => this.tip('steadfast', '<b>Steadfast!</b> Until round 6, a full-HP piece survives any single hit. After that, evolve early to stay safe.'), 900);
       if (e.e === 'pickup' && e.id === me.id && e.k === 'shard') this.after(() => this.tip('shard', '<b>Shard collected.</b> Two shards make you a Knight or Bishop: tap Promote. Every shard also Attunes you permanently.'), 900);
     }
@@ -893,13 +993,28 @@ const game = {
     box.classList.remove('hidden'); sfx.hover(); haptic(10);
   },
   onStreak(e) {
-    const k = unitById(this.s, e.by); if (!k) return;
-    let text = e.firstBlood ? 'First Blood' : STREAKS[Math.min(7, e.streak)];
+    const k = unitById(this.s, e.by); if (!k || k.kind !== 'player') return;
+    const text = e.firstBlood ? 'First Blood' : STREAKS[Math.min(7, e.streak)];
     if (!text) return;
+    this.announce(text, k.name, k.color, null, e.firstBlood ? 1 : e.streak);
+  },
+  // Announcer: big centre callouts, queued so they never trample each other.
+  announce(text, sub, color, sting, level = 3) {
+    this.annQ = this.annQ || []; this.annQ.push({ text, sub, color, sting, level });
+    if (this.annQ.length > 3) this.annQ.splice(1, this.annQ.length - 3);
+    if (!this.annBusy) this.nextAnnounce();
+  },
+  nextAnnounce() {
+    const a = (this.annQ || []).shift();
+    if (!a || !this.s) { this.annBusy = false; return; }
+    this.annBusy = true;
     const el = $('#h-streak');
-    el.innerHTML = `<span>${text}</span><small style="color:${k.color}">${esc(k.name)}</small>`;
+    el.innerHTML = `<span>${esc(a.text)}</span><small style="color:${a.color || '#fff'}">${esc(a.sub || '')}</small>`;
+    el.style.setProperty('--ac', a.color || '#ffd24d');
     el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
-    sfx.stinger(e.firstBlood ? 1 : e.streak);
+    if (a.sting) playNamed('announce:' + a.sting); else sfx.stinger(a.level);
+    haptic([20, 30, 40]);
+    setTimeout(() => this.nextAnnounce(), 1500);
   },
   flyShards(x, y, n) {
     const target = $('#h-shard-ico').getBoundingClientRect();
@@ -936,7 +1051,7 @@ const game = {
     const s = this.s, me = this.me; if (!s || !me || !me.alive) return [];
     const out = [];
     for (const v of s.units) {
-      if (!v.alive || v.id === me.id || v.kind !== 'player') continue;
+      if (!v.alive || v.id === me.id || ally(me, v) || (v.kind !== 'player' && !(s.siege && v.boss))) continue;
       if (Math.max(Math.abs(v.x - me.x), Math.abs(v.y - me.y)) > 8) continue;
       const save = { x: v.x, y: v.y }; let best = 0;
       for (const p of [save, ...legalMoves(s, v)]) {
@@ -1000,10 +1115,13 @@ const game = {
     const s = this.s, u = this.me;
     $('#h-round').textContent = `Round ${s.round}`;
     const st = $('#h-storm');
-    if (s.storm.ring >= STORM.maxRing) { st.textContent = 'Sudden death'; st.classList.add('hot'); }
+    if (s.siege) { const nx = s.siege.next ? Math.max(0, s.siege.next - s.round) : s.siege.wave < s.siege.waves ? Math.max(0, s.siege.since + 6 - s.round) : -1; st.textContent = nx < 0 ? 'Final wave' : nx === 0 ? 'Wave now' : `Next wave ${nx}`; st.classList.toggle('hot', nx >= 0 && nx <= 1); }
+    else if (s.storm.ring >= STORM.maxRing) { st.textContent = 'Sudden death'; st.classList.add('hot'); }
     else if (s.storm.crack) { st.textContent = 'Collapse!'; st.classList.add('hot'); }
     else { const R = s.rules || { first: STORM.firstCrack, every: STORM.every }; let next = R.first; while (next <= s.round) next += R.every; st.textContent = `Storm ${next - s.round}`; st.classList.toggle('hot', next - s.round <= 1); }
-    $('#h-alive').textContent = `${alivePlayers(s).length} left`;
+    if (s.siege) { const foes = s.units.filter((v) => v.alive && v.wave).length; $('#h-alive').textContent = s.siege.wave ? `Wave ${s.siege.wave}/${s.siege.waves} - ${foes} foe${foes === 1 ? '' : 's'}` : 'Wave 1 incoming'; }
+    else if (s.teams) { const mate = this.me && s.units.find((w) => w.kind === 'player' && ally(this.me, w)); const nT = new Set(alivePlayers(s).map((w) => w.team)).size; $('#h-alive').innerHTML = `${nT} team${nT === 1 ? '' : 's'}${mate ? ` <span class="mate" style="color:${mate.color}">${esc(mate.name)} ${mate.alive ? Math.round(mate.hp / stats(mate).maxHp * 100) + '%' : s.items.some((i) => i.k === 'soul' && i.id === mate.id) ? 'DOWN' : 'OUT'}</span>` : ''}`; }
+    else $('#h-alive').textContent = `${alivePlayers(s).length} left`;
     const order = predictOrder(s, 7);
     const oh = order.map((id) => { const v = unitById(s, id); if (!v) return ''; return `<div class="o ${u && v.id === u.id ? 'me' : ''}" style="--c:${v.kind === 'player' ? v.color : '#555'}"><img src="${pieceIcon(v.piece, v.skin, null, 36)}" alt=""></div>`; }).join('');
     const ok = order.map((id) => { const v = unitById(s, id); return v ? id + v.piece + v.skin + v.color : id; }).join(',');
@@ -1023,7 +1141,7 @@ const game = {
     this.lastHp = u.hp;
     $('#h-hptext').textContent = `${Math.max(0, u.hp)} / ${stt.maxHp}`;
     const defBuff = u.buffs.some((b) => b.k === 'def'), spdBuff = u.buffs.some((b) => b.k === 'spd' && b.v > 0);
-    $('#h-stats').innerHTML = `<span>ATK <b>${stt.atk}</b></span><span class="${defBuff ? 'up' : ''}">DEF <b>${stt.def}${defBuff ? '+' : ''}</b></span><span class="${spdBuff ? 'up' : ''}">SPD <b>${Math.round(effSpd(u) * 10) / 10}</b></span><span>${PASSIVES[u.passive].name}</span>`;
+    const atkBuff = u.buffs.some((b) => b.k === 'atk') || (u.passive === 'laststand' && u.hp < stt.maxHp * 0.3); $('#h-stats').innerHTML = `<span class="${atkBuff ? 'up' : ''}">ATK <b>${stt.atk}${atkBuff ? '+' : ''}</b></span><span class="${defBuff ? 'up' : ''}">DEF <b>${stt.def}${defBuff ? '+' : ''}</b></span><span class="${spdBuff ? 'up' : ''}">SPD <b>${Math.round(effSpd(u) * 10) / 10}</b></span><span>${PASSIVES[u.passive].name}</span>`;
     const popts = promoteOptions(u);
     const minCost = popts.length ? Math.min(...popts.map((p) => p.cost)) : 0;
     const shEl = $('#h-shards');
@@ -1043,6 +1161,9 @@ const game = {
     const chip = $('#event-chip');
     if (s.meteors && s.meteors.length) { chip.textContent = 'Meteors incoming'; chip.className = 'event-chip red'; }
     else if (s.bloodMoon) { chip.textContent = 'Blood Moon - damage +30%'; chip.className = 'event-chip red'; }
+    else if (s.siege && s.siege.next && s.siege.wave < s.siege.waves) { chip.textContent = `Wave ${s.siege.wave + 1} next round${s.siege.wave + 1 === s.siege.waves || s.siege.wave + 1 === Math.floor(s.siege.waves / 2) ? ' - Colossus' : ''}`; chip.className = 'event-chip cyan'; }
+    else if (this.me && !this.me.alive && s.items.some((i) => i.k === 'soul' && i.id === this.me.id)) { chip.textContent = 'Downed - waiting for a revive'; chip.className = 'event-chip red'; }
+    else if (s.mutator && s.mutator !== 'none') { chip.textContent = MUTATORS[s.mutator].name; chip.className = 'event-chip dim'; }
     else chip.className = 'event-chip hidden';
     $('#h-next').textContent = u.piece === 'king' ? 'Crowned' : target ? `${target.type === 'hone' ? 'Hone' : (affordable.length ? '' : evos.filter((p) => p.cost === target.cost).map((p) => PIECES[p.to].name).join(' / ')) || PIECES[target.to].name} ${target.cost}` : 'Max';
     const my = this.myTurn();
@@ -1167,12 +1288,20 @@ const game = {
     $('#gm-tip').classList.add('hidden'); $('#h-inspect').classList.add('hidden'); $('#abinfo').classList.add('hidden');
     $('#m-promote').classList.remove('hidden'); sfx.select();
   },
-  showDead() {
-    const u = this.me; if (!u || this.resultsShown) return;
-    $('#dead-place').textContent = '#' + u.place;
-    $('#dead-by').textContent = this.killedBy ? `Taken by ${this.killedBy.name}` : 'The board claimed you';
-    $('#m-dead').classList.remove('hidden');
-    sfx.lose();
+  showDead(quiet = false) {
+    const u = this.me; if (!u || this.resultsShown || u.alive || (this.s && this.s.over)) return;
+    const soul = this.s && this.s.items.find((i) => i.k === 'soul' && i.id === u.id);
+    $('#m-dead h3').textContent = soul ? 'Downed' : 'Eliminated';
+    $('#dead-place').textContent = soul ? 'Soul' : this.s.siege ? `Wave ${this.s.siege.wave}` : u.place ? '#' + u.place : 'Out';
+    $('#dead-by').textContent = soul ? `An ally can revive you by stepping on your soul. ${Math.max(0, soul.exp - this.s.round)} round${soul.exp - this.s.round === 1 ? '' : 's'} left.` : this.killedBy ? `Taken by ${this.killedBy.name}` : 'The board claimed you';
+    if (!soul && !u.place && !this.s.siege) $('#dead-by').textContent = 'Your teammate is still fighting. Spectate to cheer them on.';
+    $('#m-dead [data-act="results"]').classList.toggle('hidden', !!soul || !!this.s.siege || (this.s.teams && alivePlayers(this.s).some((w) => ally(w, u))));
+    if (!quiet || !$('#m-dead').classList.contains('hidden') || !this.spec) $('#m-dead').classList.remove('hidden');
+    if (!quiet) sfx.lose();
+  },
+  stopSpectate() {
+    this.spec = null; $('#s-game').classList.remove('spectating'); $('#spec-bar').classList.add('hidden'); this.r.follow = true;
+    const u = this.me; if (u) this.r.focus(u.x, u.y);
   },
   showResults(aborted = false, reason = '') {
     if (this.resultsShown) return;
@@ -1182,35 +1311,41 @@ const game = {
     const s = this.s, u = this.me;
     if (!s || !u) { go('title'); endSession(); return; }
     const place = u.alive ? (s.over ? 1 : alivePlayers(s).length) : u.place;
-    const total = s.units.filter((v) => v.kind === 'player').length;
+    const total0 = s.units.filter((v) => v.kind === 'player').length;
+    const siege = s.siege, cleared = siege ? (s.siegeWon ? siege.waves : Math.max(0, siege.wave - 1)) : 0;
+    const total = s.teams ? new Set(s.units.filter((v) => v.kind === 'player').map((v) => v.team)).size : total0;
     const win = place === 1 && s.over;
+    const rankBonus = siege ? cleared * 9 : Math.max(0, total - place) * (s.teams ? 14 : 8);
+    this.lastSummary = { win, place, total, siege: !!siege, cleared };
     const pod = $('#podium');
-    if (s.over) {
+    if (s.over && !siege) {
       const top3 = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 1 : a.place) - (b.alive ? 1 : b.place)).slice(0, 3);
       const order = [top3[1], top3[0], top3[2]];
-      pod.innerHTML = order.map((v, i) => v ? `<div class="pod p${[2, 1, 3][i]} ${v.id === u.id ? 'me' : ''}" style="--c:${v.color}"><img src="${pieceIcon(v.piece, v.skin, null, [2, 1, 3][i] === 1 ? 78 : 60)}" alt=""><span>${esc(v.name)}</span><div class="blk"><b>${[2, 1, 3][i]}</b></div></div>` : '<div class="pod empty"></div>').join('');
+      pod.innerHTML = order.map((v, i) => v ? `<div class="pod p${[2, 1, 3][i]} ${v.id === u.id ? 'me' : ''}" style="--c:${v.color}"><img src="${pieceIcon(v.piece, v.skin, null, [2, 1, 3][i] === 1 ? 78 : 60)}" alt=""><span>${esc(v.name)}</span><div class="blk"><b>${(v.alive && s.over ? 1 : v.place) || [2, 1, 3][i]}</b></div></div>` : '<div class="pod empty"></div>').join('');
       pod.classList.remove('hidden');
     } else pod.classList.add('hidden');
-    $('#r-title').textContent = win ? 'Checkmate' : reason === 'hostleft' ? 'Host Ended the Match' : aborted ? (u.alive && !s.over ? 'Forfeit' : 'Match Ended') : place <= 3 ? 'So Close' : 'Defeated';
-    $('#r-place').textContent = `Placed ${place} of ${total}`;
-    $('#r-stats').innerHTML = `<div><b id="rs-k">0</b><span>Eliminations</span></div><div><b id="rs-d">0</b><span>Damage</span></div><div><b>${PIECES[u.piece].name}</b><span>Final piece</span></div>`;
-    setTimeout(() => { countUp($('#rs-k'), 0, u.kills, 600); countUp($('#rs-d'), 0, u.dmgDealt || 0, 900); }, 400);
+    const close = s.teams ? place === 2 : place <= 3;
+    $('#r-title').textContent = siege && s.over ? (win ? 'The Line Held' : 'Overrun') : win ? (s.teams ? 'Squad Victory' : 'Checkmate') : reason === 'hostleft' ? 'Host Ended the Match' : aborted ? (u.alive && !s.over ? 'Forfeit' : 'Match Ended') : close ? 'So Close' : 'Defeated';
+    $('#r-place').textContent = siege ? `Survived ${cleared} of ${siege.waves} waves` : `Placed ${place} of ${total}${s.teams ? ' teams' : ''}`;
+    $('#r-stats').innerHTML = `<div><b id="rs-k">0</b><span>${siege ? 'Hollows' : 'Eliminations'}</span></div><div><b id="rs-d">0</b><span>Damage</span></div><div><b>${PIECES[u.piece].name}</b><span>Final piece</span></div>`;
+    setTimeout(() => { countUp($('#rs-k'), 0, siege ? u.hk || 0 : u.kills, 600); countUp($('#rs-d'), 0, u.dmgDealt || 0, 900); }, 400);
     let earned = 0, xpGain = 0, levels = 0;
     const startLvl = profile.level, startXp = profile.xp;
     const quit = aborted && u.alive && !s.over;
     if (quit && session) { try { if (session.mode === 'host') session.host.setBot('me'); else if (session.mode === 'client') { if (reason !== 'hostleft') { session.client.send({ t: 'leave' }); setTimeout(() => endSession(), 300); } } else session.host.stop(); } catch {} }
     if (quit) { profile.played = [...profile.played.slice(-30), matchKey]; if (reason === 'hostleft') { profile.marks += 15; earned = 15; } else recordMatch(profile, { kills: 0, hollows: 0, ults: 0, shards: 0, crown: false, queen: false, win: false, hard: false, minHpRatio: 0, mode: (session && session.gameMode) || 'royale' }); save(); this.seasonGain = []; this.achGain = []; this.dailyScore = null; }
     if (!profile.played.includes(matchKey)) {
-      earned = 20 + u.kills * 15 + Math.max(0, total - place) * 8 + (win ? 60 : 0);
-      xpGain = 40 + u.kills * 30 + Math.max(0, total - place) * 15 + Math.round((u.dmgDealt || 0) / 6) + (win ? 100 : 0);
+      earned = 20 + u.kills * 15 + (u.hk || 0) * 2 + rankBonus + (win ? 60 : 0);
+      xpGain = 40 + u.kills * 30 + (u.hk || 0) * 5 + Math.round(rankBonus * 1.8) + Math.round((u.dmgDealt || 0) / 6) + (win ? 100 : 0);
       profile.marks += earned;
       const gmode = (session && session.gameMode) || s.mode || 'royale';
-      recordMatch(profile, { kills: u.kills, hollows: this.ms.hollows, ults: this.ms.ults, shards: u.attune || 0, crown: this.ms.crown, queen: this.ms.queen, win, hard: !!(session && session.hard), minHpRatio: this.minHp ?? 0, mode: gmode });
+      recordMatch(profile, { kills: u.kills, hollows: this.ms.hollows, ults: this.ms.ults, shards: u.attune || 0, crown: this.ms.crown, queen: this.ms.queen, win, hard: !!(session && session.hard), minHpRatio: u.alive ? this.minHp ?? 0 : 0, mode: gmode, cleared, revives: this.ms.revives, colossi: this.ms.colossi });
+      this.masteryGain = gmode === 'daily' ? [] : addMastery(profile, [...this.ms.pieces.filter((k) => k !== u.piece), u.piece], { kills: u.kills, hollows: this.ms.hollows, win, dmg: u.dmgDealt || 0 });
       this.seasonGain = addSeasonXp(profile, xpGain);
       if (gmode === 'daily') { const sc = dailyScore(place, u.kills, u.dmgDealt || 0, total); const t = today(); if (profile.daily.date !== t) { profile.daily.date = t; profile.daily.best = 0; } this.dailyNew = sc > profile.daily.best; this.dailyScore = sc; profile.daily.best = Math.max(profile.daily.best, sc); if (!profile.daily.days.includes(t)) profile.daily.days = [...profile.daily.days.slice(-60), t]; profile.stats.dailyDays = profile.daily.days.length; }
       else this.dailyScore = null;
       profile.bestAttune = Math.max(profile.bestAttune || 0, u.attune || 0);
-      const qd = applyQuests({ ...this.ms, kills: this.ms.kills, shards: u.attune || 0, dmg: u.dmgDealt || 0, place, win });
+      const qd = applyQuests({ ...this.ms, kills: this.ms.kills, shards: u.attune || 0, dmg: u.dmgDealt || 0, place: siege ? (win ? 1 : 9) : place, win, cleared });
       this.questsDone = qd; earned += qd.reduce((a, q) => a + q.reward, 0);
       profile.xp += xpGain;
       while (profile.xp >= xpForLevel(profile.level)) { profile.xp -= xpForLevel(profile.level); profile.level++; levels++; profile.marks += 50; earned += 50; }
@@ -1235,21 +1370,26 @@ const game = {
     $('#r-quests').innerHTML = (this.questsDone || []).map((q, i) => `<div style="animation-delay:${1 + i * 0.15}s"><span>Quest complete: ${q.text}</span><b>+${q.reward}</b></div>`).join('');
     if (this.questsDone && this.questsDone.length) setTimeout(() => sfx.quest(), 1100);
     this.questsDone = [];
+    for (const m of this.masteryGain || []) if (m.piece === u.piece || m.to > m.from) $('#r-quests').insertAdjacentHTML('beforeend', `<div class="r-mastery ${m.to > m.from ? 'up' : ''}" style="animation-delay:1.2s"><img src="${pieceIcon(m.piece, profile.skin, null, 26)}" alt=""><span>${PIECES[m.piece].name} mastery ${m.to > m.from ? `<b>${m.from} &rarr; ${m.to}</b>` : m.to}${m.title ? ` - title unlocked: <b>${esc(m.title)}</b>` : ''}</span><em>+${m.gain}</em></div>`);
+    this.masteryGain = [];
     const unlocks = [...(this.seasonGain || []).map((g) => { const L = rewardLabel(g); return `<div class="r-unlock" style="animation-delay:1.3s"><span>Crown Path tier ${g.tier}: ${L.name}</span><b>${L.kind}</b></div>`; }), ...(this.achGain || []).map((a) => `<div class="r-unlock" style="animation-delay:1.5s"><span>Trophy: ${a.name}</span><b>+${a.reward}</b></div>`)];
     const tier = seasonTier(profile);
     $('#r-quests').insertAdjacentHTML('beforeend', `<div class="r-season" style="animation:rise .4s 1.1s both">Crown Path - Tier ${tier}${tier < SEASON.tiers ? ` (${profile.season.xp % SEASON.tierXp}/${SEASON.tierXp})` : ''}<div class="xpbar"><i style="width:${tier >= SEASON.tiers ? 100 : seasonProgress(profile) * 100}%"></i></div></div>` + unlocks.join(''));
     if (this.dailyScore != null) $('#r-quests').insertAdjacentHTML('afterbegin', `<div class="r-unlock"><span>Daily score: ${this.dailyScore}${this.dailyNew ? ' - new best!' : ''}</span><b>Best ${profile.daily.best}</b></div>`);
     if (unlocks.length) setTimeout(() => { sfx.buy(); uiFlash(); }, 1400);
     const winner = s.units.find((v) => v.id === s.winner);
-    if (winner && !win) $('#r-place').innerHTML = `Placed ${place} of ${total} <div class="r-winner"><img src="${pieceIcon(winner.piece, winner.skin, winner.color, 54)}" alt=""><div><span>WINNER</span><b style="color:${winner.color}">${esc(winner.name)}</b></div></div>`;
+    const wmate = winner && s.teams ? s.units.find((v) => v.kind === 'player' && v !== winner && v.team === winner.team) : null;
+    if (winner && !win && !siege) $('#r-place').innerHTML = `Placed ${place} of ${total}${s.teams ? ' teams' : ''} <div class="r-winner"><img src="${pieceIcon(winner.piece, winner.skin, winner.color, 54)}" alt=""><div><span>${wmate ? 'WINNERS' : 'WINNER'}</span><b style="color:${winner.color}">${esc(winner.name)}${wmate ? ' &amp; ' + esc(wmate.name) : ''}</b></div></div>`;
     $('#r-marks').innerHTML = earned ? `<i class="mark-ico"></i>+<span id="rm">0</span> Marks` : '';
     if (earned) setTimeout(() => countUp($('#rm'), 0, earned, 1000, true), 900);
-    const rankOf = (v) => (v.id === u.id ? place : v.alive ? (s.over ? 1 : 0) : v.place);
-    const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (rankOf(a) || 0.5) - (rankOf(b) || 0.5));
-    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${rankOf(v) || '-'}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${v.kills} KO</em></li>`).join('');
+    const rankOf = (v) => (siege ? 0 : v.id === u.id ? place : v.alive ? (s.over ? 1 : 0) : v.place);
+    const ranked = s.units.filter((v) => v.kind === 'player').sort((a, b) => (siege ? (b.hk || 0) - (a.hk || 0) : (rankOf(a) || 0.5) - (rankOf(b) || 0.5)));
+    $('#r-board').innerHTML = ranked.map((v, i) => `<li class="${v.id === u.id ? 'me' : ''}" style="--c:${v.color};animation-delay:${0.5 + i * 0.06}s"><b>${siege ? i + 1 : rankOf(v) || '-'}</b><img src="${pieceIcon(v.piece, v.skin, null, 26)}" alt=""><span>${esc(v.name)}${v.title ? `<span class="ttl">${esc(v.title)}</span>` : ''}</span><em>${siege ? (v.hk || 0) + ' Hollows' : v.kills + ' KO'}</em></li>`).join('');
     if (quit && session && session.mode === 'host') this.forfeited = true;
     const liveSpec = !s.over && (!u.alive || this.forfeited) && !(session && session.mode === 'client' && aborted);
     $('#btn-keepspec').classList.toggle('hidden', !liveSpec);
+    $('#btn-potm').classList.toggle('hidden', !this.best);
+    if (this.best) $('#btn-potm').innerHTML = `Play of the Match <small style="color:${this.best.color}">${esc(this.best.name)}</small>`;
     $('#btn-menu').textContent = liveSpec && session && session.mode === 'host' ? 'Leave' : 'Menu';
     $('#btn-rematch').classList.toggle('hidden', !!(liveSpec || (session && (session.mode === 'client' || (session.mode === 'host' && !s.over)))));
     $('#spec-bar').classList.add('hidden');
@@ -1340,7 +1480,7 @@ $('#set-bigtext').addEventListener('change', (e) => { settings.bigtext = e.targe
 $('#set-quality').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); game.r.setQuality(settings.quality); $$('#set-quality button').forEach((x) => x.classList.toggle('on', x === b)); sfx.tap(); });
 function sig(str) { let h1 = 0x811c9dc5, h2 = 0x1b873593; for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 ^ (c + i), 2246822519); } return ((h1 >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 12); }
 function info(title, html) { $('#info-title').textContent = title; $('#info-body').innerHTML = html; $('#m-info').classList.remove('hidden'); }
-const WHATS_NEW = `<h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
+const WHATS_NEW = `<h4>5.0</h4><ul><li><b>Squads</b>: teams of two, no friendly fire, a Bond DEF bonus when you stick together, and revives: step on a fallen teammate's soul to bring them back.</li><li><b>Siege</b>: co-op against eight waves of hunting Hollows, with a Colossus boss on waves 4 and 8. The first Colossus drops the Crown.</li><li><b>Map hazards</b>: Magma Rift, Frostbite and Warpgates. Most matches roll one.</li><li><b>Five new abilities</b> (Tripwire, Lance, Penance, Quake, Gambit) and two new base abilities (Lifesteal, Last Stand).</li><li><b>The Announcer</b>: First Blood, Double Take, Shutdown, Regicide, Final Two and more.</li><li><b>Play of the Match</b>: the best move of every game, replayed in slow motion on the results screen.</li><li><b>Piece Mastery</b>: level each piece to 10 for titles and Marks.</li><li><b>Season 2: The Middlegame</b>: a fresh Crown Path with the Warden and Colossus sets, the Riftgate board and the Soulfire finisher.</li><li>Dozens of rules fixes, faster rendering, bigger tap targets and a landscape title screen.</li></ul><h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
 <h4>2.0 Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
 <h4>Progression</h4><ul><li><b>Crown Path</b>: a free 30-tier season track with exclusive cosmetics and titles.</li><li><b>Trophies</b>: 21 achievements, each with Marks and a title.</li><li>Pick a title to show in lobbies and results.</li></ul>
 <h4>Balance</h4><ul><li>Heavy is the Head: the King no longer attunes, charges ultimates at half speed and takes 10% more damage. The Crown appears at a random safe spot.</li><li>Tank preset reworked. Regen scales with attunement.</li></ul>
@@ -1384,6 +1524,8 @@ document.addEventListener('click', (e) => {
     case 'forfeit': if (session && session.mode === 'tutorial') { $('#m-menu').classList.add('hidden'); endSession(); go('tutorial'); break; }
       $('#m-menu').classList.add('hidden'); game.showResults(!!(game.s && !game.s.over && game.me && game.me.alive)); break;
     case 'spectate': $('#m-dead').classList.add('hidden'); game.startSpectate(); break;
+    case 'potm': case 'potm-replay': sfx.select(); game.playPotm(); break;
+    case 'potm-close': sfx.tap(); game.closePotm(); break;
     case 'keep-spectating': $('#m-results').classList.add('hidden'); game.startSpectate(); break;
     case 'spec-prev': game.cycleSpec(-1); break;
     case 'spec-next': game.cycleSpec(1); break;
@@ -1448,7 +1590,7 @@ bgInit();
 game.init();
 renderProfile();
 document.body.classList.toggle('bigtext', !!settings.bigtext); document.body.classList.toggle('reduced', !!settings.motion);
-setTimeout(() => { $('#splash').classList.add('out'); if (profile.seenVersion !== '3.1' && (profile.games || profile.tutorial.length)) { info('What\'s New in 3.1', WHATS_NEW); } profile.seenVersion = '3.1'; save(); }, 700);
+setTimeout(() => { $('#splash').classList.add('out'); if (profile.seenVersion !== '5.0' && (profile.games || profile.tutorial.length)) { info('What\'s New in 5.0', WHATS_NEW); } profile.seenVersion = '5.0'; save(); }, 700);
 const q = new URLSearchParams(location.search);
 if (q.get('join')) { go('join'); $('#in-code').value = q.get('join').toUpperCase().slice(0, 5); }
 window.__cc = { game, profile, get session() { return session; }, startSolo };

@@ -4,15 +4,15 @@ export const MAX_PLAYERS = 8;
 export const TURN_MS = 30000;
 
 export const PIECES = {
-  pawn:   { ult: 'enPassant', name: 'Pawn',   tier: 1, hp: 60,  atk: 10, def: 5,  spd: 10, attack: 'pawnStrike', sig: 'shove',     equips: ['sprint', 'digin', 'pickpocket'],
+  pawn:   { ult: 'enPassant', name: 'Pawn',   tier: 1, hp: 60,  atk: 10, def: 5,  spd: 10, attack: 'pawnStrike', sig: 'shove',     equips: ['sprint', 'digin', 'pickpocket', 'tripwire'],
             moveDesc: 'Steps 1 tile in any direction.' },
-  knight: { ult: 'fork', name: 'Knight', tier: 2, hp: 90,  atk: 16, def: 8,  spd: 12, attack: 'tstrike',    sig: 'vault',     equips: ['trample', 'stagger', 'rally'],
+  knight: { ult: 'fork', name: 'Knight', tier: 2, hp: 90,  atk: 16, def: 8,  spd: 12, attack: 'tstrike',    sig: 'vault',     equips: ['trample', 'stagger', 'rally', 'lance'],
             moveDesc: 'L-shaped jump. Ignores anything in the way.' },
-  bishop: { ult: 'excommunicate', name: 'Bishop', tier: 2, hp: 80,  atk: 14, def: 6,  spd: 11, attack: 'ray',        sig: 'transpose', equips: ['sanctuary', 'cross', 'blink'],
+  bishop: { ult: 'excommunicate', name: 'Bishop', tier: 2, hp: 80,  atk: 14, def: 6,  spd: 11, attack: 'ray',        sig: 'transpose', equips: ['sanctuary', 'cross', 'blink', 'penance'],
             moveDesc: 'Slides diagonally up to 4 tiles.' },
-  rook:   { ult: 'castling', name: 'Rook',   tier: 3, hp: 140, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege'],
+  rook:   { ult: 'castling', name: 'Rook',   tier: 3, hp: 140, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege', 'quake'],
             moveDesc: 'Slides straight up to 4 tiles.' },
-  queen:  { ult: 'nova', name: 'Queen',  tier: 4, hp: 150, atk: 22, def: 10, spd: 10, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate'],
+  queen:  { ult: 'nova', name: 'Queen',  tier: 4, hp: 150, atk: 22, def: 10, spd: 10, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate', 'gambit'],
             moveDesc: 'Slides any direction up to 5 tiles.' },
   king:   { ult: 'divineRight', name: 'King',   tier: 5, hp: 0,   atk: 0,  def: 0,  spd: 0,  attack: 'royalStrike', sig: 'royalGuard', equips: [],
             moveDesc: 'Steps 1 tile. Wears the Crown.' },
@@ -69,14 +69,24 @@ export const ABILITIES = {
   dominion:   { name: 'Dominion',     cd: 4, desc: 'Nearby enemies are slowed and pushed back in the turn order.' },
   execute:    { name: 'Execute',      cd: 3, desc: 'Strike a piece within 2 tiles. Massive damage below 30% HP.' },
   checkmate:  { name: 'Checkmate',    cd: 4, desc: 'Rays in all 8 directions, 3 tiles each.' },
+  // 5.0 equips
+  tripwire:   { name: 'Tripwire',     cd: 3, desc: 'Hide a trap on an adjacent tile. Enemies who step on it take damage and lose initiative. Two traps at a time.' },
+  lance:      { name: 'Lance',        cd: 2, desc: 'Thrust 2 tiles straight ahead. Everything hit is knocked back a tile.' },
+  penance:    { name: 'Penance',      cd: 3, desc: 'Strike the first piece on a diagonal within 4 tiles and heal half the damage dealt.' },
+  quake:      { name: 'Quake',        cd: 3, desc: 'Shockwaves 2 tiles down all four straight lines. Survivors lose initiative.' },
+  gambit:     { name: 'Gambit',       cd: 5, free: true, desc: 'Free action: pay 12% of your HP for +40% ATK this turn and next.' },
+  // siege boss
+  colossusSlam: { name: 'Colossus Slam', cd: 0, desc: '' },
 };
 
 export const PASSIVES = {
-  regen:     { name: 'Regen',       desc: 'Recover 3 HP at the start of every turn.' },
+  regen:     { name: 'Regen',       desc: 'Recover 1 HP at the start of every turn, plus 1 for every 10 shards attuned.' },
   scavenger: { name: 'Scavenger',   desc: 'Crates you break always drop an extra shard.' },
   momentum:  { name: 'Momentum',    desc: '+2 SPD for every elimination (max 4 stacks).' },
-  thorns:    { name: 'Thorns',      desc: 'Reflect 20% of damage taken from adjacent attackers.' },
-  first:     { name: 'First Strike', desc: '+50% damage against targets at full HP.' },
+  thorns:    { name: 'Thorns',      desc: 'Reflect 30% of damage taken from adjacent attackers.' },
+  first:     { name: 'First Strike', desc: '+50% damage against targets above 60% HP.' },
+  lifesteal: { name: 'Lifesteal',   desc: 'Heal 10% of all damage you deal.' },
+  laststand: { name: 'Last Stand',  desc: '+30% ATK while below 30% HP.' },
 };
 
 export const STAT_POINTS = 10;
@@ -85,9 +95,16 @@ export const PRESETS = {
   bruiser:  { name: 'Bruiser',  pts: { hp: 3, atk: 5, def: 2, spd: 0 }, passive: 'thorns',    blurb: 'Hits hard, takes a punch.' },
   scout:    { name: 'Scout',    pts: { hp: 3, atk: 3, def: 1, spd: 3 }, passive: 'scavenger', blurb: 'First to the loot, first to evolve.' },
   tank:     { name: 'Tank',     pts: { hp: 4, atk: 2, def: 2, spd: 2 }, passive: 'regen',     blurb: 'Outlast everyone.' },
-  assassin: { name: 'Assassin', pts: { hp: 2, atk: 5, def: 0, spd: 3 }, passive: 'first',     blurb: 'Delete anyone at full health.' },
+  assassin: { name: 'Assassin', pts: { hp: 2, atk: 5, def: 0, spd: 3 }, passive: 'first',     blurb: 'Opens fights with a devastating first blow.' },
 };
 
+export const TEAM_COLORS = ['#4dabff', '#ffd24d', '#5cff9d', '#c77dff']; // no red: red reads as danger
+export const MUTATORS = {
+  none:    { name: 'Classic', desc: 'No hazards.' },
+  lava:    { name: 'Magma Rift', desc: 'Lava pools burn anyone who starts a turn on them.' },
+  ice:     { name: 'Frostbite', desc: 'Ice patches. Anything that lands on ice keeps sliding.' },
+  portals: { name: 'Warpgates', desc: 'Paired portals. Step in, step out across the board.' },
+};
 export const PLAYER_COLORS = ['#ff4d6d', '#4dabff', '#ffd24d', '#5cff9d', '#c77dff', '#ff8f3d', '#3dfff0', '#ff6ad5'];
 
 export const ATTUNE = { max: 30, hp: 0.01, atk: 0.008, def: 0.005, spdEvery: 6 };
@@ -155,6 +172,8 @@ export const QUESTS = {
   ults:     { text: 'Use 2 Ultimates', goal: 2, reward: 90 },
   hollows:  { text: 'Defeat 3 Hollows', goal: 3, reward: 70 },
   attune:   { text: 'Reach Attunement 3', goal: 3, reward: 90, best: true },
+  revive:   { text: 'Revive a teammate in Squads or Siege', goal: 1, reward: 100 },
+  waves:    { text: 'Clear 4 waves in one Siege', goal: 4, reward: 110, best: true },
 };
 export const BOT_LEVELS = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
 
@@ -188,30 +207,41 @@ export const MODES = {
   royale: { name: 'Battle Royale', short: 'Royale', desc: 'The full experience. Up to 8 pieces, one survivor.', players: [2, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3 },
   blitz:  { name: 'Blitz', short: 'Blitz', desc: 'Five-minute chaos. Faster storm, 15 second turns, quicker everything.', players: [2, 8], storm: { first: 3, every: 2 }, crown: 5, turnMs: 15000, startShards: 1, events: 2 },
   duel:   { name: 'Duel', short: 'Duel', desc: 'One on one in a tight 10x10 arena. Pure skill.', players: [2, 2], storm: { first: 6, every: 3 }, crown: 6, turnMs: 30000, startShards: 1, events: 4, arena: { x0: 3, y0: 3, x1: 12, y1: 12 } },
+  squads: { name: 'Squads', short: 'Squads', desc: 'Teams of two. No friendly fire. Stand close for Bond, and step on a fallen ally\'s soul to bring them back.', players: [4, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3, teams: 2 },
+  siege:  { name: 'Siege', short: 'Siege', desc: 'Co-op. Hold the board against eight waves of hunting Hollows, with a Colossus on waves 4 and 8.', players: [1, 4], storm: { first: 999, every: 3 }, crown: 999, turnMs: 30000, startShards: 1, events: 3, siege: { waves: 8 } },
   daily:  { name: 'Daily Challenge', short: 'Daily', desc: 'Same map, same loadout for everyone today. Seven Hard bots. Chase your best score.', players: [8, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3 },
 };
 
 // ---------- 2.0: season ----------
-export const SEASON = { id: 1, name: 'Season 1: The Opening', tierXp: 250, tiers: 30 };
+export const SEASON = { id: 2, name: 'Season 2: The Middlegame', tierXp: 250, tiers: 30 };
 export const SEASON_REWARDS = (() => {
   const r = {};
   for (let t = 1; t <= 30; t++) r[t] = { marks: t % 5 === 0 ? 150 : t % 2 ? 40 : 60 };
-  r[4] = { title: 'Opening Theory' };
-  r[8] = { skin: 'arcane' };
-  r[12] = { title: 'Tactician' };
-  r[15] = { board: 'throne' };
-  r[18] = { title: 'Endgame Specialist' };
-  r[22] = { skin: 'sovereign' };
-  r[26] = { title: 'Season One Legend' };
-  r[30] = { finisher: 'coronation' };
+  r[4] = { title: 'Middlegame' };
+  r[8] = { skin: 'warden' };
+  r[12] = { title: 'Squad Leader' };
+  r[15] = { board: 'riftgate' };
+  r[18] = { title: 'Wavebreaker' };
+  r[22] = { skin: 'colossus' };
+  r[26] = { title: 'Season Two Legend' };
+  r[30] = { finisher: 'soulfire' };
   return r;
 })();
 SKINS.arcane = { name: 'Arcane', price: null, season: 1, body: ['#7ff7e8', '#3a1060'], rim: '#e8fffb', glow: '#ff5af0', line: '#12052a', fx: 'spark' };
 SKINS.sovereign = { name: 'Sovereign', price: null, season: 1, body: ['#3a3a44', '#050507'], rim: '#ffd76a', glow: '#ffcf4a', line: '#ffd76a', fx: 'glint' };
 BOARDS.throne = { weather: 'embers', name: 'Throne Room', price: null, season: 1, light: '#4a1820', dark: '#33101a', vein: 'rgba(255,210,120,0.08)', frame: '#ffd76a', grid: 'rgba(255,210,120,0.14)', wallTop: ['#6a2a30', '#4a1a22'], wallFront: '#2a0c12', bg: ['#3a0c14', '#060203'], mote: '#ffd76a' };
+SKINS.warden = { name: 'Warden', price: null, season: 2, body: ['#cfe9ff', '#1d3b5c'], rim: '#f2fbff', glow: '#6dc8ff', line: '#0a1a2c', fx: 'frost' };
+SKINS.colossus = { name: 'Colossus', price: null, season: 2, body: ['#b98cff', '#2a1046'], rim: '#efe2ff', glow: '#a06bff', line: '#12051f', fx: 'star' };
+BOARDS.riftgate = { weather: 'stars', name: 'Riftgate', price: null, season: 2, light: '#1f2440', dark: '#151a30', vein: 'rgba(160,107,255,0.08)', frame: '#a06bff', grid: 'rgba(160,107,255,0.14)', wallTop: ['#3a3466', '#28244a'], wallFront: '#1a1730', bg: ['#141a33', '#04050b'], mote: '#c9a6ff' };
+FINISHERS.soulfire = { name: 'Soulfire', price: null, season: 2, desc: 'Violet soulflame swallows the piece and carries it skyward.' };
 FINISHERS.coronation = { name: 'Coronation', price: null, season: 1, desc: 'A golden crown slams down, then the victim bursts into light.' };
 
 // ---------- 2.0: achievements ----------
+// ---------- 5.0: piece mastery ----------
+export const MASTERY_MAX = 10;
+export const masteryCost = (lv) => 120 + 60 * (lv - 1);          // xp from level lv to lv+1
+export const MASTERY_TITLES = { 3: 'Adept', 6: 'Expert', 10: 'Master' };
+
 export const ACHIEVEMENTS = {
   first_win:  { name: 'First Victory', desc: 'Win a match.', stat: 'wins', goal: 1, reward: 100 },
   wins10:     { name: 'Seasoned', desc: 'Win 10 matches.', stat: 'wins', goal: 10, reward: 300 },
@@ -219,6 +249,12 @@ export const ACHIEVEMENTS = {
   games25:    { name: 'Regular', desc: 'Play 25 matches.', stat: 'games', goal: 25, reward: 150 },
   kills50:    { name: 'Hunter', desc: 'Eliminate 50 players.', stat: 'kills', goal: 50, reward: 200 },
   kills250:   { name: 'Executioner', desc: 'Eliminate 250 players.', stat: 'kills', goal: 250, reward: 600 },
+  squad1:     { name: 'Brothers in Arms', desc: 'Win a Squads match.', stat: 'squadWins', goal: 1, reward: 150 },
+  revive5:    { name: 'Lifeline', desc: 'Revive 5 teammates.', stat: 'revives', goal: 5, reward: 200 },
+  siege1:     { name: 'The Line Held', desc: 'Survive every wave of Siege.', stat: 'siegeWins', goal: 1, reward: 300 },
+  wave5:      { name: 'Wavebreaker', desc: 'Clear 4 waves in one Siege.', stat: 'bestWave', goal: 4, reward: 120 },
+  colossus3:  { name: 'Giant Slayer', desc: 'Help topple 3 Colossi.', stat: 'colossi', goal: 3, reward: 250 },
+  master1:    { name: 'Specialist', desc: 'Reach mastery 10 with any piece.', stat: 'topMastery', goal: 10, reward: 500 },
   queens:     { name: 'Promotion', desc: 'Evolve into a Queen.', stat: 'queens', goal: 1, reward: 100 },
   crowns5:    { name: 'Usurper', desc: 'Claim the Crown 5 times.', stat: 'crowns', goal: 5, reward: 200 },
   shards200:  { name: 'Crystal Hoarder', desc: 'Collect 200 shards.', stat: 'shardsTotal', goal: 200, reward: 200 },

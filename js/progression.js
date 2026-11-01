@@ -1,8 +1,10 @@
 // Season track (Crown Path), achievements and titles. Pure functions over the saved profile.
-import { SEASON, SEASON_REWARDS, ACHIEVEMENTS, SKINS, BOARDS, FINISHERS, DEFAULT_SKINS, DEFAULT_BOARDS, DEFAULT_FINISHERS } from './data.js';
+import { SEASON, SEASON_REWARDS, ACHIEVEMENTS, SKINS, BOARDS, FINISHERS, DEFAULT_SKINS, DEFAULT_BOARDS, DEFAULT_FINISHERS, PIECES, MASTERY_MAX, masteryCost, MASTERY_TITLES } from './data.js';
 
 export function ensureProgress(p) {
-  p.stats = Object.assign({ games: 0, wins: 0, kills: 0, crowns: 0, queens: 0, shardsTotal: 0, ults: 0, hollows: 0, streak: 0, bestStreak: 0, hardWins: 0, flawless: 0, blitzWins: 0, duelWins: 0, dailyDays: 0 }, p.stats || {});
+  p.stats = Object.assign({ games: 0, wins: 0, kills: 0, crowns: 0, queens: 0, shardsTotal: 0, ults: 0, hollows: 0, streak: 0, bestStreak: 0, hardWins: 0, flawless: 0, blitzWins: 0, duelWins: 0, dailyDays: 0, squadWins: 0, siegeWins: 0, bestWave: 0, revives: 0, colossi: 0, topMastery: 0 }, p.stats || {});
+  if (!p.mastery || typeof p.mastery !== 'object') p.mastery = {};
+  for (const k of Object.keys(PIECES)) p.mastery[k] = Math.max(0, Math.floor(+p.mastery[k] || 0));
   // migrate legacy counters
   p.stats.games = Math.max(p.stats.games, p.games || 0); p.stats.wins = Math.max(p.stats.wins, p.wins || 0);
   p.stats.kills = Math.max(p.stats.kills, p.kills || 0); p.stats.crowns = Math.max(p.stats.crowns, p.crowns || 0);
@@ -80,10 +82,38 @@ export function recordMatch(p, m) {
     if (m.minHpRatio >= 0.5) s.flawless++;
     if (m.mode === 'blitz') s.blitzWins++;
     if (m.mode === 'duel') s.duelWins++;
+    if (m.mode === 'squads') s.squadWins++;
+    if (m.mode === 'siege') s.siegeWins++;
   } else s.streak = 0;
+  if (m.mode === 'siege') s.bestWave = Math.max(s.bestWave, m.cleared || 0);
+  s.revives += m.revives || 0; s.colossi += m.colossi || 0;
   p.games = s.games; p.wins = s.wins; p.kills = s.kills; p.crowns = s.crowns;
 }
 
 // Daily challenge: deterministic seed + loadout from the date.
 export function dailySeed(date) { let h = 2166136261; for (const c of 'cc-daily-' + date) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
 export function dailyScore(place, kills, dmg, total) { return Math.max(0, (total - place) * 100) + kills * 150 + Math.round(dmg / 2) + (place === 1 ? 500 : 0); }
+
+// ---------- 5.0: piece mastery ----------
+export function masteryLevel(xp) {
+  let lv = 1, left = xp;
+  while (lv < MASTERY_MAX && left >= masteryCost(lv)) { left -= masteryCost(lv); lv++; }
+  return { lv, into: left, need: lv < MASTERY_MAX ? masteryCost(lv) : 0 };
+}
+// pieces: list of pieces held this match (final last). Returns [{piece, gain, from, to, title}]
+export function addMastery(p, pieces, perf) {
+  ensureProgress(p);
+  const out = []; const uniq = [...new Set(pieces)].filter((k) => PIECES[k]);
+  const fin = uniq[uniq.length - 1];
+  for (const k of uniq) {
+    const gain = k === fin ? 60 + perf.kills * 25 + (perf.hollows || 0) * 4 + (perf.win ? 80 : 0) + Math.min(60, Math.round((perf.dmg || 0) / 20)) : 25;
+    const from = masteryLevel(p.mastery[k]).lv;
+    p.mastery[k] += gain;
+    const to = masteryLevel(p.mastery[k]).lv;
+    let title = null;
+    for (let l = from + 1; l <= to; l++) { p.marks += 30; if (MASTERY_TITLES[l]) { title = `${PIECES[k].name} ${MASTERY_TITLES[l]}`; if (!p.titles.includes(title)) p.titles.push(title); } if (l === MASTERY_MAX) p.marks += 300; }
+    out.push({ piece: k, gain, from, to, title });
+  }
+  p.stats.topMastery = Math.max(p.stats.topMastery || 0, ...Object.values(p.mastery).map((x) => masteryLevel(x).lv));
+  return out;
+}

@@ -1,7 +1,7 @@
 // Chess Complex — authoritative rules engine. Pure data in, events out.
 import {
   SIZE, PIECES, ABILITIES, EVOLVE, EVOLVE_COST, MAX_HONE, honeCost, STAT_GAIN,
-  PLAYER_COLORS, HOLLOW_STATS, ATTUNE, MODES, STEADFAST_ROUND, CALM_ROUNDS,
+  PLAYER_COLORS, HOLLOW_STATS, ATTUNE, MODES, STEADFAST_ROUND, CALM_ROUNDS, TEAM_COLORS, MUTATORS,
 } from './data.js';
 
 const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -34,6 +34,10 @@ export const isSolid = (s, x, y) => { const t = tileAt(s, x, y); return !t || !!
 export const canStand = (s, x, y) => inB(x, y) && !isSolid(s, x, y) && !unitAt(s, x, y);
 const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 export const alivePlayers = (s) => s.units.filter((u) => u.alive && u.kind === 'player');
+// Teams (Squads, Siege). Royale players have no team, so nobody is an ally.
+export const ally = (a, b) => !!(a && b && a !== b && a.team != null && a.team === b.team);
+export const teamKey = (u) => (u.team != null ? 't' + u.team : 'u' + u.id);
+export const teamsAlive = (s) => new Set(alivePlayers(s).map(teamKey));
 const sgn = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
 
 export function baseStats(u) {
@@ -53,10 +57,13 @@ export function baseStats(u) {
 }
 export const attuneSpd = (u) => Math.floor((u.attune || 0) / ATTUNE.spdEvery);
 export function stats(u) {
-  if (u.kind === 'hollow') return { maxHp: u.hpMax || HOLLOW_STATS.hp, atk: HOLLOW_STATS.atk, def: u.dummy ? 2 : HOLLOW_STATS.def, spd: (u.dummy ? 5 : HOLLOW_STATS.spd) + buffSum(u, 'spd') };
+  if (u.kind === 'hollow') return { maxHp: u.hpMax || HOLLOW_STATS.hp, atk: u.atkB || HOLLOW_STATS.atk, def: u.dummy ? 2 : u.defB || HOLLOW_STATS.def, spd: (u.dummy ? 5 : u.spdB || HOLLOW_STATS.spd) + buffSum(u, 'spd') };
   const b = baseStats(u), a = u.attune || 0;
+  const maxHp = Math.round(b.hp * (1 + ATTUNE.hp * a));
+  let atkM = u.buffs.reduce((m, q) => (q.k === 'atk' ? m * q.v : m), 1);
+  if (u.passive === 'laststand' && u.hp > 0 && u.hp < maxHp * 0.3) atkM *= 1.3;
   return {
-    maxHp: Math.round(b.hp * (1 + ATTUNE.hp * a)), atk: Math.round(b.atk * (1 + ATTUNE.atk * a)), def: Math.round(b.def * (1 + ATTUNE.def * a)),
+    maxHp, atk: Math.round(b.atk * (1 + ATTUNE.atk * a) * atkM), def: Math.round(b.def * (1 + ATTUNE.def * a)),
     spd: b.spd + attuneSpd(u) + (u.momentum || 0) * 2 + buffSum(u, 'spd'),
   };
 }
@@ -68,6 +75,7 @@ export const honed = (u) => (u.hone[u.piece] || 0) > 0;
 
 // ---------- creation ----------
 const SPAWNS = [[1, 1], [14, 14], [14, 1], [1, 14], [7, 1], [8, 14], [1, 8], [14, 7]];
+const TEAM_SPAWNS = [[[1, 1], [3, 2]], [[14, 14], [12, 13]], [[14, 1], [13, 3]], [[1, 14], [2, 12]]];
 
 export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts = {}) {
   const modeId = MODES[opts.mode] ? opts.mode : 'royale', M = MODES[modeId];
@@ -76,6 +84,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     tiles: [], units: [], items: [], storm: { ring: 0, crack: false }, event: null, meteors: [], bloodMoon: 0, lastEvent: null,
     active: null, turn: null, crownSpawned: false, log: [], nextId: 1, firstBlood: false,
     mode: modeId, rules: { first: M.storm.first, every: M.storm.every, crown: M.crown, events: M.events, turnMs: M.turnMs }, arena: M.arena || null,
+    mutator: 'none', teams: M.teams || 0, siege: M.siege ? { wave: 0, waves: M.siege.waves, next: 2, since: 0 } : null, finalTwo: false,
   };
   for (let i = 0; i < SIZE * SIZE; i++) s.tiles.push({ t: 'floor' });
   const A = s.arena;
@@ -83,8 +92,9 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
   if (A) { for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (!inArena(x, y)) s.tiles[y * SIZE + x] = { t: 'out' }; s.storm.ring = A.x0; }
   const sc = A ? 0.4 : 0.5 + 0.5 * Math.min(8, players.length) / 8; // content scales with arena size and player count
 
-  const spawnOrder = A ? [[A.x0 + 1, A.y0 + 1], [A.x1 - 1, A.y1 - 1]] : SPAWNS.slice();
+  let spawnOrder = A ? [[A.x0 + 1, A.y0 + 1], [A.x1 - 1, A.y1 - 1]] : s.siege ? [[6, 6], [9, 9], [9, 6], [6, 9]] : SPAWNS.slice();
   for (let i = spawnOrder.length - 1; i > 0; i--) { const j = ri(s, i + 1); [spawnOrder[i], spawnOrder[j]] = [spawnOrder[j], spawnOrder[i]]; }
+  if (s.teams) { const pairs = TEAM_SPAWNS.slice(); for (let i = pairs.length - 1; i > 0; i--) { const j = ri(s, i + 1); [pairs[i], pairs[j]] = [pairs[j], pairs[i]]; } spawnOrder = pairs.flat(); }
   const reserved = new Set();
   const reserve = (x, y, r) => { for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) reserved.add((y + dy) * SIZE + x + dx); };
   spawnOrder.forEach(([x, y]) => reserve(x, y, 1));
@@ -110,6 +120,23 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     let [x, y] = p;
     for (let k = 0; k < 4; k++) { if (free(x, y)) set(x, y, 'bramble'); const d = DIRS8[ri(s, 8)]; x += d[0]; y += d[1]; }
   }
+  // 5.0 map mutators: one hazard theme per match
+  const mut = MUTATORS[opts.mutator] ? opts.mutator : A || s.siege ? 'none' : ['none', 'lava', 'ice', 'portals'][ri(s, 4)];
+  s.mutator = mut;
+  if (mut === 'lava' || mut === 'ice') {
+    for (let c = 0; c < (mut === 'lava' ? 4 : 5); c++) {
+      const p = randFree(2); if (!p) continue;
+      let [x, y] = p;
+      for (let k = 0; k < (mut === 'lava' ? 4 : 6); k++) { if (free(x, y)) set(x, y, mut); const d = ORTH[ri(s, 4)]; x += d[0]; y += d[1]; }
+    }
+  } else if (mut === 'portals') {
+    for (let k = 0, made = 0; k < 40 && made < 2; k++) {
+      const p = randFree(2); if (!p) break;
+      const [x, y] = p, mx = SIZE - 1 - x, my = SIZE - 1 - y;
+      if (Math.abs(mx - x) + Math.abs(my - y) < 6 || !free(mx, my)) continue;
+      set(x, y, 'portal', { pair: made }); set(mx, my, 'portal', { pair: made }); reserved.add(y * SIZE + x); reserved.add(my * SIZE + mx); made++;
+    }
+  }
   for (let i = 0; i < Math.round(20 * sc); i++) { const p = randFree(1); if (p) set(p[0], p[1], 'crate', { hp: 1 }); }
   for (let i = 0; i < Math.round(12 * sc); i++) { const p = randFree(1); if (p) s.items.push({ x: p[0], y: p[1], k: 'shard', n: 1 }); }
 
@@ -117,7 +144,8 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     const [x, y] = spawnOrder[i];
     const u = {
       id: s.nextId++, pid: p.pid, name: p.name, bot: !!p.isBot, kind: 'player', slot: i,
-      color: PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter', trail: p.trail || 'none', title: String(p.title || '').slice(0, 24),
+      team: s.teams ? Math.floor(i / s.teams) : s.siege ? 0 : null,
+      color: s.teams ? TEAM_COLORS[Math.floor(i / s.teams) % TEAM_COLORS.length] : PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter', trail: p.trail || 'none', title: String(p.title || '').slice(0, 24),
       piece: 'pawn', hone: {}, pts: { ...p.build.pts }, passive: p.build.passive, equips: { ...p.build.equips },
       x, y, hp: 1, gauge: rand(s) * 40, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [],
       alive: true, kills: 0, momentum: 0, mark: null, place: 0, dmgDealt: 0, attune: 0, ult: 0, ults: 0, botLevel: p.botLevel || 'normal', pref: rand(s) < 0.5 ? 'knight' : 'bishop',
@@ -132,7 +160,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     const c = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) === 2 && free(u.x + dx, u.y + dy) && !s.items.some((it) => it.x === u.x + dx && it.y === u.y + dy)) c.push([u.x + dx, u.y + dy]);
     if (c.length) { const [x, y] = c[ri(s, c.length)]; s.items.push({ x, y, k: 'shard', n: 1 }); }
   }
-  for (let i = 0; i < (A ? 2 : Math.round(6 * sc)); i++) {
+  for (let i = 0; i < (A ? 2 : s.siege ? 0 : Math.round(6 * sc)); i++) {
     const p = randFree(A ? 2 : 3); if (!p) continue;
     const [x, y] = p;
     const h = {
@@ -152,7 +180,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
 // ---------- tutorial arena ----------
 export const ARENA = { x0: 4, y0: 5, x1: 11, y1: 11 };
 export function createTutorial(player) {
-  const s = createMatch([player], 7);
+  const s = createMatch([player], 7, { mutator: 'none' });
   s.tutorial = true; s.units = s.units.filter((u) => u.kind === 'player'); s.items = [];
   for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
     const inside = x >= ARENA.x0 && x <= ARENA.x1 && y >= ARENA.y0 && y <= ARENA.y1;
@@ -206,7 +234,7 @@ export function canUse(s, u, slot) {
 
 // ---------- abilities ----------
 export function slotAbility(u, slot) {
-  if (u.kind === 'hollow') return slot === 'atk' ? 'hollowClaw' : null;
+  if (u.kind === 'hollow') return slot === 'atk' ? (u.boss ? 'colossusSlam' : 'hollowClaw') : null;
   if (slot === 'atk') return PIECES[u.piece].attack;
   if (slot === 'sig') return PIECES[u.piece].sig;
   if (slot === 'eq') return u.piece === 'king' ? null : u.equips[u.piece] || PIECES[u.piece].equips[0];
@@ -251,7 +279,7 @@ export function abilityOptions(s, u, slot) {
     case 'hollowClaw':
     case 'royalStrike': for (const t of around8(u.x, u.y)) opt(t, [t], id === 'royalStrike' ? 1.4 : 1.0); break;
     case 'tstrike': case 'stagger':
-      for (const [dx, dy] of ORTH) { const tl = tShape(u, dx, dy); if (tl.length) opt(tl[0], tl, id === 'stagger' ? 0.9 : 1.0); } break;
+      for (const [dx, dy] of ORTH) { let tl = tShape(u, dx, dy); if (tl.length && isSolid(s, tl[0].x, tl[0].y)) tl = tl.slice(0, 1); if (tl.length) opt(tl[0], tl, id === 'stagger' ? 0.9 : 1.0); } break;
     case 'ray': for (const [dx, dy] of DIAG) { const tl = lineTiles(s, u, dx, dy, 3); if (tl.length) opt(tl[0], tl, 1.0); } break;
     case 'slam':
       for (const [dx, dy] of ORTH) {
@@ -355,30 +383,48 @@ export function abilityOptions(s, u, slot) {
         }
       } break;
     case 'execute':
-      for (const v of s.units) if (v.alive && v !== u && cheb(u, v) <= 2) opt(pt(v.x, v.y), [pt(v.x, v.y)], v.hp / stats(v).maxHp < 0.3 ? 2.5 : 1.0); break;
+      for (const v of s.units) if (v.alive && v !== u && !ally(u, v) && cheb(u, v) <= 2) opt(pt(v.x, v.y), [pt(v.x, v.y)], v.hp / stats(v).maxHp < 0.3 ? 2.5 : 1.0); break;
+    case 'tripwire':
+      for (const t of around8(u.x, u.y)) if (canStand(s, t.x, t.y) && !isVoid(s, t.x, t.y) && !isCracked(s, t.x, t.y) && !s.items.some((i) => i.x === t.x && i.y === t.y)) opt(t, [t], 0, { kind: 'trap', util: 3 });
+      break;
+    case 'lance':
+      for (const [dx, dy] of ORTH) { const tl = lineTiles(s, u, dx, dy, 2); if (tl.length) opt(tl[0], tl, 1.25, { data: { dx, dy } }); } break;
+    case 'penance':
+      for (const [dx, dy] of DIAG) {
+        const tl = lineTiles(s, u, dx, dy, 4, { stopAtUnit: true }); const last = tl[tl.length - 1];
+        const v = last && unitAt(s, last.x, last.y);
+        if (v && !ally(u, v)) opt(last, [last], 1.0, { kind: 'shot', util: (1 - u.hp / stats(u).maxHp) * 10 });
+      } break;
+    case 'quake': { const tl = []; for (const [dx, dy] of ORTH) tl.push(...lineTiles(s, u, dx, dy, 2)); opt(self, tl, 0.8); break; }
+    case 'gambit': if (u.hp > stats(u).maxHp * 0.35) opt(self, [self], 0, { kind: 'buff', util: 5 }); break;
+    case 'colossusSlam': { const tl = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && inB(u.x + dx, u.y + dy)) tl.push(pt(u.x + dx, u.y + dy)); opt(self, tl, 1.25); break; }
   }
+  // no friendly fire: allies never count as hits
+  if (u.team != null) for (const q of o) q.hits = q.hits.filter((id) => !ally(u, unitById(s, id)));
   return o;
 }
 
 // ---------- damage ----------
 function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
-  if (s.over || !tgt.alive || mult <= 0) return 0;
+  if (s.over || !tgt.alive || mult <= 0 || ally(src, tgt)) return 0;
   const a = stats(src), d = stats(tgt);
   let m = mult * (0.9 + rand(s) * 0.2);
-  if (src.passive === 'first' && tgt.hp >= d.maxHp) m *= 1.5;
+  if (src.passive === 'first' && tgt.hp >= d.maxHp * 0.6) m *= 1.5;
   const crit = rand(s) < 0.1;
   if (crit) m *= 1.5;
   if (s.bloodMoon) m *= 1.3;
   if (tgt.piece === 'king') m *= 1.1;
   let dmg = Math.max(1, Math.round(a.atk * m * 30 / (30 + d.def * defMul(tgt))));
-  if (s.round < STEADFAST_ROUND && tgt.kind === 'player' && tgt.hp >= d.maxHp && dmg >= tgt.hp) { dmg = tgt.hp - 1; ev.push({ e: 'steadfast', id: tgt.id }); }
+  if (s.round < STEADFAST_ROUND && tgt.kind === 'player' && (tgt.hp >= d.maxHp || (s._guard && s._guard.has(tgt.id))) && dmg >= tgt.hp) { dmg = tgt.hp - 1; ev.push({ e: 'steadfast', id: tgt.id }); }
+  if (s.round < STEADFAST_ROUND && tgt.kind === 'player' && tgt.hp >= d.maxHp) (s._guard || (s._guard = new Set())).add(tgt.id);
   tgt.hp -= dmg;
   if (src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + dmg; chargeUlt(src, dmg * 1.1, ev); }
   if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
   ev.push({ e: 'dmg', id: tgt.id, src: src.id, n: dmg, crit });
   if (tgt.hp <= 0) kill(s, tgt, src, ev);
-  if (!s.over && tgt.alive && reflect && tgt.passive === 'thorns' && src !== tgt && cheb(src, tgt) <= 1 && src.alive) {
-    const r = Math.max(1, Math.round(dmg * 0.2));
+  if (!s.over && src.alive && src.passive === 'lifesteal' && src !== tgt) heal(s, src, Math.max(1, dmg * 0.1), ev);
+  if (!s.over && tgt.alive && reflect && tgt.passive === 'thorns' && src !== tgt && cheb(src, tgt) <= 1 && src.alive && !ally(src, tgt)) {
+    const r = Math.max(1, Math.round(dmg * 0.3));
     src.hp -= r; ev.push({ e: 'dmg', id: src.id, src: tgt.id, n: r, thorns: true });
     if (src.hp <= 0) kill(s, src, tgt, ev);
   }
@@ -395,6 +441,7 @@ function dealFixed(s, tgt, n, ev, tag) {
   tgt.hp -= dmg; ev.push({ e: 'dmg', id: tgt.id, n: dmg, [tag]: true });
   if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
   if (tgt.hp <= 0) kill(s, tgt, null, ev, tag);
+  return dmg;
 }
 function heal(s, u, n, ev) {
   const mx = stats(u).maxHp; const h = Math.min(mx - u.hp, Math.round(n));
@@ -407,9 +454,10 @@ function hitTile(s, src, x, y, ev) {
     ev.push({ e: 'crate', x, y });
     const r = rand(s);
     const extra = src && src.passive === 'scavenger' ? 1 : 0;
-    if (r < 0.6) s.items.push({ x, y, k: 'shard', n: 1 + extra });
+    const put = (it) => (isVoid(s, x, y) ? dropNear(s, x, y, it) : s.items.push({ x, y, ...it }));
+    if (r < 0.6) put({ k: 'shard', n: 1 + extra });
     else {
-      s.items.push({ x, y, k: r < 0.82 ? 'potion' : 'haste', n: 1 });
+      put({ k: r < 0.82 ? 'potion' : 'haste', n: 1 });
       if (extra) dropNear(s, x, y, { k: 'shard', n: 1 });
     }
   } else if (t.t === 'chest') {
@@ -428,6 +476,7 @@ function hitTile(s, src, x, y, ev) {
 function dropNear(s, x, y, item) {
   let cands = [pt(x, y), ...around8(x, y)].filter((t) => !isSolid(s, t.x, t.y) && !isVoid(s, t.x, t.y));
   if (!cands.length) cands = freeTiles(s, 0).slice(0, 1);
+  if (!cands.length) { for (let yy = 0; yy < SIZE && !cands.length; yy++) for (let xx = 0; xx < SIZE && !cands.length; xx++) if (!isVoid(s, xx, yy) && !isSolid(s, xx, yy)) cands = [pt(xx, yy)]; }
   const spot = cands.find((t) => !s.items.some((i) => i.x === t.x && i.y === t.y)) || cands[0] || pt(x, y);
   if (isSolid(s, spot.x, spot.y) && tileAt(s, spot.x, spot.y) && tileAt(s, spot.x, spot.y).t !== 'out') s.tiles[spot.y * SIZE + spot.x] = { t: 'floor' };
   const same = s.items.find((i) => i.x === spot.x && i.y === spot.y && i.k === item.k && item.k === 'shard');
@@ -435,12 +484,14 @@ function dropNear(s, x, y, item) {
 }
 function aoe(s, u, tiles, mult, ev, onHit) {
   ev.push({ e: 'aoe', id: u.id, tiles, kind: mult > 0 ? 'hit' : 'fx' });
-  for (const t of tiles) {
-    const v = unitAt(s, t.x, t.y);
-    if (v && v !== u) { dealDamage(s, u, v, mult, ev); if (onHit && v.alive) onHit(v); }
-    else if (!v) hitTile(s, u, t.x, t.y, ev);
+  const victims = tiles.map((t) => unitAt(s, t.x, t.y)); // snapshot so knockback can't make a piece get hit twice
+  const done = new Set();
+  tiles.forEach((t, i) => {
     if (!u.alive || s.over) return;
-  }
+    const v = victims[i];
+    if (v && v !== u) { if (ally(u, v) || done.has(v.id) || !v.alive) return; done.add(v.id); dealDamage(s, u, v, mult, ev); if (onHit && v.alive) onHit(v); }
+    else if (!v && !unitAt(s, t.x, t.y)) hitTile(s, u, t.x, t.y, ev);
+  });
 }
 
 function kill(s, v, killer, ev, cause = null) {
@@ -451,23 +502,93 @@ function kill(s, v, killer, ev, cause = null) {
   const loot = (v.shards || 0);
   if (loot > 0) dropNear(s, v.x, v.y, { k: 'shard', n: loot });
   v.shards = 0;
-  if (v.piece === 'king') { dropNear(s, v.x, v.y, { k: 'crown', n: 1 }); ev.push({ e: 'msg', text: 'The Crown has fallen', tone: 'gold' }); }
+  if (v.piece === 'king') { dropNear(s, v.x, v.y, { k: 'shard', n: 4 }); ev.push({ e: 'msg', text: 'The Crown has shattered', tone: 'gold' }); }
+  if (v.kind === 'hollow' && v.boss && s.siege && !s.crownSpawned && v.wave < s.siege.waves) { s.crownSpawned = true; dropNear(s, v.x, v.y, { k: 'crown', n: 1 }); ev.push({ e: 'msg', text: 'The Colossus dropped the Crown', tone: 'gold' }); }
+  const de = ev.find((q) => q.e === 'death' && q.id === v.id);
+  if (v.kind === 'hollow' && killer && killer.kind === 'player') killer.hk = (killer.hk || 0) + 1;
   if (v.kind === 'player') {
-    v.place = alivePlayers(s).length + 1;
-    s.log.push(`${killer && killer !== v ? killer.name : cause === 'meteor' ? 'A meteor' : 'The storm'} eliminated ${v.name}`);
+    const wasKing = v.piece === 'king';
+    s.log.push(`${killer && killer !== v ? killer.name : cause === 'meteor' ? 'A meteor' : cause === 'lava' ? 'The lava' : cause === 'trap' ? 'A trap' : 'The storm'} eliminated ${v.name}`);
     if (killer && killer !== v && killer.kind === 'player') {
       killer.kills++;
       if (killer.passive === 'momentum') killer.momentum = Math.min(4, killer.momentum + 1);
-      const de = ev.find((q) => q.e === 'death' && q.id === v.id);
-      if (de) { de.streak = killer.kills; if (!s.firstBlood) { s.firstBlood = true; de.firstBlood = true; } }
+      if (de) {
+        de.streak = killer.kills; if (!s.firstBlood) { s.firstBlood = true; de.firstBlood = true; }
+        if (v.kills >= 3) de.shutdown = true;
+        if (wasKing) de.regicide = true;
+      }
     }
-    const left = alivePlayers(s);
-    if (left.length <= 1) {
-      s.over = true; s.winner = left[0] ? left[0].id : null;
-      if (left[0]) left[0].place = 1;
-      ev.push({ e: 'over', winner: s.winner });
+    if (s.siege) {
+      v.place = 0;
+      if (alivePlayers(s).length) { dropNear(s, v.x, v.y, { k: 'soul', n: 1, id: v.id, team: v.team, exp: s.round + 3 }); ev.push({ e: 'soul', id: v.id, x: v.x, y: v.y }); }
+      else { s.over = true; s.winner = null; s.items = s.items.filter((i) => i.k !== 'soul'); for (const p of s.units) if (p.kind === 'player') p.place = 2; ev.push({ e: 'over', winner: null, siege: true, wave: s.siege.wave }); }
+      return;
     }
+    const mates = s.units.filter((w) => w.kind === 'player' && w.alive && ally(w, v));
+    if (mates.length) {
+      v.place = 0;
+      dropNear(s, v.x, v.y, { k: 'soul', n: 1, id: v.id, team: v.team, exp: s.round + 3 });
+      ev.push({ e: 'soul', id: v.id, x: v.x, y: v.y });
+    } else {
+      const place = teamsAlive(s).size + 1;
+      for (const w of s.units) if (w.kind === 'player' && (w === v || (v.team != null && w.team === v.team))) w.place = place;
+      if (v.team != null) s.items = s.items.filter((i) => !(i.k === 'soul' && i.team === v.team));
+    }
+    const left = teamsAlive(s);
+    if (left.size <= 1) {
+      const alive = alivePlayers(s);
+      s.over = true; s.winner = alive[0] ? alive[0].id : null;
+      for (const w of s.units) if (w.kind === 'player' && alive[0] && (w === alive[0] || ally(w, alive[0]))) w.place = 1;
+      ev.push({ e: 'over', winner: s.winner, team: alive[0] ? alive[0].team : null });
+    } else if (left.size === 2 && !s.finalTwo && s.units.filter((w) => w.kind === 'player').length > 2) { s.finalTwo = true; ev.push({ e: 'final', teams: !!s.teams }); }
+  } else if (v.wave && s.siege && !s.units.some((w) => w.alive && w.wave)) {
+    siegeCleared(s, ev);
   }
+}
+
+// ---------- 5.0: Siege ----------
+export const isBossWave = (S, w) => w === S.waves || w === Math.floor(S.waves / 2);
+export const SIEGE_T = { spd: 0.4, c0: 1.2, cw: 0.3, hs: 0.1, as: 0.3, force: 4, boss: 0.8, ring: 3, pf0: 0.6, pf: 0.2 };
+function siegeCleared(s, ev) {
+  const S = s.siege;
+  if (S.wave >= S.waves) {
+    const alive = alivePlayers(s);
+    s.over = true; s.winner = alive[0] ? alive[0].id : null; s.siegeWon = true;
+    for (const p of s.units) if (p.kind === 'player') p.place = 1;
+    ev.push({ e: 'over', winner: s.winner, siege: true, won: true, wave: S.wave });
+    return;
+  }
+  S.next = s.round + 1;
+  for (const p of alivePlayers(s)) heal(s, p, stats(p).maxHp * 0.2, ev);
+  ev.push({ e: 'wave', phase: 'clear', n: S.wave, next: S.wave + 1, boss: isBossWave(S, S.wave + 1) });
+}
+function spawnWave(s, ev) {
+  const S = s.siege; S.wave++; S.next = 0; S.since = s.round;
+  const w = S.wave, nP = s.units.filter((u) => u.kind === 'player').length;
+  const boss = isBossWave(S, w);
+  // waves are sized to what the defenders can clear; leftovers count against the next wave so Hollows never pile up
+  const left = s.units.filter((h) => h.alive && h.wave).length;
+  const target = Math.min(14, Math.ceil((boss ? 0.5 : 1) * (SIEGE_T.c0 + SIEGE_T.cw * w) * nP));
+  const count = Math.max(boss ? 0 : 1, target - left);
+  const edge = []; for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (ringOf(x, y) <= SIEGE_T.ring && ringOf(x, y) >= 1 && canStand(s, x, y)) edge.push(pt(x, y));
+  const tiles = [];
+  const mk = (extra) => {
+    if (!edge.length) return null;
+    const t = edge.splice(ri(s, edge.length), 1)[0]; tiles.push(t);
+    const h = { id: s.nextId++, kind: 'hollow', name: 'Hollow', piece: 'hollow', x: t.x, y: t.y, hx: t.x, hy: t.y, hunt: true, wave: w,
+      gauge: rand(s) * 60, shards: 1, cd: { sig: 0, eq: 0 }, buffs: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow', ...extra };
+    h.hp = h.hpMax; s.units.push(h); return h;
+  };
+  const pf = SIEGE_T.pf0 + SIEGE_T.pf * nP; // fewer defenders, gentler Hollows
+  const hs = 1 + SIEGE_T.hs * (w - 1), as = (1 + SIEGE_T.as * (w - 1)) * pf;
+  for (let i = 0; i < count; i++) mk({ hpMax: Math.round(HOLLOW_STATS.hp * hs), atkB: Math.round(HOLLOW_STATS.atk * as), defB: HOLLOW_STATS.def + Math.floor(w / 3), spdB: Math.round(HOLLOW_STATS.spd + w * SIEGE_T.spd) });
+  if (boss) {
+    const big = w >= S.waves;
+    const b = mk({ boss: true, name: big ? 'Elder Colossus' : 'Colossus', hpMax: Math.round(((big ? 420 : 260) + nP * (big ? 120 : 70)) * SIEGE_T.boss), atkB: Math.round((big ? 26 : 19) * Math.sqrt(SIEGE_T.boss)), defB: big ? 12 : 9, spdB: 7, shards: 6, color: '#a06bff' });
+    if (b) ev.push({ e: 'msg', text: `${b.name} approaches`, tone: 'gold' });
+  }
+  ev.push({ e: 'wave', phase: 'start', n: w, of: S.waves, boss, tiles });
+  s.log.push(`Wave ${w} begins`);
 }
 
 // ---------- shards / attunement ----------
@@ -486,10 +607,28 @@ function gainShards(s, u, n, ev) {
 // ---------- landing / pickups ----------
 function land(s, u, ev) {
   const t = tileAt(s, u.x, u.y);
-  if (u.kind !== 'player') return;
+  // traps catch players and Hollows alike (never their owner or the owner's team)
+  for (let i = s.items.length - 1; i >= 0 && u.alive; i--) {
+    const it = s.items[i];
+    if (it.k !== 'trap' || it.x !== u.x || it.y !== u.y) continue;
+    const owner = unitById(s, it.owner);
+    if (it.owner === u.id || (owner && ally(owner, u)) || (u.team != null && it.team === u.team)) continue;
+    s.items.splice(i, 1);
+    ev.push({ e: 'trap', id: u.id, x: u.x, y: u.y, by: it.owner });
+    u.gauge -= 35;
+    if (owner && owner.alive) dealDamage(s, owner, u, 0.9, ev, { reflect: false }); else dealFixed(s, u, 10, ev, 'trap');
+  }
+  if (u.kind !== 'player' || !u.alive) return;
   for (let i = s.items.length - 1; i >= 0; i--) {
     const it = s.items[i];
-    if (it.x !== u.x || it.y !== u.y) continue;
+    if (it.x !== u.x || it.y !== u.y || it.k === 'trap') continue;
+    if (it.k === 'soul') {
+      const dead = unitById(s, it.id);
+      if (dead && !dead.alive && ally(u, dead)) { if (revive(s, dead, u, ev)) s.items.splice(i, 1); continue; }
+      s.items.splice(i, 1);
+      { ev.push({ e: 'soulDeny', id: u.id, x: u.x, y: u.y, of: it.id }); gainShards(s, u, 1, ev); }
+      continue;
+    }
     s.items.splice(i, 1);
     if (it.k === 'shard') { ev.push({ e: 'pickup', id: u.id, k: 'shard', n: it.n }); gainShards(s, u, it.n, ev); }
     else if (it.k === 'potion') { ev.push({ e: 'pickup', id: u.id, k: 'potion' }); heal(s, u, stats(u).maxHp * 0.35, ev); }
@@ -501,9 +640,25 @@ function land(s, u, ev) {
     heal(s, u, stats(u).maxHp * 0.4, ev);
   }
   if (t && t.t === 'bramble') { u.gauge -= 25; ev.push({ e: 'bramble', id: u.id }); }
+  if (t && t.t === 'portal' && !s._porting) {
+    let dest = null;
+    for (let y = 0; y < SIZE && !dest; y++) for (let x = 0; x < SIZE && !dest; x++) { const q = s.tiles[y * SIZE + x]; if (q.t === 'portal' && q.pair === t.pair && (x !== u.x || y !== u.y) && canStand(s, x, y) && !isVoid(s, x, y)) dest = pt(x, y); }
+    if (dest) { s._porting = true; ev.push({ e: 'portal', id: u.id, from: pt(u.x, u.y), to: dest }); moveUnit(s, u, dest.x, dest.y, ev, 'portal'); s._porting = false; }
+  }
+}
+function revive(s, v, by, ev) {
+  const spot = around8(by.x, by.y).find((t) => canStand(s, t.x, t.y) && !isVoid(s, t.x, t.y));
+  if (!spot) return false;
+  v.alive = true; v.x = spot.x; v.y = spot.y; v.place = 0; v.buffs = []; v.gauge = 40; v.mark = null;
+  if (v.piece === 'king') { v.piece = v.kingFrom || 'pawn'; v.kingStats = null; v.cd = { sig: 0, eq: 0 }; } // the Crown shattered when they fell
+  v.hp = Math.max(1, Math.round(stats(v).maxHp * 0.4));
+  ev.push({ e: 'revive', id: v.id, by: by.id, x: v.x, y: v.y });
+  s.log.push(`${by.name} revived ${v.name}`);
+  return true;
 }
 function crown(s, u, ev) {
-  const st = baseStats(u);
+  let st = baseStats(u);
+  if (PIECES[u.piece].tier < 3 && alivePlayers(s).length > 3) { const r = baseStats({ ...u, piece: 'rook' }); st = { hp: Math.max(st.hp, Math.round(r.hp * 0.85)), atk: Math.max(st.atk, Math.round(r.atk * 0.85)), def: Math.max(st.def, Math.round(r.def * 0.85)), spd: st.spd }; }
   const before = stats(u).maxHp;
   st.maxHp = st.hp;
   u.kingFrom = u.piece;
@@ -517,6 +672,16 @@ function moveUnit(s, u, x, y, ev, how = 'step') {
   const from = pt(u.x, u.y);
   u.x = x; u.y = y;
   ev.push({ e: 'move', id: u.id, from, to: pt(x, y), how });
+  const tl = tileAt(s, x, y);
+  if (tl && tl.t === 'ice' && how !== 'ice' && how !== 'portal' && how !== 'swap') {
+    const dx = sgn(x - from.x), dy = sgn(y - from.y);
+    let n = 0;
+    while (n < 3 && (dx || dy) && tileAt(s, u.x, u.y) && tileAt(s, u.x, u.y).t === 'ice' && canStand(s, u.x + dx, u.y + dy)) {
+      land(s, u, ev); if (!u.alive) return;
+      const a = pt(u.x, u.y); u.x += dx; u.y += dy; n++;
+      ev.push({ e: 'move', id: u.id, from: a, to: pt(u.x, u.y), how: 'ice' });
+    }
+  }
   land(s, u, ev);
 }
 function pushUnit(s, src, v, dx, dy, dist, bonus, ev) {
@@ -543,6 +708,7 @@ export function useAbility(s, u, slot, anchor, ev) {
   const o = opts.find((q) => q.anchor.x === anchor.x && q.anchor.y === anchor.y);
   if (!o) return false;
   ev.push({ e: 'ability', id: u.id, ab: id, slot, anchor, from: { x: u.x, y: u.y }, tiles: o.tiles, n: o.hits.length });
+  const pieceAtCast = u.piece;
   let cdOverride = null;
   switch (id) {
     case 'shove': {
@@ -626,11 +792,22 @@ export function useAbility(s, u, slot, anchor, ev) {
       if (u.alive) aoe(s, u, around8(u.x, u.y), o.mult, ev);
       break;
     }
+    case 'tripwire': {
+      const mine = s.items.filter((i) => i.k === 'trap' && i.owner === u.id);
+      if (mine.length >= 2) s.items.splice(s.items.indexOf(mine[0]), 1);
+      s.items.push({ x: o.anchor.x, y: o.anchor.y, k: 'trap', n: 1, owner: u.id, team: u.team });
+      ev.push({ e: 'trapSet', id: u.id, x: o.anchor.x, y: o.anchor.y });
+      break;
+    }
+    case 'lance': { const { dx, dy } = o.data; aoe(s, u, o.tiles, o.mult, ev, (v) => pushUnit(s, u, v, dx, dy, 1, 0.3, ev)); break; }
+    case 'penance': { const v = unitAt(s, o.anchor.x, o.anchor.y); ev.push({ e: 'aoe', id: u.id, tiles: o.tiles, kind: 'hit' }); if (v) { const d = dealDamage(s, u, v, o.mult, ev); if (u.alive && d > 0) heal(s, u, d * 0.5, ev); } break; }
+    case 'quake': aoe(s, u, o.tiles, o.mult, ev, (v) => { v.gauge -= 25; ev.push({ e: 'stagger', id: v.id }); }); break;
+    case 'gambit': { const cost = Math.max(1, Math.round(u.hp * 0.12)); u.hp = Math.max(1, u.hp - cost); u.buffs.push({ k: 'atk', v: 1.4, t: 2 }); ev.push({ e: 'dmg', id: u.id, n: cost, self: true }, { e: 'buff', id: u.id, k: 'atk' }); break; }
     default:
       aoe(s, u, o.tiles, o.mult, ev);
   }
   if (slot === 'ult') { u.ult = 0; u.ults = (u.ults || 0) + 1; }
-  else if (slot !== 'atk') u.cd[slot] = cdOverride ?? abilityCd(u, id);
+  else if (slot !== 'atk' && u.piece === pieceAtCast) u.cd[slot] = cdOverride ?? abilityCd(u, id);
   if (!ABILITIES[id].free) s.turn.acted = true;
   return true;
 }
@@ -653,7 +830,7 @@ function promote(s, u, to, ev) {
   u.shards -= o.cost;
   if (o.type === 'evolve') { u.piece = to; u.cd = { sig: 0, eq: 0 }; u.mark = null; }
   else u.hone[u.piece] = (u.hone[u.piece] || 0) + 1;
-  u.hp = Math.max(1, Math.min(stats(u).maxHp, u.hp + stats(u).maxHp - before));
+  u.hp = Math.max(1, Math.min(stats(u).maxHp, u.hp + Math.max(0, stats(u).maxHp - before)));
   ev.push({ e: 'promote', id: u.id, piece: u.piece, hone: u.hone[u.piece] || 0, type: o.type });
   s.log.push(o.type === 'evolve' ? `${u.name} evolved into a ${PIECES[to].name}` : `${u.name} honed their ${PIECES[u.piece].name}`);
   return true;
@@ -665,7 +842,7 @@ export function applyAction(s, pid, a) {
   if (s.over || !a || typeof a !== 'object') return { ok: false, ev };
   const u = unitById(s, s.active);
   if (!u || u.pid !== pid) return { ok: false, ev };
-  let ok = false;
+  let ok = false; s._guard = null;
   if (a.type === 'move' && canMove(s, u)) {
     const m = legalMoves(s, u).find((q) => q.x === a.x && q.y === a.y);
     if (m) {
@@ -681,9 +858,12 @@ export function applyAction(s, pid, a) {
 
   if (ok) {
     s.v++;
+    const kos = ev.filter((q) => q.e === 'death' && q.by === u.id && (unitById(s, q.id) || {}).kind === 'player').length;
+    if (kos >= 2) ev.push({ e: 'multi', id: u.id, n: kos });
     const done = a.type === 'end' || !u.alive || (s.turn.acted && (!canMove(s, u) || legalMoves(s, u).length === 0));
     if (done && !s.over) nextTurn(s, ev);
   }
+  s._guard = null;
   return { ok, ev };
 }
 
@@ -714,8 +894,11 @@ export function nextTurn(s, ev) {
 function startTurn(s, u, ev) {
   u.buffs = u.buffs.filter((b) => --b.t > 0 || b.t === undefined);
   for (const k of ['sig', 'eq']) if (u.cd[k] > 0) u.cd[k]--;
-  if (u.passive === 'regen') heal(s, u, 2 + Math.floor((u.attune || 0) / 10), ev);
+  if (u.passive === 'regen') heal(s, u, 1 + Math.floor((u.attune || 0) / 10), ev);
   if (u.piece === 'king') heal(s, u, stats(u).maxHp * 0.02, ev);
+  if (s.teams && u.kind === 'player' && s.units.some((w) => w.alive && ally(u, w) && cheb(u, w) <= 2)) u.buffs.push({ k: 'def', v: 1.15, t: 1, bond: true });
+  const lt = tileAt(s, u.x, u.y);
+  if (lt && lt.t === 'lava') { dealFixed(s, u, Math.max(4, stats(u).maxHp * 0.08), ev, 'lava'); if (!u.alive) return; }
   if (s.storm.ring >= STORM.maxRing && u.kind === 'player') {
     const d = Math.max(3, Math.round(stats(u).maxHp * 0.06));
     u.hp -= d; ev.push({ e: 'dmg', id: u.id, n: d, storm: true });
@@ -748,7 +931,7 @@ function worldEvents(s, ev) {
   }
   const EV = (s.rules && s.rules.events) || 3;
   if (r < EV || r % EV !== 0) return;
-  const pool = (r < CALM_ROUNDS ? ['shardRain', 'supply'] : ['shardRain', 'meteor', 'bloodMoon', 'supply']).filter((k) => k !== s.lastEvent);
+  const pool = (r < CALM_ROUNDS || s.siege ? ['shardRain', 'supply'] : ['shardRain', 'meteor', 'bloodMoon', 'supply']).filter((k) => k !== s.lastEvent);
   const kind = pool[ri(s, pool.length)];
   s.lastEvent = kind;
   if (kind === 'shardRain') {
@@ -777,8 +960,15 @@ function onRound(s, ev) {
   for (const t of s.tiles) if (t.t === 'shrine' && t.cd > 0) t.cd--;
   const r = s.round;
   if (s.tutorial) return;
+  for (const it of s.items) if (it.k === 'soul' && r >= it.exp) { ev.push({ e: 'soulFade', of: it.id, x: it.x, y: it.y }); it.gone = true; }
+  s.items = s.items.filter((i) => !i.gone);
   worldEvents(s, ev);
   if (s.over) return;
+  if (s.siege) {
+    const S = s.siege;
+    if ((S.next && r >= S.next) || (S.wave > 0 && S.wave < S.waves && !S.next && r - S.since >= SIEGE_T.force)) spawnWave(s, ev);
+    else if (S.wave >= S.waves && r - S.since >= 8 && s.units.some((w) => w.alive && w.wave && !w.boss)) { ev.push({ e: 'msg', text: 'The last Hollows crumble. Only the Colossus remains.', tone: 'cyan' }); for (const h of s.units.filter((w) => w.alive && w.wave && !w.boss)) { kill(s, h, null, ev, 'crumble'); if (s.over) break; } }
+  }
   const R = s.rules || { first: STORM.firstCrack, every: STORM.every, crown: CROWN_ROUND };
   if (s.storm.ring < STORM.maxRing && r >= R.first && (r - R.first) % R.every === 0 && !s.storm.crack) {
     s.storm.crack = true;
@@ -787,7 +977,7 @@ function onRound(s, ev) {
     s.storm.crack = false; s.storm.ring++;
     s.items = s.items.filter((i) => i.k === 'crown' || !isVoid(s, i.x, i.y));
     for (const it of s.items) if (it.k === 'crown' && isVoid(s, it.x, it.y)) {
-      let c = null;
+      const ft = freeTiles(s, s.storm.ring + 2); let c = ft.length ? ft[ri(s, ft.length)] : null;
       for (let y = 0; y < SIZE && !c; y++) for (let x = 0; x < SIZE && !c; x++) if (!isVoid(s, x, y) && !isSolid(s, x, y) && !unitAt(s, x, y)) c = pt(x, y);
       if (!c) { c = pt(7, 7); if (isSolid(s, 7, 7)) s.tiles[7 * SIZE + 7] = { t: 'floor' }; }
       it.x = c.x; it.y = c.y;
@@ -822,7 +1012,7 @@ export function previewDamage(src, tgt, mult) {
   if (mult <= 0) return [0, 0];
   const a = stats(src), d = stats(tgt);
   let m = mult;
-  if (src.passive === 'first' && tgt.hp >= d.maxHp) m *= 1.5;
+  if (src.passive === 'first' && tgt.hp >= d.maxHp * 0.6) m *= 1.5;
   const k = 30 / (30 + d.def * defMul(tgt));
   return [Math.max(1, Math.round(a.atk * m * 0.9 * k)), Math.max(1, Math.round(a.atk * m * 1.1 * k))];
 }
@@ -830,6 +1020,23 @@ export function previewDamage(src, tgt, mult) {
 // ---------- AI ----------
 function estDmg(src, tgt, mult) { return Math.max(1, stats(src).atk * mult * 30 / (30 + stats(tgt).def * defMul(tgt))); }
 
+// Breadth-first step toward a target, so hunters walk around walls instead of getting stuck.
+function pathStep(s, u, target) {
+  const prev = new Map(); const start = u.y * SIZE + u.x; prev.set(start, -1);
+  const q = [start];
+  for (let qi = 0; qi < q.length; qi++) {
+    const c = q[qi], cx = c % SIZE, cy = (c / SIZE) | 0;
+    if (Math.max(Math.abs(cx - target.x), Math.abs(cy - target.y)) <= 1 && c !== start) {
+      let k = c; while (prev.get(k) !== start) k = prev.get(k);
+      return pt(k % SIZE, (k / SIZE) | 0);
+    }
+    for (const [dx, dy] of DIRS8) {
+      const nx = cx + dx, ny = cy + dy, ni = ny * SIZE + nx;
+      if (!prev.has(ni) && canStand(s, nx, ny) && !isVoid(s, nx, ny)) { prev.set(ni, c); q.push(ni); }
+    }
+  }
+  return null;
+}
 export function planHollow(s, u) {
   if (u.dummy) return [{ type: 'end' }];
   const players = alivePlayers(s);
@@ -837,14 +1044,15 @@ export function planHollow(s, u) {
   for (const p of players) { const d = cheb(u, p); if (d < bd) { bd = d; target = p; } }
   const acts = [];
   const adj = (x, y) => players.find((p) => Math.max(Math.abs(p.x - x), Math.abs(p.y - y)) === 1);
-  if (target && bd <= 4) {
+  if (target && (bd <= 4 || u.hunt)) {
     let pos = pt(u.x, u.y);
     if (!adj(u.x, u.y)) {
-      const mv = legalMoves(s, u).filter((m) => !isVoid(s, m.x, m.y)).sort((a, b) => cheb(a, target) - cheb(b, target))[0];
-      if (mv && cheb(mv, target) < bd) { acts.push({ type: 'move', x: mv.x, y: mv.y }); pos = mv; }
+      let mv = legalMoves(s, u).filter((m) => !isVoid(s, m.x, m.y)).sort((a, b) => cheb(a, target) - cheb(b, target))[0];
+      if (u.hunt && (!mv || cheb(mv, target) >= bd)) mv = pathStep(s, u, target) || mv;
+      if (mv && (cheb(mv, target) < bd || u.hunt)) { acts.push({ type: 'move', x: mv.x, y: mv.y }); pos = mv; }
     }
     const v = adj(pos.x, pos.y);
-    if (v) acts.push({ type: 'ability', slot: 'atk', x: v.x, y: v.y });
+    if (v) acts.push(u.boss ? { type: 'ability', slot: 'atk', x: pos.x, y: pos.y } : { type: 'ability', slot: 'atk', x: v.x, y: v.y });
   } else if (cheb(u, { x: u.hx, y: u.hy }) > 1 || isVoid(s, u.x, u.y)) {
     const goal = isVoid(s, u.x, u.y) ? pt(7, 7) : pt(u.hx, u.hy);
     const mv = legalMoves(s, u).sort((a, b) => cheb(a, goal) - cheb(b, goal))[0];
@@ -854,6 +1062,8 @@ export function planHollow(s, u) {
   return acts;
 }
 
+// The AI rolls its own dice so replaying an action log reproduces the match exactly.
+function aiRand(s) { s.aiSeed = ((s.aiSeed ?? (s.seed ^ 0x9e3779b9)) * 1664525 + 1013904223) >>> 0; return s.aiSeed / 4294967296; }
 export function planBot(s, u) {
   const acts = [];
   // promotion first
@@ -870,7 +1080,8 @@ export function planBot(s, u) {
     u = { ...u, shards: u.shards - pick.cost, piece: pick.type === 'evolve' ? pick.to : u.piece, hone: pick.type === 'hone' ? { ...u.hone, [u.piece]: (u.hone[u.piece] || 0) + 1 } : u.hone, cd: pick.type === 'evolve' ? { sig: 0, eq: 0 } : u.cd };
   }
   const real = unitById(s, u.id);
-  const enemies = s.units.filter((v) => v.alive && v.id !== u.id);
+  const enemies = s.units.filter((v) => v.alive && v.id !== u.id && !ally(real, v));
+  const mates = s.teams ? s.units.filter((v) => v.alive && ally(real, v)) : [];
   const st = stats(u);
   const hpR = real.hp / st.maxHp;
   const safeRing = s.storm.ring + (s.storm.crack ? 1 : 0);
@@ -879,17 +1090,19 @@ export function planBot(s, u) {
   const posScore = (x, y) => {
     let sc = 0;
     if (isVoid(s, x, y)) sc -= 60; else if (ringOf(x, y) < safeRing) sc -= 25;
-    if (ringOf(x, y) < safeRing + 1 && s.round >= STORM.firstCrack - 1) sc -= 4;
+    if (ringOf(x, y) < safeRing + 1 && s.round >= s.rules.first - 1) sc -= 4;
     for (const it of shardItems) {
       const d = Math.max(Math.abs(it.x - x), Math.abs(it.y - y));
-      const val = it.k === 'crown' ? 70 : it.k === 'shard' ? 14 * it.n : it.k === 'potion' ? (1 - hpR) * 30 : 6;
+      const val = it.k === 'crown' ? 70 : it.k === 'shard' ? 14 * it.n : it.k === 'potion' ? (1 - hpR) * 30 : it.k === 'trap' ? 0 : it.k === 'soul' ? (it.team === real.team ? 90 : 20) : 6;
       if (d === 0) sc += val; else sc += val / (d + 1.5) * 0.6;
     }
     const t = tileAt(s, x, y);
     if (t.t === 'shrine' && t.cd === 0) sc += (1 - hpR) * 40;
     if (t.t === 'bramble') sc -= 4;
+    if (t.t === 'lava') sc -= 14;
+    for (const m of mates) if (Math.max(Math.abs(m.x - x), Math.abs(m.y - y)) <= 2) sc += 4;
     let near = 99;
-    for (const e of enemies) if (e.kind === 'player') near = Math.min(near, Math.max(Math.abs(e.x - x), Math.abs(e.y - y)));
+    for (const e of enemies) if (e.kind === 'player' || s.siege) near = Math.min(near, Math.max(Math.abs(e.x - x), Math.abs(e.y - y)));
     if (near < 99) sc += hpR > 0.4 ? -near * 1.4 : near * 1.2;
     // threat: enemies adjacent
     const adj = enemies.filter((e) => Math.max(Math.abs(e.x - x), Math.abs(e.y - y)) <= 1).length;
@@ -903,8 +1116,9 @@ export function planBot(s, u) {
       for (const hid of o.hits) {
         const v = unitById(s, hid); if (!v) continue;
         const d = estDmg(u, v, o.mult);
-        sc += Math.min(d, v.hp) * (v.kind === 'player' ? 1.2 : 0.8);
-        if (d >= v.hp) sc += v.kind === 'player' ? 45 : 18 + v.shards * 6;
+        const prime = v.kind === 'player' || (s.siege && v.wave); // in Siege the Hollows are the enemy
+        sc += Math.min(d, v.hp) * (prime ? 1.2 : 0.8);
+        if (d >= v.hp) sc += prime ? 45 + (v.boss ? 60 : 0) : 18 + v.shards * 6;
         if (v.piece === 'king') sc += 10;
       }
       if (o.kind === 'charge' || o.kind === 'dash' || o.kind === 'leap') sc += posScore(o.anchor.x, o.anchor.y) * 0.3;
@@ -930,7 +1144,7 @@ export function planBot(s, u) {
         if (best && bs > as) { as = bs; bestAct = { slot, o: best }; }
       }
     }
-    const noise = u.botLevel === 'easy' ? rand(s) * 30 : u.botLevel === 'hard' ? 0 : rand(s) * 4;
+    const noise = u.botLevel === 'easy' ? aiRand(s) * 30 : u.botLevel === 'hard' ? 0 : aiRand(s) * 4;
     const total = ps + as * (u.botLevel === 'easy' ? 0.6 : u.botLevel === 'hard' ? 1.25 : 1) + (m.stay ? 0.5 : 0) + noise;
     if (total > top) { top = total; plan = { m, bestAct }; }
   }

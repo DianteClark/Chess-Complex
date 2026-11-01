@@ -4,7 +4,7 @@ import { abilityOptions, legalMoves } from './engine.js';
 import { drawPiece, pieceIcon } from './pieces.js';
 
 const ORDER = ['pawn', 'knight', 'bishop', 'rook', 'queen', 'king'];
-const TARGETS = { shove: [[1, 0]], pickpocket: [[1, 0]], transpose: [[2, -2]], castling: [[0, -3]], execute: [[2, 1]], charge: [[0, -3]], siege: [[0, -4]] };
+const TARGETS = { shove: [[1, 0]], pickpocket: [[1, 0]], transpose: [[2, -2]], castling: [[0, -3]], execute: [[2, 1]], charge: [[0, -3]], siege: [[0, -4]], penance: [[3, -3]] };
 
 function synthState(piece, abilityId) {
   const tiles = []; for (let i = 0; i < 256; i++) tiles.push({ t: 'floor' });
@@ -75,7 +75,7 @@ export function renderCodex(tab, el, profile) {
     el.innerHTML = ORDER.map((pc) => {
       const P = PIECES[pc];
       const cost = pc === 'pawn' ? 'Starting piece' : pc === 'king' ? 'Claim the Crown' : `Evolve: ${EVOLVE_COST[P.tier]} shards`;
-      const stats = pc === 'king' ? 'Your stats x1.1 HP, +2 ATK, +1 DEF, slower. Heals 3% per turn.' : `Base: HP ${P.hp} - ATK ${P.atk} - DEF ${P.def} - SPD ${P.spd} (your build adds on top)`;
+      const stats = pc === 'king' ? 'Your HP x1.05 +5, +1 ATK, +1 DEF, slower. Heals 2% per turn, takes 10% more damage, charges its ultimate at half speed, and gets no attunement.' : `Base: HP ${P.hp} - ATK ${P.atk} - DEF ${P.def} - SPD ${P.spd} (your build adds on top)`;
       const rows = [abilityRow(pc, P.attack, 'atk', skin), abilityRow(pc, P.sig, 'sig', skin), ...P.equips.map((e) => abilityRow(pc, e, 'eq', skin)), abilityRow(pc, P.ult, 'ult', skin)].join('');
       return `<details class="cx-piece" ${pc === 'pawn' ? 'open' : ''}><summary><img src="${pieceIcon(pc, skin, null, 56)}" alt=""><div><b>${P.name}</b><span>${cost}</span></div><i class="chev"></i></summary>
         <div class="cx-body"><div class="cx-move"><img src="${diagram(pc, 'move', 96, skin)}" alt=""><div><b>Movement</b><p>${P.moveDesc}</p><em>${stats}</em></div></div>${rows}</div></details>`;
@@ -89,7 +89,7 @@ export function renderCodex(tab, el, profile) {
       <div class="panel"><div class="lbl">Attunement</div><div class="cx-line"><p>Every shard you collect permanently adds +${ATTUNE.hp * 100}% HP, +${ATTUNE.atk * 100}% ATK and +${ATTUNE.def * 100}% DEF, plus +1 SPD every ${ATTUNE.spdEvery} shards, up to ${ATTUNE.max}. Spending shards never removes it. Every 5 adds a crystal orbiting your piece.</p></div></div>
       <div class="panel"><div class="lbl">Promotion</div><div class="cx-line"><p>The ladder is fixed: Pawn, then Knight or Bishop (${EVOLVE_COST[2]}), then Rook (${EVOLVE_COST[3]} more), then Queen (${EVOLVE_COST[4]} more). The Promote menu shows every rung, and you can climb several at once if you have the shards: Pawn straight to Rook is ${EVOLVE_COST[2] + EVOLVE_COST[3]}, straight to Queen ${EVOLVE_COST[2] + EVOLVE_COST[3] + EVOLVE_COST[4]}. Promoting never costs your action. Climbing in one jump costs the same as climbing step by step, so there is never a reason to save: Knight now plus Rook later is the same total. Or Hone your current piece for +15% stats per level and a stronger Signature (Pawn ${honeCost(0, 1)}/${honeCost(1, 1)}/${honeCost(2, 1)}, Knight or Bishop ${honeCost(0, 2)}/${honeCost(1, 2)}/${honeCost(2, 2)}, Rook ${honeCost(0, 3)}/${honeCost(1, 3)}/${honeCost(2, 3)}, Queen ${honeCost(0, 4)}/${honeCost(1, 4)}/${honeCost(2, 4)}). Hone levels stay with that piece. Before round 6 a player at full HP cannot be eliminated by a single hit (Steadfast).</p></div></div>
       <div class="panel"><div class="lbl">The Storm</div><div class="cx-line"><p>From round 5 the outer ring cracks, then collapses a round later, every 3 rounds. The void burns 20% max HP per turn. When the board is fully closed, everyone burns 6% per turn.</p></div></div>
-      <div class="panel"><div class="lbl">The Crown</div><div class="cx-line"><p>Appears at the centre on round 7. The holder becomes the King: more HP, healing every turn, single steps, and a new ultimate. Kill the King and the Crown drops where they fell.</p></div></div>
+      <div class="panel"><div class="lbl">The Crown</div><div class="cx-line"><p>Appears on round 7 somewhere safe. The holder becomes the King: more HP, healing every turn, single steps, and a new ultimate. A Knight or Bishop who claims it with 4+ players left is lifted to near-Rook strength. Kill the King and the Crown shatters into 4 shards: there is only ever one King per match.</p></div></div>
       <div class="panel"><div class="lbl">World Events</div>${Object.values(WORLD_EVENTS).map((w) => `<div class="cx-line"><b>${w.name}</b><p>${w.desc}.</p></div>`).join('')}<p class="hint">One hits every third round, starting on round 3.</p></div>
       <div class="panel"><div class="lbl">Terrain</div>
         <div class="cx-line"><b>Walls</b><p>Block movement, slides and most shots.</p></div>
@@ -97,7 +97,19 @@ export function renderCodex(tab, el, profile) {
         <div class="cx-line"><b>Crates</b><p>Break in one hit. Usually a shard, sometimes a potion or haste.</p></div>
         <div class="cx-line"><b>Brambles</b><p>Stop sliding pieces and cost initiative to step on.</p></div>
         <div class="cx-line"><b>Shrines</b><p>Heal 40% once, then recharge for 4 rounds.</p></div>
-        <div class="cx-line"><b>Hollows</b><p>Neutral ghosts that guard shard caches. They wake up when you get close and drop 2 shards.</p></div></div>`;
+        <div class="cx-line"><b>Hollows</b><p>Neutral ghosts that guard shard caches. They wake up when you get close and drop 2 shards.</p></div></div>
+      <div class="panel"><div class="lbl">Map Hazards</div><p class="hint">Most Royale, Blitz and Squads matches roll one hazard theme, announced at the start.</p>
+        <div class="cx-line"><b>Magma Rift</b><p>Lava pools burn 8% max HP to anyone who starts a turn on them. Great places to shove people.</p></div>
+        <div class="cx-line"><b>Frostbite</b><p>Anything that lands on ice keeps sliding in the same direction, up to 3 tiles. Pushes slide too.</p></div>
+        <div class="cx-line"><b>Warpgates</b><p>Two pairs of portals on opposite sides of the board. Step in and you arrive at the partner gate if it is free.</p></div></div>
+      <div class="panel"><div class="lbl">Squads</div>
+        <div class="cx-line"><b>No friendly fire</b><p>Your attacks pass over your teammate. Area attacks are safe to throw next to them.</p></div>
+        <div class="cx-line"><b>Bond</b><p>Start your turn within 2 tiles of a teammate for +15% DEF.</p></div>
+        <div class="cx-line"><b>Souls</b><p>A fallen teammate leaves a soul for 3 rounds. Step on it to revive them at 40% HP. Enemies can step on it to shatter it for a shard.</p></div></div>
+      <div class="panel"><div class="lbl">Siege</div>
+        <div class="cx-line"><b>Waves</b><p>Eight waves of Hollows come from the edges and hunt you down, growing faster and tougher each wave. The next wave arrives one round after you clear the last, or after 4 rounds; Hollows still standing count against its size. To win, clear the last wave and beat the Elder Colossus.</p></div>
+        <div class="cx-line"><b>Colossus</b><p>Waves 4 and 8 bring a Colossus that slams every tile around it. The first one drops the Crown.</p></div>
+        <div class="cx-line"><b>Holding on</b><p>Clearing a wave heals everyone 20%. Fallen allies leave souls just like in Squads.</p></div></div>`;
   } else if (tab === 'combos') {
     const found = profile.discovered || [];
     el.innerHTML = `<p class="hint center">A few starting ideas. The best combos are yours to find.</p>

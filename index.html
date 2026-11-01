@@ -70,7 +70,7 @@
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v3.1</div>
+    <div class="version">v5.0</div>
   </section>
 
   <!-- LOADOUT -->
@@ -218,6 +218,10 @@
         <div class="lbl">Title <span class="pts" id="title-count"></span></div>
         <div class="titles" id="title-list"></div>
       </div>
+      <div class="panel">
+        <div class="lbl">Piece Mastery <span class="pts">Titles at 3, 6 and 10</span></div>
+        <div class="mastery" id="mastery-list"></div>
+      </div>
       <div class="lbl" style="padding: 0 4px">Achievements <span class="pts" id="ach-count"></span></div>
       <div id="ach-list"></div>
       <div class="panel" style="margin-top:12px">
@@ -345,6 +349,13 @@
         <p class="hint center" style="margin:8px 0 0">Forfeiting an unfinished match earns no rewards.</p>
       </div>
     </div>
+    <div role="dialog" aria-modal="true" class="modal hidden" id="m-potm">
+      <div class="modal-box potm-box">
+        <div class="potm-head"><span>Play of the Match</span><b id="potm-name"></b><em id="potm-sub"></em></div>
+        <canvas id="potm-c"></canvas>
+        <div class="row2"><button class="btn wide" data-act="potm-replay">Replay</button><button class="btn wide gold" data-act="potm-close">Back to Results</button></div>
+      </div>
+    </div>
     <div role="dialog" aria-modal="true" class="modal hidden" id="m-dead">
       <div class="modal-box">
         <h3 class="red">Eliminated</h3>
@@ -366,6 +377,7 @@
         <div class="r-recap hidden" id="r-recap"></div>
         <div class="r-quests" id="r-quests"></div>
         <ol class="r-board" id="r-board"></ol>
+        <button class="btn wide potm hidden" data-act="potm" id="btn-potm">Play of the Match</button>
         <div class="row2"><button class="btn big gold wide shine hidden" data-act="keep-spectating" id="btn-keepspec">Spectate</button><button class="btn big wide" data-act="to-title" id="btn-menu">Menu</button><button class="btn big gold wide shine" data-act="rematch" id="btn-rematch">Play Again</button></div>
       </div>
     </div>
