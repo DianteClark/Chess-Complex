@@ -199,3 +199,6 @@
 }
 body.reduced .dt.show::after, body.reduced .dh .dh-sweep { animation: none !important; }
 body.bigtext .dh-sub { font-size: 13px; } body.bigtext .dh-kick { font-size: 12px; }
+
+/* A0 integration fixes (10.0 QA): 11px text floor */
+.dh-kick, .dh-sub { font-size: 11px; }

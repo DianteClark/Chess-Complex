@@ -357,13 +357,13 @@ function onProfileClick(e) {
 
 // ---------- daily login ----------
 // Shows the daily reward once per session on the title screen, waiting until splash, intro and other dialogs are gone.
-export function maybeLogin(tries = 12) {
+export function maybeLogin(tries = 3) {
   if (S.loginShown) return; const p = P(); const st = loginStatus(p);
   const q = new URLSearchParams(location.search);
   if (q.get('join') || q.get('net') === 'local') return; // never get in the way of an invite link or a local test session
   if (st.claimed) return;
   const busy = $$('.modal:not(.hidden)').length || document.querySelector('.sequel') || ($('#splash') && !$('#splash').classList.contains('out')) || !$('#s-title.active');
-  if (busy) { if (tries > 0) setTimeout(() => maybeLogin(tries - 1), 1500); return; }
+  if (busy) { if (tries > 0) setTimeout(() => maybeLogin(tries - 1), 1000); return; } // short window only: never pop up under a finger mid-navigation
   S.loginShown = true;
   $('#lg-days').innerHTML = LOGIN_REWARDS.map((r, i) => `<div class="lg-d ${i + 1 < st.day ? 'got' : ''} ${i + 1 === st.day ? 'now' : ''} ${i === 6 ? 'big' : ''}"><span>Day ${i + 1}</span><i class="mark-ico"></i><b>${r.marks}</b>${r.xp ? `<em>+${r.xp} XP</em>` : ''}</div>`).join('');
   $('#lg-streak').textContent = st.streak > 1 ? `${st.streak} day streak` : 'Welcome back';

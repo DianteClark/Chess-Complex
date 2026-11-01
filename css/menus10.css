@@ -567,3 +567,11 @@ input[type=range]::-webkit-slider-runnable-track { background: linear-gradient(9
 .profile-chip:hover { filter: brightness(1.12); }
 .profile-chip:active { transform: translateY(2px); }
 .profile-chip::after { content: ''; width: 7px; height: 7px; margin-left: 4px; border-right: 2px solid var(--gold); border-top: 2px solid var(--gold); transform: rotate(45deg); opacity: .8; }
+
+/* A0 integration fixes (10.0 QA) */
+.title-fx .shaft { will-change: opacity, transform; }
+.screen:not(.active) * { animation-play-state: paused !important; }
+body.reduced .badge.new, body.reduced .act.promo.ready, body.reduced .new-player, body.reduced #new-player { animation: none !important; }
+.splash.out .sp-bar i, #splash.out .sp-bar i { animation: none !important; }
+.act .a-k, #ult-pct, .ult-pct, .attune-pill, #h-hptext { font-size: 11px; }
+.mode .chip, .modes .chip { font-size: 11px; }

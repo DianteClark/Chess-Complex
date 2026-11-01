@@ -198,9 +198,11 @@ export function initScene({ canvas, bg, getProfile, getScreen, settings }) {
     requestAnimationFrame(loop);
     try {
       const dt = Math.min(0.05, (now - last) / 1000); last = now; acc += dt;
-      const modalUp = !!document.querySelector('.modal.global:not(.hidden), .sequel');
+      if (!bg.on) return; // nothing to do during matches: skip the DOM query entirely
       const fps = reducedNow(settings) ? 12 : lowQ() ? 24 : 30;
-      if (!bg.on || modalUp || acc < 1 / fps) return;
+      if (acc < 1 / fps) return;
+      const modalUp = !!document.querySelector('.modal.global:not(.hidden), .sequel');
+      if (modalUp) return;
       const step = acc; acc = 0;
       if (lowQ() !== bg.wasLow) { bg.wasLow = lowQ(); resize(); }
       frame(step);

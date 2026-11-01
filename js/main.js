@@ -1472,10 +1472,11 @@ function confirmBox(title, body, yes, no, onYes, onNo) {
   $('#cf-no').onclick = () => { $('#m-confirm').classList.add('hidden'); sfx.tap(); if (onNo) onNo(); };
 }
 function leaveToTitle() {
+  const sess = session;
   const live = session && session.mode === 'host' && game.s && !game.s.over && screen === 'game';
   const friends = live ? [...session.conns.values()].length : 0;
   if (live && friends > 0) {
-    confirmBox('End the match?', `You are hosting. The match runs on your device, so leaving ends it for ${friends === 1 ? 'your friend' : `all ${friends} friends`}. Keep spectating to let them finish.`, 'End match for everyone', 'Keep spectating', () => { for (const c of session.conns.values()) c.send({ t: 'bye', reason: 'ended' }); setTimeout(() => { endSession(); go('title'); }, 250); }, () => { $('#m-results').classList.add('hidden'); game.startSpectate(); });
+    confirmBox('End the match?', `You are hosting. The match runs on your device, so leaving ends it for ${friends === 1 ? 'your friend' : `all ${friends} friends`}. Keep spectating to let them finish.`, 'End match for everyone', 'Keep spectating', () => { if (sess && sess.conns) for (const c of sess.conns.values()) c.send({ t: 'bye', reason: 'ended' }); setTimeout(() => { endSession(); go('title'); }, 250); }, () => { $('#m-results').classList.add('hidden'); game.startSpectate(); });
     return;
   }
   endSession(); go('title');
