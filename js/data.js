@@ -130,7 +130,7 @@ export const PASSIVES = {
   venom:       { name: 'Venom',       desc: 'Every ability that damages a piece adds a Poison stack.' },
   rime:        { name: 'Rime',        desc: 'Your hits Slow their targets. Damage against frozen targets +25%.' },
   aegis:       { name: 'Aegis',       desc: 'Every third turn, start with a Shield of 10% max HP.' },
-  adrenaline:  { name: 'Adrenaline',  desc: 'Drop below 50% HP and gain Haste and a Shield of 16% max HP. Recharges after 3 rounds.' },
+  adrenaline:  { name: 'Adrenaline',  desc: 'Drop below 50% HP and gain Haste and a Shield of 12% max HP. Recharges after 3 rounds.' },
   ward:        { name: 'Ward',        desc: 'Immune to Freeze, Stun and Slow. Burn and Poison on you last 1 turn less.' },
   opportunist: { name: 'Opportunist', desc: '+25% damage against targets with a harmful status.' },
 };

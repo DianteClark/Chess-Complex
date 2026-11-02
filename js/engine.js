@@ -546,7 +546,7 @@ export const harmed = (u) => !!(u && u.status && u.status.some((q) => STATUS[q.k
 export const ascended = (u) => !!(u && u.kind === 'player' && ASCEND[u.piece] && ((u.hone && u.hone[u.piece]) || 0) >= MAX_HONE);
 // Boss King tuning (tools/sim15.mjs sweeps these). converge/focus: how hard bots gang up on it.
 // Tuned with 300-game sweeps for ~40% King wins in 8-bot Royale (15.0). HP pool = (piece HP x hp + 5) x (1 + hpPer per rival beyond 1).
-export const KING_T = { hp: 0.95, hpPer: 0.04, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.015, converge: 1.2, focus: 16 };
+export const KING_T = { hp: 0.93, hpPer: 0.035, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
 export function addStatus(s, u, k, ev, o = {}) {
   if (!u || !u.alive || s.over || !STATUS[k]) return false;
   let t = Math.max(1, Math.round(o.t ?? STATUS[k].t));
@@ -738,7 +738,7 @@ function adrenaline(s, u, ev) {
   if (u.passive !== 'adrenaline' || !u.alive || u.kind !== 'player' || (u.adrenAt && s.round < u.adrenAt)) return;
   const mx = stats(u).maxHp; if (u.hp >= mx * 0.5) return;
   u.adrenAt = s.round + 3;
-  addStatus(s, u, 'haste', ev, { t: 2 }); addStatus(s, u, 'shield', ev, { n: mx * 0.16, t: 2 });
+  addStatus(s, u, 'haste', ev, { t: 2 }); addStatus(s, u, 'shield', ev, { n: mx * 0.12, t: 2 });
 }
 function dealFixed(s, tgt, n, ev, tag) {
   if (s.over || !tgt.alive) return;
@@ -1048,9 +1048,9 @@ function crown(s, u, ev) {
   u.kingFrom = u.piece;
   // 15.0 (C): the King is a raid boss. Its HP pool grows with the number of rivals left to fight it.
   const rivals = alivePlayers(s).filter((w) => w !== u && !ally(u, w)).length;
-  u.kingStats = { hp: Math.round((st.maxHp * KING_T.hp + 5) * (1 + KING_T.hpPer * Math.max(0, rivals - 1))), atk: st.atk + 1, def: st.def + 1, spd: Math.max(6, (PIECES[u.piece].spd || 10) + u.pts.spd - 3) };
+  u.kingStats = { hp: Math.max(before, Math.round((st.maxHp * KING_T.hp + 5) * (1 + KING_T.hpPer * Math.max(0, rivals - 1)))), atk: st.atk + 1, def: st.def + 1, spd: Math.max(6, (PIECES[u.piece].spd || 10) + u.pts.spd - 3) };
   u.piece = 'king'; u.cd = { sig: 0, eq: 0 }; u.mark = null;
-  u.hp += stats(u).maxHp - before;
+  u.hp = Math.max(1, Math.min(stats(u).maxHp, u.hp + stats(u).maxHp - before));
   ev.push({ e: 'crowned', id: u.id });
   if (!s.siege) { const mx = stats(u).maxHp, r = u.hp / mx; s.kingBoss = { id: u.id, name: u.name, hp: u.hp, hpMax: mx, phase: r <= 0.33 ? 2 : r <= 0.66 ? 1 : 0, aura: KING_T.aura }; }
   s.log.push(`${u.name} claimed the Crown`);
@@ -1356,7 +1356,9 @@ function startTurn(s, u, ev) {
   if (lt && lt.t === 'lava') { dealFixed(s, u, Math.max(4, stats(u).maxHp * 0.08), ev, 'lava'); if (!u.alive) return; }
   if (lt && lt.t === 'poison') locPoisonPool(s, u, ev); // 15.0 (W)
   if (s.storm.ring >= STORM.maxRing && u.kind === 'player') {
-    const d = Math.max(3, Math.round(stats(u).maxHp * 0.06));
+    // Sudden death escalates: 6% plus 2% per round since it began, so healers can never out-sustain it forever.
+    if (s.storm.sdAt == null) s.storm.sdAt = s.round;
+    const d = Math.max(3, Math.round(stats(u).maxHp * (0.06 + 0.02 * Math.max(0, s.round - s.storm.sdAt))));
     u.hp -= d; ev.push({ e: 'dmg', id: u.id, n: d, storm: true });
     if (u.hp <= 0) { kill(s, u, null, ev); return; }
   }

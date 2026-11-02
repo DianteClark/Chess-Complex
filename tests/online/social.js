@@ -237,8 +237,10 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
     run.check(t.host === t.c1 && t.c2 !== t.host, `unexpected team layout ${JSON.stringify(t)}`);
     await tap(c1, '#s-game [data-act="emotes"]');
     const tabs = await c1.evaluate(() => [...document.querySelectorAll('#emote-menu .qc-tab')].map((x) => x.textContent));
-    run.check(tabs.includes('Squad'), `c1: no Squad tab in Squads ${tabs}`);
-    await c1.evaluate(() => document.querySelector('#emote-menu [data-tab="team"]').click()); await sleep(150);
+    await c1.evaluate(() => document.querySelector('#emote-menu [data-tab="all"]').click()); await sleep(150); // 15.0: categories are chips in All Phrases
+    const chips = await c1.evaluate(() => [...document.querySelectorAll('#emote-menu .qc-cat')].map((x) => x.textContent));
+    run.check(chips.includes('Squad'), `c1: no Squad category in Squads ${chips}`);
+    await c1.evaluate(() => document.querySelector('#emote-menu .qc-cat[data-tab="team"]').click()); await sleep(150);
     await c1.evaluate(() => document.querySelector('#emote-menu [data-say="s.revive"]').click()); await sleep(800);
     const h = await chatLog(host), o = await chatLog(c2);
     run.check(h.some((l) => /Revive me$/.test(l)), `host (teammate) missed the team callout ${JSON.stringify(h)}`);

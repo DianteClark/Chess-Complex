@@ -24,6 +24,8 @@ const MOODS = { citadel: '#7fe0ff', forge: '#ff5a1f', temple: '#3ddcff', gardens
 
 // ---------- location previews: the real backdrop layers painted small, with a miniature board ----------
 const PREV = new Map(); // `${id}|${w}x${h}` -> canvas | Promise
+// Preview canvases (~7 MB) are only needed during the intro; the game calls this when it leaves the match screen.
+export function releaseWheel() { PREV.clear(); }
 function rng(seed) { let a = (seed * 2654435761) >>> 0 || 1; return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 function ridge({ x0, x1, y, amp = 2, seed = 1, step = 0.25, rough = 0.55, peaks = null }) {
   const R = rng(seed), n = Math.max(2, Math.ceil((x1 - x0) / step)), N = 1 << Math.ceil(Math.log2(n)), h = new Float32Array(N + 1);

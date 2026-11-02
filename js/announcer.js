@@ -344,13 +344,13 @@ const SV = (d) => `<svg viewBox="0 0 16 16" aria-hidden="true">${d}</svg>`;
 export const STATUS = {
   burn:    { name: 'Burn',    c: '#ff8a3d', what: 'Loses 6% max HP at the start of each turn. Freeze puts it out.', icon: SV('<path d="M8 1.5c.5 2.6 3.8 4 3.8 7.6A3.8 3.8 0 0 1 4.2 9.1c0-1.6.8-2.6 1.6-3.4.1 1.3.7 2 1.4 2.3C6.8 5.6 7.4 3.4 8 1.5z"/>') },
   poison:  { name: 'Poison',  c: '#8ee05a', what: 'Loses 3% max HP per stack each turn (up to 3 stacks). Healing is halved.', icon: SV('<path d="M8 1.8C6 5 4 7.3 4 9.9a4 4 0 0 0 8 0C12 7.3 10 5 8 1.8z"/><path d="M6.4 10.4l3.2-1.6"/>') },
-  freeze:  { name: 'Frozen',  c: '#7fe0ff', what: 'Cannot move this turn. You can still act. Fire thaws it.', icon: SV('<path d="M8 1.5v13M2.4 4.8l11.2 6.4M2.4 11.2l11.2-6.4M6.3 2.6L8 4.2l1.7-1.6M6.3 13.4L8 11.8l1.7 1.6"/>') },
-  stun:    { name: 'Stunned', c: '#ffe066', what: 'Cannot act this turn. You can still move.', icon: SV('<path d="M8 1.8l1.6 3.6 3.9.4-2.9 2.6.8 3.8L8 10.3l-3.4 1.9.8-3.8-2.9-2.6 3.9-.4z"/>') },
-  slow:    { name: 'Slowed',  c: '#b4a4ff', what: '-3 SPD: you act later in the turn order.', icon: SV('<path d="M3.5 4.5L8 9l4.5-4.5M3.5 8.5L8 13l4.5-4.5"/>') },
+  freeze:  { name: 'Freeze',  c: '#7fe0ff', what: 'Cannot move this turn. You can still act. Fire thaws it.', icon: SV('<path d="M8 1.5v13M2.4 4.8l11.2 6.4M2.4 11.2l11.2-6.4M6.3 2.6L8 4.2l1.7-1.6M6.3 13.4L8 11.8l1.7 1.6"/>') },
+  stun:    { name: 'Stun', c: '#ffe066', what: 'Cannot act this turn. You can still move.', icon: SV('<path d="M8 1.8l1.6 3.6 3.9.4-2.9 2.6.8 3.8L8 10.3l-3.4 1.9.8-3.8-2.9-2.6 3.9-.4z"/>') },
+  slow:    { name: 'Slow',  c: '#b4a4ff', what: '-3 SPD: you act later in the turn order.', icon: SV('<path d="M3.5 4.5L8 9l4.5-4.5M3.5 8.5L8 13l4.5-4.5"/>') },
   shield:  { name: 'Shield',  c: '#9df3ff', what: 'Absorbs damage before HP.', icon: SV('<path d="M8 1.6l5 2v4.2c0 3.2-2.2 5.5-5 6.6-2.8-1.1-5-3.4-5-6.6V3.6z"/>') },
   haste:   { name: 'Haste',   c: '#6dffa8', what: '+3 SPD: you act sooner in the turn order.', icon: SV('<path d="M3.5 11.5L8 7l4.5 4.5M3.5 7.5L8 3l4.5 4.5"/>') },
   exposed: { name: 'Exposed', c: '#ff6b7a', what: '-15% DEF for each different attacker this round (up to 4), until the King moves again. Gang up.', icon: SV('<path d="M8 1.6l5 2v4.2c0 3.2-2.2 5.5-5 6.6-2.8-1.1-5-3.4-5-6.6V3.6z"/><path d="M8.6 3.4L7 7.2l2.2 1.4-1.6 4"/>') },
-  enrage:  { name: 'Enraged', c: '#ff4d5e', what: '+25% ATK for a short time after a phase shockwave.', icon: SV('<path d="M3 3.5l3 3.2M13 3.5l-3 3.2M4 10.5c1.2-1.4 2.5-2 4-2s2.8.6 4 2M5.5 13h5"/>') },
+  enrage:  { name: 'Enrage', c: '#ff4d5e', what: '+25% ATK for a short time after a phase shockwave.', icon: SV('<path d="M3 3.5l3 3.2M13 3.5l-3 3.2M4 10.5c1.2-1.4 2.5-2 4-2s2.8.6 4 2M5.5 13h5"/>') },
 };
 const ST_ORDER = ['freeze', 'stun', 'burn', 'poison', 'slow', 'exposed', 'enrage', 'shield', 'haste'];
 // u.status entries [{k,t,n}] (spec 15.0) plus older/alternate fields, merged into one list

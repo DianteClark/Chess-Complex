@@ -1693,7 +1693,7 @@ function warmStep(ms) {
   gbStep(gbGet(WARM[0][0], WARM[0][1]), ms);
   return true;
 }
-if (typeof window !== 'undefined') setTimeout(() => warmPieces(), 6000);
+if (typeof window !== 'undefined') setTimeout(() => { warmPieces(); warmPieces(['veteran', 'champion', 'knight.asc', 'bishop.asc', 'rook.asc', 'queen.asc', 'king.boss', 'colossus'], [192, 96]); }, 6000); // 15.0: warm the new models too, so promotions mid-match don't hitch
 
 // ---------------------------------------------------------------- legacy vector paths (kept for API compatibility)
 function plinth(p) {

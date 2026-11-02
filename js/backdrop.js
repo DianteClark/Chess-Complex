@@ -141,6 +141,8 @@ function entry(id, M, v, all) {
   while (E.layers.length < n) { E.layers.push(bakeLayer(M, M.layers[E.layers.length], v)); if (!all) break; }
   return E;
 }
+// R 15.0 (menu slowdown): Renderer.sleep() calls this when the game screen is left; layers rebake on the next match
+export function releaseBackdrops() { CACHE.clear(); }
 export function prepareBackdrop(id, v) { const M = mod(id); if (!M || !v) return false; entry(id, M, v, true); return true; }
 
 // ---------- per frame ----------

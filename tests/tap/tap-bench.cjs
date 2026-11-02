@@ -206,6 +206,7 @@ async function runConfig(browser, vp, mode) {
       await p.fill('#in-code', code);
       await p.evaluate(() => document.querySelector('#s-join [data-act="join"]').click());
       await p.waitForFunction(() => /In the lobby/.test(document.querySelector('#join-status').textContent), null, { timeout: 6000 });
+      await p.evaluate(() => { const r = document.querySelector('#btn-ready'); if (r && !r.classList.contains('hidden') && !r.disabled) r.click(); }); await sleep(600); // 15.0 parties: members ready up
       await host.evaluate(() => document.querySelector('[data-act="add-bot"]').click()); await sleep(150);
       await host.evaluate(() => document.querySelector('#btn-start-host').click());
       for (const q of [host, p]) await q.waitForFunction(() => window.__cc.game.s && document.querySelector('.screen.active').id === 's-game', null, { timeout: 10000 });

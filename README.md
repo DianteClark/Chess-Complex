@@ -17,6 +17,11 @@ A turn-based chess battle royale for up to 8 players. Everyone starts as a Pawn 
 - **Progression:** XP and levels with titles from Recruit to Legend; every level-up pays out Marks.
 - **Juice:** hit-stop, slow-motion eliminations, camera punches, lunging attacks, per-ability VFX, shattering pieces, collapsing storm tiles, damage previews with KO markers, kill streak callouts, emotes, haptics and a generative soundtrack that intensifies as the match closes in.
 
+## What's in 15.0
+- **World Tour:** 8 locations with their own scenery, weather, music, hazards and events, chosen by a wheel.
+- **Raid-boss King**, **status effects**, **Ascension** and the **pawn line** so every piece can win, plus 17 new abilities with Marks unlocks.
+- **Parties** that stay together between matches, automatic reconnects, a **Royal Pass** for Marks, profiles, custom build slots and an 8x8 starting zoom.
+
 ## What's in 10.0
 - **Four new modes:** King of the Hill, Chaos, Gauntlet and Mirror Match, plus new world events, hazards, Siege enemies and a third boss.
 - **A sequel-grade presentation:** new piece art, lit 3D-feeling boards with weather, rebuilt effects and 11 new finishers, an adaptive soundtrack, new sound design, and a Director that keeps every callout in its own lane.
