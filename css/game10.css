@@ -17,3 +17,58 @@ body.reduced #s-title .new-player::after { animation: none; }
 /* U 10.2 input: informational cards over the board never swallow a board tap; the board handler dismisses them
    (js/main.js passThrough) and treats that touch as a preview only. */
 #s-game #gm-tip, #s-game #h-inspect, #s-game #h-inspect * { pointer-events: none; }
+/* N 15.0 parties: functional states only (hidden bits, readable defaults). F owns the look of .party-* / .pm-* / #net-banner. */
+#s-join.in-party #in-code, #s-join.in-party [data-act="join"], #s-join.in-party .join-help { display: none; }
+.party-opts:empty { display: none; }
+.party-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0; }
+.party-row > span { min-width: 72px; font-size: 12px; opacity: .75; text-transform: uppercase; letter-spacing: .06em; }
+.party-row > em { font-size: 12px; opacity: .7; font-style: normal; }
+.party-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.party-seg button { min-height: 36px; padding: 6px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: inherit; font: inherit; font-size: 13px; }
+.party-seg button.on { border-color: #ffd36b; background: rgba(255,211,107,.18); color: #ffe7a8; }
+.party-desc { margin: 2px 0 6px; font-size: 12px; opacity: .75; }
+.party-ready { margin-top: 10px; }
+.party-ready.on { filter: saturate(.6) brightness(1.15); }
+.pcard.pm-ready em { color: #6dffa8; }
+.pcard.pm-wait em { color: #ffd36b; }
+.pcard.pm-away { opacity: .6; }
+.r-partynote { margin: 10px 0 4px; padding: 8px 10px; border-radius: 10px; background: rgba(255,107,107,.12); border: 1px solid rgba(255,107,107,.35); font-size: 13px; text-align: center; }
+.net-banner { position: fixed; z-index: 9000; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 10px); transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: rgba(20,14,30,.92); border: 1px solid rgba(255,211,107,.5); color: #ffe7a8; font-size: 13px; pointer-events: none; }
+.net-banner.hidden { display: none; }
+.net-banner .nb-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,231,168,.3); border-top-color: #ffe7a8; animation: nbspin .8s linear infinite; }
+body.reduced .net-banner .nb-spin { animation: none; }
+@keyframes nbspin { to { transform: rotate(360deg); } }
+/* N 15.0 quick chat: favourites chooser (first open + Edit Favourites) and the All Phrases view */
+.qc-body .qc-h { grid-column: 1 / -1; margin: 6px 2px 0; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--mute, #a9a3b8); }
+.qc-body .qc-cats { grid-column: 1 / -1; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; position: sticky; top: 0; z-index: 1; padding-bottom: 4px; background: rgba(14,12,20,.97); }
+.qc-body .qc-cats::-webkit-scrollbar { display: none; }
+#emote-menu.qc .qc-cat { flex: none; min-height: 34px; padding: 0 10px; border-radius: 17px; border: 1px solid rgba(255,255,255,.12); background: transparent; color: var(--mute, #a9a3b8); font-size: 12px; font-weight: 700; }
+#emote-menu.qc .qc-cat.on { border-color: var(--gold, #d6b05c); color: var(--gold2, #ffe7a8); }
+#emote-menu.qc .qc-p.fav { border-color: rgba(214,176,92,.55); }
+.qc-pick-h { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 2px 2px 4px; }
+.qc-pick-h b { font-size: 15px; }
+.qc-pick-h small { grid-column: 1 / 2; font-size: 12px; color: var(--mute, #a9a3b8); white-space: normal; }
+.qc-pick-n { grid-row: 1 / 3; grid-column: 2; font-weight: 800; font-size: 13px; color: var(--mute, #a9a3b8); }
+.qc-pick-n.ok { color: var(--gold2, #ffe7a8); }
+#emote-menu.qc .qc-tog { position: relative; padding-right: 26px; }
+#emote-menu.qc .qc-tog.on { border-color: var(--gold, #d6b05c); background: rgba(214,176,92,.18); }
+#emote-menu.qc .qc-tog.on::after { content: attr(data-n); position: absolute; right: 6px; top: 50%; transform: translateY(-50%); min-width: 16px; height: 16px; border-radius: 8px; background: var(--gold, #d6b05c); color: #1a1205; font-size: 10px; font-weight: 800; line-height: 16px; text-align: center; }
+#emote-menu.qc .qc-foot .qc-done { background: var(--gold, #d6b05c); color: #1a1205; border-color: var(--gold, #d6b05c); }
+#emote-menu.qc .qc-foot .qc-done:disabled { opacity: .5; }
+#emote-menu.qc.qc-picking .qc-body { max-height: clamp(140px, calc(100vh - var(--hb, 190px) - 210px), 340px); }
+.qcm-favn { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; font-size: 13px; }
+.qcm-favn b { min-width: 20px; text-align: center; }
+.qcm-favn .btn.small { min-width: 40px; min-height: 36px; padding: 0; }
+/* R 15.0: zoom toggle (8x8 around your piece / whole board). Shows the current level; F owns placement. */
+.icon-btn.zoom-btn { width: auto; min-width: 58px; padding: 0 8px 0 6px; display: inline-flex; align-items: center; gap: 4px; }
+.icon-btn.zoom-btn svg { width: 18px; height: 18px; flex: none; }
+.icon-btn.zoom-btn .zl-t { font: 700 11px/1 "Chakra Petch", sans-serif; letter-spacing: .04em; color: var(--gold2); text-transform: uppercase; }
+.icon-btn.zoom-btn[data-level="close"] .zl-board, .icon-btn.zoom-btn[data-level="board"] .zl-close { display: none; }
+.icon-btn.zoom-btn[data-level="board"] { border-color: rgba(255, 210, 120, .55); background: rgba(40, 30, 14, .85); }
+/* C 15.0: codex status / unlock tags and Ascension line */
+.cx-ab-h .t-st { margin-left: 4px; } .cx-ab-h .t-lock, .cx-line .t-lock { margin-left: 4px; background: rgba(214,176,92,.12); color: var(--gold2); }
+.t-st.st-burn, b.st-burn { color: #ffb37a; } .t-st.st-poison, b.st-poison { color: #c8ff8a; } .t-st.st-freeze, b.st-freeze { color: #bff4ff; } .t-st.st-stun, b.st-stun { color: #ffe680; }
+.t-st.st-slow, b.st-slow { color: #a9b8ff; } .t-st.st-shield, b.st-shield { color: #9df3ff; } .t-st.st-haste, b.st-haste { color: #9dffc8; } b.st-exposed { color: #ff9a9a; } b.st-enrage { color: #ff7a5a; }
+.t-st.st-burn { background: rgba(255,106,31,.2); } .t-st.st-poison { background: rgba(166,255,77,.15); } .t-st.st-freeze { background: rgba(127,224,255,.18); } .t-st.st-stun { background: rgba(255,224,77,.16); }
+.t-st.st-slow { background: rgba(120,140,255,.18); } .t-st.st-shield { background: rgba(157,243,255,.14); } .t-st.st-haste { background: rgba(92,255,157,.14); }
+.cx-asc { border-left: 2px solid var(--gold2); padding-left: 8px; }

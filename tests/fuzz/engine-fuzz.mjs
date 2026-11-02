@@ -5,6 +5,9 @@
 import * as E from '../../js/engine.js';
 import { PIECES, PRESETS, PASSIVES, MODES, SIZE, MUTATORS } from '../../js/data.js';
 const MUTS = Object.keys(MUTATORS);
+// Q 15.0: every location and random Custom lobby rules (opts.location / opts.custom), when js/locations.js exists
+let LOC_IDS = []; try { LOC_IDS = Object.keys((await import('../../js/locations.js')).LOCATIONS); } catch {}
+const CUSTOMS = [undefined, { mirror: true }, { hazards: false }, { events: false }, { storm: 'fast' }, { storm: 'slow', mirror: true, hazards: false }, { storm: 'bogus', location: '__proto__', mirror: 'yes' }];
 import fs from 'fs';
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, arr) => (v.startsWith('--') ? [...a, [v.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : true]] : a), []));
@@ -81,12 +84,12 @@ function invariants(s, tag) {
 const snap = (s) => JSON.stringify(s, (k, v) => (k === '_guard' ? undefined : typeof v === 'number' && !Number.isFinite(v) ? 'NF:' + v : v));
 
 function play(cfg) {
-  const { mode, n, humans, seed, fuzzSeed, mutator } = cfg;
+  const { mode, n, humans, seed, fuzzSeed, mutator, location, custom } = cfg;
   const r = mulberry(fuzzSeed);
   const players = mkPlayers(r, n, humans);
   const fails = [], log = [], evCounts = {};
   let s;
-  try { s = E.createMatch(players, seed, { mode, mutator }); } catch (e) { return { fails: [`createMatch threw: ${e.stack.split('\n').slice(0, 3).join(' < ')}`], log, s: null }; }
+  try { s = E.createMatch(players, seed, { mode, mutator, location, custom }); } catch (e) { return { fails: [`createMatch threw: ${e.stack.split('\n').slice(0, 3).join(' < ')}`], log, s: null }; }
   fails.push(...invariants(s, 'create'));
   let steps = 0, rejected = 0, malformedAccepted = 0, lastTurn = -1, sameTurnSteps = 0;
   const ACT = (pid, a, kind) => {
@@ -125,7 +128,7 @@ function play(cfg) {
   // determinism: replay the log
   if (s.over || steps >= MAXA) {
     try {
-      const s2 = E.createMatch(mkPlayers(mulberry(fuzzSeed), n, humans), seed, { mode, mutator });
+      const s2 = E.createMatch(mkPlayers(mulberry(fuzzSeed), n, humans), seed, { mode, mutator, location, custom });
       for (const [pid, a] of log) E.applyAction(s2, pid, a === '__undef' ? undefined : a);
       // aiSeed is planner RNG state: the replay applies logged actions without re-planning
       const strip = (x) => { const o = JSON.parse(snap(x)); delete o.aiSeed; return JSON.stringify(o); };
@@ -164,7 +167,7 @@ for (let i = 0; i < N; i++) for (const mode of modes) {
   if (n > hi) n = hi;
   const humans = i % 3 === 0 ? 0 : i % 3 === 1 ? 1 : Math.min(n, 2);
   // half the matches force each map mutator in turn, the rest let the engine pick
-  cfgs.push({ mode, n, humans, mutator: i % 2 ? MUTS[(i >> 1) % MUTS.length] : undefined, seed: (SEED0 * 7919 + k * 104729) | 0, fuzzSeed: SEED0 * 31 + k++ });
+  cfgs.push({ mode, n, humans, mutator: i % 2 ? MUTS[(i >> 1) % MUTS.length] : undefined, location: LOC_IDS.length && i % 3 === 1 ? LOC_IDS[(i + k) % LOC_IDS.length] : undefined, custom: i % 4 === 3 ? CUSTOMS[(i >> 2) % CUSTOMS.length] : undefined, seed: (SEED0 * 7919 + k * 104729) | 0, fuzzSeed: SEED0 * 31 + k++ });
 }
 const t0 = Date.now();
 const report = { cfgs: cfgs.length, failures: [], perMode: {}, botsOnly: [], ms: 0 };
@@ -186,6 +189,6 @@ console.log(`engine fuzz: ${cfgs.length} matches in ${(report.ms / 1000).toFixed
 for (const [m, pm] of Object.entries(report.perMode)) console.log(`  ${m.padEnd(7)} matches=${pm.matches} failed=${pm.failed} unfinished=${pm.unfinished} avgRounds=${pm.avgRounds} maxRounds=${pm.maxRounds} actions=${pm.steps}`);
 const bo = report.botsOnly.filter((b) => !b.same || b.threw); console.log(`  bots-only determinism: ${report.botsOnly.length - bo.length}/${report.botsOnly.length} identical` + (bo.length ? ' FAIL ' + JSON.stringify(bo) : ''));
 console.log(report.failures.length ? `FAILURES (${report.failures.length} unique):` : 'ALL INVARIANTS HELD');
-for (const f of report.failures.slice(0, 40)) console.log(`  [${f.mode} n=${f.n} humans=${f.humans} mut=${f.mutator || '-'} seed=${f.seed} fuzz=${f.fuzzSeed} x${f.count}] ${f.msg.slice(0, 400)}`);
+for (const f of report.failures.slice(0, 40)) console.log(`  [${f.mode} n=${f.n} humans=${f.humans} mut=${f.mutator || '-'} loc=${f.location || '-'} custom=${f.custom ? JSON.stringify(f.custom) : '-'} seed=${f.seed} fuzz=${f.fuzzSeed} x${f.count}] ${f.msg.slice(0, 400)}`);
 if (args.json) fs.writeFileSync(args.json, JSON.stringify(report, null, 1));
 process.exitCode = report.failures.length || bo.length ? 1 : 0;

@@ -17,7 +17,7 @@
 <body>
 <header>
   <b>VFX gallery</b>
-  <button data-set="all" class="on">All</button><button data-set="ability">Abilities</button><button data-set="finisher">Finishers</button><button data-set="event">Events</button>
+  <button data-set="all" class="on">All</button><button data-set="ability">Abilities</button><button data-set="finisher">Finishers</button><button data-set="event">Events</button><button data-set="status">Status</button><button data-set="king">Boss King</button><button data-set="world">World Tour</button><button data-set="rank">Ascension</button>
   <span style="width:10px"></span>
   <button id="b-low">Low quality</button><button id="b-calm">Reduced motion</button><button id="b-pause">Pause</button><button id="b-slow">Slow x0.25</button>
   <span id="stats"></span>
@@ -83,6 +83,54 @@ const EVENTS = {
   'rift swap': (f) => f.event({ e: 'hazard', kind: 'rift', from: { x: 6, y: 9 }, to: { x: 10, y: 7 } }),
 };
 for (const k of Object.keys(EVENTS)) cells.push({ type: 'event', id: k, name: k, period: k.startsWith('hit') ? 1.2 : 2.4 });
+
+// ---------- 15.0: Ascended ultimates (engine marks them ev.asc) ----------
+for (const ab of ['fork', 'excommunicate', 'castling', 'nova']) { const sc = scenario(ab); if (sc) cells.push({ type: 'ability', id: ab + ':asc', name: (ABILITIES[ab].name || ab) + ' (Ascended)', sc: { ...sc, ev: { ...sc.ev, asc: true } }, period: 3.2 }); }
+
+// ---------- 15.0 scripted cells: run(f, c) with c.at(id) -> [x, tileTop] like render.js ----------
+const ME = [{ id: 1, x: 8, y: 8, piece: 'knight', me: true }];
+const TRIO = [{ id: 1, x: 7, y: 8, piece: 'knight' }, { id: 2, x: 9, y: 7, piece: 'rook' }, { id: 3, x: 8, y: 10, piece: 'bishop' }];
+const KING = [{ id: 1, x: 8, y: 8, piece: 'king', me: true, kind: 'player' }];
+const box = (r, cx = 8, cy = 8) => { const t = []; for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) t.push({ x: cx + x, y: cy + y }); return t; };
+const S = (id, k, on, o = {}) => ({ e: 'status', id, k, on, t: 2, n: 1, ...o });
+const scripted = (type, id, name, period, units, run, o = {}) => cells.push({ type, id, name, period, units, run, ...o });
+// status effects: apply, loop the aura, a damage tick, then expire
+for (const k of ['burn', 'poison', 'freeze', 'stun', 'slow', 'shield', 'haste']) scripted('status', k, k, 3.2, ME, (f, c) => {
+  f.statusSync(c.units); f.event(S(1, k, true), c.at);
+  if (k === 'poison') { f.after(0.6, () => f.event(S(1, k, true, { n: 2 }), c.at)); f.after(1.2, () => f.event(S(1, k, true, { n: 3 }), c.at)); }
+  if (k === 'burn' || k === 'poison') f.after(1.8, () => f.hit(8.5, 8.45, { n: 6, dot: k }));
+  if (k === 'shield') f.after(1.4, () => f.hit(8.5, 8.45, { n: 9, shield: true, ang: 0 }));
+  f.after(2.6, () => f.event(S(1, k, false), c.at));
+});
+scripted('status', 'shieldBreak', 'shield break', 2.4, ME, (f, c) => { f.event(S(1, 'shield', true), c.at); f.after(1, () => { f.hit(8.5, 8.45, { n: 20, shield: true, ang: 0 }); f.event(S(1, 'shield', false, { why: 'break' }), c.at); f.event({ e: 'shieldBreak', id: 1 }, c.at); }); });
+scripted('status', 'melt', 'fire melts ice', 2.6, ME, (f, c) => { f.event(S(1, 'freeze', true), c.at); f.after(1.1, () => { f.event(S(1, 'freeze', false, { why: 'melt' }), c.at); f.event(S(1, 'burn', true), c.at); }); f.after(2.3, () => f.event(S(1, 'burn', false), c.at)); });
+scripted('status', 'snuff', 'freeze snuffs burn', 2.6, ME, (f, c) => { f.event(S(1, 'burn', true), c.at); f.after(1.1, () => { f.event(S(1, 'burn', false, { why: 'snuff' }), c.at); f.event(S(1, 'freeze', true), c.at); }); f.after(2.3, () => f.event(S(1, 'freeze', false), c.at)); });
+scripted('status', 'stacked', 'burn + poison + slow + haste', 3, ME, (f, c) => { for (const [i, k] of ['burn', 'poison', 'slow', 'haste'].entries()) f.after(i * 0.25, () => f.event(S(1, k, true, { n: k === 'poison' ? 2 : 1 }), c.at)); f.after(2.4, () => { f.event({ e: 'cleanse', id: 1, ks: ['burn', 'poison', 'slow'] }, c.at); for (const k of ['burn', 'poison', 'slow', 'haste']) f.event(S(1, k, false, { why: 'cleanse' }), c.at); }); });
+scripted('status', 'resist', 'resist (Ward)', 1.4, ME, (f, c) => f.event({ e: 'resist', id: 1, k: 'freeze' }, c.at));
+// boss King
+scripted('king', 'telegraph', 'crown telegraph -> spawn', 3.6, [], (f) => { f.crownWarn(8, 8); f.after(2.8, () => f.crownSpawn(8.5, 8.62)); });
+scripted('king', 'coronation', 'boss coronation', 3.2, KING, (f) => f.promote(8.5, 8.86, '#ffd24d', '#ffe9a8', { crowned: true }));
+scripted('king', 'aura', 'royal aura', 2, KING, (f, c) => f.statusSync(c.units));
+scripted('king', 'phase1', 'phase 66% shockwave', 2.6, KING, (f, c) => { f.statusSync(c.units); f.event({ e: 'kingPhase', id: 1, phase: 1, tiles: box(2) }, c.at); });
+scripted('king', 'phase2', 'phase 33% + enrage', 2.8, KING, (f, c) => { f.statusSync(c.units); f.event({ e: 'kingPhase', id: 1, phase: 2, tiles: box(2) }, c.at); f.after(0.4, () => { f.event(S(1, 'enrage', true), c.at); f.event({ e: 'enrage', id: 1 }, c.at); }); });
+scripted('king', 'exposed', 'Exposed x1-x4', 3, KING, (f, c) => { f.statusSync(c.units); for (let i = 1; i <= 4; i++) f.after((i - 1) * 0.5, () => { f.hit(8.5, 8.45, { n: 10, ang: i * 1.4 }); f.event(S(1, 'exposed', true, { n: i, t: 1 }), c.at); }); f.after(2.6, () => f.event(S(1, 'exposed', false), c.at)); });
+scripted('king', 'regicide', 'Regicide', 3.2, KING, (f) => { f.regicide(8.5, 8.86); f.finisher('coronation', 8.5, 8.86, 'king', 'ivory'); }, { hideAfter: 0.05 });
+// World Tour location events: warn and strike
+const WK = ['blizzard', 'eruption', 'flood', 'bloom', 'sandstorm', 'overcharge', 'gravityWell', 'toxicFog', 'warDrums', 'royalBounty'];
+const TELE = new Set(['blizzard', 'eruption', 'flood', 'gravityWell', 'toxicFog']);
+for (const kind of WK) for (const phase of TELE.has(kind) ? ['warn', 'strike'] : ['strike']) scripted('world', kind + ':' + phase, kind + (phase === 'warn' ? ' (warn)' : ''), 2.8, TRIO, (f, c) => {
+  f.statusSync(c.units);
+  f.event({ e: 'world', kind, phase, tiles: box(kind === 'gravityWell' ? 3 : 2), ids: [1, 2, 3], centers: [{ x: 7, y: 8 }, { x: 9, y: 9 }], center: { x: 8, y: 8 }, made: [{ x: 10, y: 8 }] }, c.at);
+});
+scripted('world', 'poisonPool', 'poison pool step', 1.8, ME, (f, c) => { f.statusSync(c.units); f.event({ e: 'hazard', kind: 'poison', x: 8, y: 8, id: 1 }, c.at); f.event(S(1, 'poison', true, { src: 'poisonPool' }), c.at); f.after(1.4, () => f.event(S(1, 'poison', false), c.at)); });
+const LOCS = ['citadel', 'forge', 'temple', 'gardens', 'ruins', 'works', 'rift', 'bog'];
+scripted('world', 'location', 'location reveal (cycles)', 1.6, TRIO, (f, c) => { f.statusSync(c.units); f.event({ e: 'location', id: LOCS[Math.max(0, c.loop) % LOCS.length] }, c.at); });
+// Ascension and the pawn line
+for (const pc of ['knight', 'bishop', 'rook', 'queen']) scripted('rank', 'ascend:' + pc, 'Ascension: ' + pc, 3, [{ id: 1, x: 8, y: 8, piece: pc, me: true }], (f, c) => f.event({ e: 'ascend', id: 1, piece: pc }, c.at));
+scripted('rank', 'ascend:hone', 'Ascension via promote ev', 3, [{ id: 1, x: 8, y: 8, piece: 'bishop', me: true }], (f) => f.promote(8.5, 8.86, '#4dabff', '#7fe0ff', { ev: { e: 'promote', type: 'hone', hone: 3, piece: 'bishop' } }));
+scripted('rank', 'veteran', 'Veteran', 2.4, [{ id: 1, x: 8, y: 8, piece: 'pawn', me: true }], (f) => f.promote(8.5, 8.86, '#4dabff', '#7fe0ff', { ev: { e: 'promote', piece: 'veteran' } }));
+scripted('rank', 'champion', 'Champion', 2.6, [{ id: 1, x: 8, y: 8, piece: 'pawn', me: true }], (f) => f.promote(8.5, 8.86, '#4dabff', '#7fe0ff', { ev: { e: 'promote', piece: 'champion' } }));
+for (const c of cells) if (c.units) c.at = (id) => { const u = c.units.find((q) => q.id === id); return u ? [u.x + 0.5, u.y] : [0, 0]; };
 for (const c of cells) { c.fx = new FX(); c.t = 0; c.loop = -1; }
 
 let vis = [];
@@ -101,6 +149,7 @@ function fire(c) {
     const run = () => f.ability(c.sc.ev, '#4dabff', '#ffe9a8');
     if (c.sc.ult) { f.ultCharge(8.5, 8.5, '#ffd24d', '#ffe9a8'); f.after(0.8, run); } else run();
   } else if (c.type === 'finisher') f.finisher(c.id, 8.5, 8.86, 'rook', 'ivory', '#ffe7a8');
+  else if (c.run) c.run(f, c);
   else EVENTS[c.id](f);
 }
 function step(c, dt) {
@@ -120,7 +169,7 @@ function drawCell(c) {
   const f = c.fx;
   f.drawGround(ctx);
   const local = (c.t % c.period);
-  const units = c.type === 'ability' ? c.sc.units : c.type === 'finisher' ? (local < 0.05 || local > c.period - 0.4 ? [{ x: 8, y: 8, piece: 'rook' }] : []) : (c.id.startsWith('hit') ? [{ x: 8, y: 8, piece: 'knight' }] : []);
+  const units = c.units ? (c.hideAfter != null && local > c.hideAfter && local < c.period - 0.4 ? [] : c.units) : c.type === 'ability' ? c.sc.units : c.type === 'finisher' ? (local < 0.05 || local > c.period - 0.4 ? [{ x: 8, y: 8, piece: 'rook' }] : []) : (c.id.startsWith('hit') ? [{ x: 8, y: 8, piece: 'knight' }] : []);
   for (const u of units.slice().sort((a, b) => a.y - b.y)) {
     const img = hiSprite(u.piece, u.hollow ? 'obsidian' : u.me ? 'ivory' : 'obsidian');
     ctx.save(); ctx.translate(u.x + 0.5, u.y + 0.86); ctx.scale(1 / 160 * (u.me ? 1 : 0.85), 1 / 160 * (u.me ? 1 : 0.85)); ctx.globalAlpha = u.me ? 1 : 0.8; ctx.drawImage(img, -96, -224); ctx.restore();

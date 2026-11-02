@@ -223,6 +223,11 @@ S['S5a-rematch'] = async (run) => {
   const hv = await view(host); run.check(hv.screen === 's-host' && hv.players === 8, `host: rematch lobby ${hv.screen} players ${hv.players}`);
   await sleep(800); const cv2 = await view(c); run.note(`c1 while host is in rematch lobby: ${cv2.screen} [${cv2.modals}]`);
   await run.shot('c1', 'waiting-rematch');
+  // 15.0 (N): parties. The member taps Back to Party, lands in the party lobby and readies up; then the leader starts.
+  run.check(cv2.rematchVisible, 'c1: no Back to Party on results');
+  await tap(c, '#btn-rematch'); const cv3 = await view(c);
+  run.check(cv3.screen === 's-join' && cv3.joinLobby === 8, `c1: Back to Party -> ${cv3.screen} lobby rows ${cv3.joinLobby}`);
+  await L.readyAll(host, [c]);
   const before = await view(c);
   await tap(host, '#btn-start-host');
   const ok = await waitFor(c, (t) => window.__cc.game.s && !window.__cc.game.s.over && window.__cc.game.s.turnNo < 50 && document.querySelector('#m-results').classList.contains('hidden'), null, 8000);
@@ -242,6 +247,7 @@ S['S5b-rematch-one-left'] = async (run) => {
   await tap(cs[1], '#m-results [data-act="to-title"]'); await sleep(800);
   await tap(host, '#btn-rematch'); await sleep(500);
   const hv = await view(host); run.check(hv.players === 7, `host rematch lobby has ${hv.players} players (expected 7 after c2 left)`);
+  await tap(cs[0], '#btn-rematch'); await L.readyAll(host, [cs[0]]); // 15.0 (N): Back to Party + Ready Up
   await tap(host, '#btn-start-host');
   run.check(await waitFor(cs[0], () => window.__cc.game.s && !window.__cc.game.s.over && window.__cc.game.s.turnNo < 50 && document.querySelector('#m-results').classList.contains('hidden'), null, 8000), 'c1: did not enter rematch');
   const c2 = await view(cs[1]); run.check(c2.screen === 's-title', `c2 (left) pulled back into game: ${c2.screen}`);
@@ -480,6 +486,8 @@ S['S9-siege-coop'] = async (run) => {
 
 // 10.2 (N): quick chat (C1-C6) and voice (V1-V2) scenarios live in social.js
 require('./social')(S, { L, match, sleep, tap, autoplay });
+// 15.0 (N): parties, leader-leaves (bug a), Siege wave 5 + reconnect (bug b) in party.js
+require('./party')(S, { L, match, sleep, tap, autoplay });
 
 // ---------- runner ----------
 (async () => {

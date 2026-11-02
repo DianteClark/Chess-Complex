@@ -6,7 +6,7 @@
 // Everything is in world units (1 = one tile). lowQ drops secondary layers; reduced motion slows flows.
 import { ROLES, unitById, ringOf, HILL } from './engine.js';
 
-export const TILES = { throne: 1, geyser: 1, conveyor: 1, crumble: 1, pit: 1 };
+export const TILES = { throne: 1, geyser: 1, conveyor: 1, crumble: 1, pit: 1, poison: 1 }; // R 15.0: + Witchwood Bog poison pools
 const SIZE = 16, TAU = Math.PI * 2;
 const isT = (s, x, y, k) => x >= 0 && y >= 0 && x < SIZE && y < SIZE && s.tiles[y * SIZE + x].t === k;
 const mkC = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; };
@@ -457,6 +457,7 @@ export function tile(r, ctx, t, x, y, T) {
   else if (t.t === 'geyser') drawGeyser(r, ctx, t, x, y, T);
   else if (t.t === 'conveyor') drawConveyor(r, ctx, t, x, y, T);
   else if (t.t === 'pit') drawPit(r, ctx, x, y, T);
+  else if (t.t === 'poison') drawPool(r, ctx, x, y, T);
   else if (t.t === 'crumble' && t.hp <= 1) { // ember glow in the gaps and loose grit trembling over a breaking tile
     ctx.globalCompositeOperation = 'lighter'; dot(ctx, '#ff8a3a', x + 0.5, y + 0.5, 0.55, 0.16 + 0.1 * Math.sin(T * (r.reduced ? 1.5 : 4) + x + y)); ctx.globalCompositeOperation = 'source-over';
     if (r.lowQ) { ctx.globalAlpha = 1; return; }
@@ -464,6 +465,56 @@ export function tile(r, ctx, t, x, y, T) {
     if (p > 0.05) { ctx.globalAlpha = p * 0.6; ctx.fillStyle = '#d9cfb8'; for (let i = 0; i < 3; i++) ctx.fillRect(x + 0.3 + i * 0.17, y + 0.4 + ((i * 7) % 3) * 0.1 - p * 0.04, 0.025, 0.025); ctx.globalAlpha = 1; }
   }
   ctx.globalAlpha = 1;
+}
+
+// ---------- R 15.0: poison pools (Witchwood Bog, tile t:'poison'). Drawn per frame like lava (pools can appear
+// mid-match): one cached sludge sprite per neighbour mask (pools merge into one body), plus a few bubbles that swell
+// and pop. Under reduced motion the bubbles drift slowly; lowQ draws one bubble per tile.
+function poolSprite(m, v) {
+  return sprite('pool' + m + '|' + v, 1.2, 1.2, 0.1, 0.1, (g) => {
+    const r = rng(41 + v * 7 + m), n = m & 1 ? -0.1 : 0.1, e = m & 2 ? 1.1 : 0.9, so = m & 4 ? 1.1 : 0.9, w = m & 8 ? -0.1 : 0.1;
+    const shape = (ins) => { g.beginPath(); const x0 = w + ins, y0 = n + ins, x1 = e - ins, y1 = so - ins, q = Math.min(0.3, (x1 - x0) / 2, (y1 - y0) / 2);
+      g.moveTo(x0 + q, y0); g.quadraticCurveTo((x0 + x1) / 2, y0 - (m & 1 ? 0 : 0.04), x1 - q, y0); g.quadraticCurveTo(x1, y0, x1, y0 + q); g.quadraticCurveTo(x1 + (m & 2 ? 0 : 0.04), (y0 + y1) / 2, x1, y1 - q);
+      g.quadraticCurveTo(x1, y1, x1 - q, y1); g.quadraticCurveTo((x0 + x1) / 2, y1 + (m & 4 ? 0 : 0.04), x0 + q, y1); g.quadraticCurveTo(x0, y1, x0, y1 - q); g.quadraticCurveTo(x0 - (m & 8 ? 0 : 0.04), (y0 + y1) / 2, x0, y0 + q); g.quadraticCurveTo(x0, y0, x0 + q, y0); g.closePath(); };
+    shape(-0.02); g.fillStyle = '#0d1a08'; g.fill(); // muddy rim
+    shape(0.03); g.fillStyle = lg(g, 0, 0, 1, 1, [[0, '#3f9a1a'], [0.55, '#25670d'], [1, '#143a06']]); g.fill();
+    g.save(); shape(0.03); g.clip();
+    for (let i = 0; i < 4; i++) { const x = 0.15 + r() * 0.7, y = 0.15 + r() * 0.7, rad = 0.12 + r() * 0.16, gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, 'rgba(160,255,90,0.35)'); gr.addColorStop(1, 'rgba(160,255,90,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
+    g.strokeStyle = 'rgba(210,255,170,0.35)'; g.lineWidth = 0.02; for (let i = 0; i < 2; i++) { const x = 0.25 + r() * 0.5, y = 0.25 + r() * 0.5; g.beginPath(); g.ellipse(x, y, 0.12 + r() * 0.1, 0.05, 0, 0, TAU); g.stroke(); }
+    for (let i = 0; i < 3; i++) { const x = 0.2 + r() * 0.6, y = 0.2 + r() * 0.6, rad = 0.025 + r() * 0.03; g.fillStyle = 'rgba(190,255,130,0.5)'; g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill(); g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(x - rad * 0.4, y - rad * 0.5, rad * 0.4, rad * 0.4); }
+    g.restore();
+  });
+}
+function poolMask(s, x, y) { return (isT(s, x, y - 1, 'poison') ? 1 : 0) | (isT(s, x + 1, y, 'poison') ? 2 : 0) | (isT(s, x, y + 1, 'poison') ? 4 : 0) | (isT(s, x - 1, y, 'poison') ? 8 : 0); }
+function drawPool(r, ctx, x, y, T) {
+  const s = r.state; blit(ctx, poolSprite(poolMask(s, x, y), (x * 3 + y * 5) % 3), x, y);
+  const sp = r.reduced ? 0.25 : 1, nb = r.lowQ ? 1 : 2;
+  for (let i = 0; i < nb; i++) {
+    const h = ((x * 73 + y * 151 + i * 37) % 97) / 97, ph = (T * 0.55 * sp + h) % 1, bx = x + 0.25 + ((h * 7 + i * 0.4) % 1) * 0.5, by = y + 0.3 + ((h * 13 + i * 0.3) % 1) * 0.45;
+    if (ph < 0.86) { const rad = 0.025 + ph * 0.07; ctx.globalAlpha = 0.85; ctx.fillStyle = '#9bea3a'; ctx.beginPath(); ctx.arc(bx, by, rad, 0, TAU); ctx.fill(); ctx.fillStyle = 'rgba(240,255,220,0.8)'; ctx.fillRect(bx - rad * 0.45, by - rad * 0.55, rad * 0.38, rad * 0.38); }
+    else { const k = (ph - 0.86) / 0.14; ctx.globalAlpha = 0.7 * (1 - k); ctx.strokeStyle = '#c8ff8a'; ctx.lineWidth = 0.018; ctx.beginPath(); ctx.ellipse(bx, by, 0.1 + k * 0.1, 0.05 + k * 0.04, 0, 0, TAU); ctx.stroke(); }
+  }
+  if (!r.lowQ) { ctx.globalCompositeOperation = 'lighter'; dot(ctx, '#7dff4a', x + 0.5, y + 0.5, 0.75, 0.1 + 0.05 * Math.sin(T * 2 * sp + x + y)); ctx.globalCompositeOperation = 'source-over'; }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- R 15.0: telegraphed location events (W: s.locWarn = { kind, round, tiles, area?, rings?, centers?, center?,
+// radius? }) drawn like the meteor warning: pulsing tinted tiles, the area / ring band outlined, centres crossed.
+const WARN_COL = { blizzard: '#9fe6ff', eruption: '#ff6a2a', flood: '#3da5ff', gravityWell: '#b06bff', toxicFog: '#7dff4a', sandstorm: '#e0b26a' };
+export function warn(r, ctx, s, T) {
+  const w = s.locWarn; if (!w || !w.tiles) return;
+  const col = WARN_COL[w.kind] || '#ffb070', p = 0.5 + 0.5 * Math.sin(T * (r.reduced ? 2 : 6)), [cr, cg, cb] = hex(col);
+  ctx.fillStyle = `rgba(${cr},${cg},${cb},${0.1 + p * 0.14})`;
+  for (const t of w.tiles) if (ringOf(t.x, t.y) >= s.storm.ring) ctx.fillRect(t.x + 0.04, t.y + 0.04, 0.92, 0.92);
+  ctx.strokeStyle = `rgba(${cr},${cg},${cb},${0.55 + p * 0.4})`; ctx.lineWidth = 0.06; ctx.setLineDash([0.22, 0.14]); ctx.lineDashOffset = -T * (r.reduced ? 0.1 : 0.6);
+  if (w.area) ctx.strokeRect(w.area.x0 + 0.06, w.area.y0 + 0.06, w.area.x1 - w.area.x0 + 0.88, w.area.y1 - w.area.y0 + 0.88);
+  if (w.rings) for (const q of [w.rings[0], w.rings[1] + 1]) if (q < SIZE / 2) ctx.strokeRect(q + 0.04, q + 0.04, SIZE - q * 2 - 0.08, SIZE - q * 2 - 0.08);
+  if (w.center && w.radius) { ctx.beginPath(); ctx.arc(w.center.x + 0.5, w.center.y + 0.5, w.radius + 0.5, 0, TAU); ctx.stroke(); }
+  ctx.setLineDash([]);
+  for (const c of w.centers || (w.center ? [w.center] : [])) {
+    ctx.beginPath(); ctx.arc(c.x + 0.5, c.y + 0.5, 0.4 + p * 0.08, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(c.x - 0.05, c.y + 0.5); ctx.lineTo(c.x + 1.05, c.y + 0.5); ctx.moveTo(c.x + 0.5, c.y - 0.05); ctx.lineTo(c.x + 0.5, c.y + 1.05); ctx.stroke();
+  }
 }
 
 // per-frame light glows (called from world.js drawLighting with 'lighter' compositing)
@@ -612,6 +663,12 @@ export function overlay(r, ctx, s, T) {
       g.addColorStop(0, 'rgba(6,3,14,0)'); g.addColorStop(1, 'rgba(6,3,14,0.9)');
       ctx.fillStyle = g;
     } else ctx.fillStyle = 'rgba(6,3,14,0.45)';
+    ctx.fillRect(-4, -4, 24, 24);
+  }
+  if (s.sandstorm && !s.eclipse) { // R 15.0: Sandstorm (W): vision drops for a round, sand-tinted, ~4.5 tiles of sight
+    const me = r.viewer && r.viewer(), d = me && me.alive && r.disp.get(me.id), k = r.reduced ? 0 : Math.sin(T * 1.3) * 0.15;
+    if (d) { const g = ctx.createRadialGradient(d.x + 0.5, d.y + 0.5, 3.2 + k, d.x + 0.5, d.y + 0.5, 5.2 + k); g.addColorStop(0, 'rgba(150,110,55,0.08)'); g.addColorStop(1, 'rgba(120,86,40,0.86)'); ctx.fillStyle = g; }
+    else ctx.fillStyle = 'rgba(130,95,45,0.4)';
     ctx.fillRect(-4, -4, 24, 24);
   }
 }

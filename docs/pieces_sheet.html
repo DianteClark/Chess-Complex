@@ -1,34 +1,61 @@
-<!doctype html><html><head><meta charset="utf-8"><title>A4 piece contact sheet</title>
-<style>body{background:#15121d;color:#ddd;font:12px system-ui;margin:10px}h3{margin:14px 0 4px;font-weight:600}
-.row{display:flex;align-items:flex-end;gap:2px;flex-wrap:nowrap}.big canvas{background:radial-gradient(#2b2638,#1a1724)}.sm{display:flex;gap:6px;align-items:center;margin-left:12px}
-.sm img{width:32px;height:32px}.lbl{width:110px;flex:none}</style></head><body>
+<!doctype html><html><head><meta charset="utf-8"><title>Piece contact sheet</title>
+<style>body{background:#15121d;color:#ddd;font:12px system-ui;margin:10px}h2{margin:18px 0 6px;font-weight:600;font-size:15px}
+.row{display:flex;align-items:flex-end;gap:2px;flex-wrap:nowrap}.big canvas{background:radial-gradient(#2b2638,#1a1724)}
+.sm{display:flex;gap:6px;align-items:flex-end;margin:2px 0 10px 112px;flex-wrap:wrap}.sm img{display:block}
+.lbl{width:110px;flex:none}.hd{display:flex;gap:2px;margin-left:112px;color:#9a93b8}.hd span{text-align:center;flex:none}
+.light canvas{background:radial-gradient(#d9d4cc,#a8a196)!important}</style></head><body>
 <div id="out"></div>
 <script type="module">
-import { drawPiece, pieceIcon, materialOf } from '../js/pieces.js';
+// Contact sheet (CA, 15.0). Query: ?skins=a,b&pieces=a,b&big=110&t=<sec>&res=<px>&light (light board backdrop)
+// Default: synchronous final sprites; auras drawn at t (static unless ?t is given).
+import { drawPiece, drawPieceAura, hasAura, pieceIcon, iconReady, materialOf } from '../js/pieces.js';
 import { SKINS } from '../js/data.js';
 const q = new URLSearchParams(location.search);
-const PIECES = (q.get('pieces') || 'pawn,knight,bishop,rook,queen,king,hollow,colossus').split(',');
-let skins = q.get('skins') ? q.get('skins').split(',') : Object.keys(SKINS);
-const big = +(q.get('big') || 160), t = +(q.get('t') || 0), live = q.has('t'); // ?t=<sec> draws live (queued, stand-ins first); default: synchronous final sprites
-const res = q.get('res') ? +q.get('res') : undefined; // force a sprite resolution (e.g. res=512 for the hero tier)
+const NEW = ['pawn', 'veteran', 'champion', 'knight', 'knight.asc', 'bishop', 'bishop.asc', 'rook', 'rook.asc', 'queen', 'queen.asc', 'king', 'king.boss'];
+const PIECES = q.get('pieces') ? q.get('pieces').split(',') : NEW;
+const skins = q.get('skins') ? q.get('skins').split(',') : Object.keys(SKINS);
+const big = +(q.get('big') || 110), t = +(q.get('t') || 0), live = q.has('t');
+const res = q.get('res') ? +q.get('res') : undefined;
+const ICON_PX = (q.get('icons') || '28,40,64').split(',').map(Number);
 const out = document.getElementById('out');
-for (const s of skins) {
-  const m = materialOf(s);
-  const row = document.createElement('div'); row.className = 'row';
-  row.innerHTML = `<div class="lbl"><b>${s}</b><br>${m.type}${m.pat ? ' / ' + m.pat : ''}${m.anim ? '<br>anim ' + m.anim : ''}</div>`;
-  const bigWrap = document.createElement('div'); bigWrap.className = 'row big';
-  for (const p of PIECES) {
-    const c = document.createElement('canvas'); const dpr = 1; c.width = big * dpr; c.height = big * 1.15 * dpr; c.style.width = big + 'px'; c.style.height = big * 1.15 + 'px';
-    const x = c.getContext('2d'); x.translate(big / 2, big * 1.05); const sc = big * 0.78; x.scale(sc, sc);
-    drawPiece(x, p, p === 'hollow' || p === 'colossus' ? (s === skins[0] ? 'hollow' : s) : s, live ? { t, res } : { res });
-    bigWrap.appendChild(c);
-  }
-  row.appendChild(bigWrap);
-  const sm = document.createElement('div'); sm.className = 'sm';
-  for (const p of PIECES) { const i = new Image(); i.src = pieceIcon(p, s, null, 32); sm.appendChild(i); }
-  row.appendChild(sm);
-  out.appendChild(row);
-  await new Promise((r) => setTimeout(r, 0));
+if (q.has('light')) document.body.classList.add('light');
+const icons = [];
+function cell(p, s) {
+  const c = document.createElement('canvas'); c.width = big; c.height = big * 1.25; c.style.width = big + 'px'; c.style.height = big * 1.25 + 'px';
+  const x = c.getContext('2d'); x.translate(big / 2, big * 1.15); const sc = big * 0.72; x.scale(sc, sc);
+  if (hasAura(p)) drawPieceAura(x, p, s, t, 'back');
+  drawPiece(x, p, s, live ? { t, res, aura: false } : { res });
+  if (hasAura(p)) drawPieceAura(x, p, s, t, 'front');
+  return c;
 }
+function header(list) { const h = document.createElement('div'); h.className = 'hd'; for (const p of list) { const s = document.createElement('span'); s.style.width = big + 'px'; s.textContent = p; h.appendChild(s); } out.appendChild(h); }
+function section(title, list, skinList, mapSkin = (p, s) => s) {
+  const h = document.createElement('h2'); h.textContent = title; out.appendChild(h); header(list);
+  return (async () => {
+    for (const s of skinList) {
+      const m = materialOf(s);
+      const row = document.createElement('div'); row.className = 'row';
+      row.innerHTML = `<div class="lbl"><b>${s}</b><br>${m.type}${m.pat ? ' / ' + m.pat : ''}${m.anim ? '<br>anim ' + m.anim : ''}</div>`;
+      const bw = document.createElement('div'); bw.className = 'row big';
+      for (const p of list) bw.appendChild(cell(p, mapSkin(p, s)));
+      row.appendChild(bw); out.appendChild(row);
+      const sm = document.createElement('div'); sm.className = 'sm';
+      for (const px of ICON_PX) for (const p of list) { const i = new Image(); i.width = i.height = px; const sk = mapSkin(p, s); i.src = pieceIcon(p, sk, null, px); icons.push([p, sk, px]); sm.appendChild(i); }
+      out.appendChild(sm);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  })();
+}
+await section('Pawn line, Ascended and boss King', PIECES, skins);
+if (!q.get('pieces')) {
+  await section('Siege enemies', ['hollow', 'colossus'], ['hollow'], (p) => p === 'colossus' ? 'hollow' : 'hollow');
+  const h = document.createElement('h2'); h.textContent = 'Store size (160 px icons)'; out.appendChild(h);
+  const sm = document.createElement('div'); sm.className = 'sm';
+  for (const s of skins.slice(0, 4)) for (const p of ['champion', 'queen.asc', 'king.boss']) { const i = new Image(); i.width = i.height = 160; i.src = pieceIcon(p, s, null, 160); icons.push([p, s, 160]); sm.appendChild(i); }
+  out.appendChild(sm);
+}
+const t0 = performance.now();
+while (icons.some(([p, s, px]) => !iconReady(p, s, null, px)) && performance.now() - t0 < 120000) await new Promise((r) => setTimeout(r, 200));
+await new Promise((r) => setTimeout(r, 400));
 document.title = 'done';
 </script></body></html>

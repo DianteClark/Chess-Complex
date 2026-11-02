@@ -4,7 +4,10 @@
 // Chat: presets, custom phrases, mute, preset-only filter, host rate limit, malicious payloads, team routing.
 // Voice: signalling, mesh, push-to-talk indicators, mute, a dropped peer, and a denied microphone. Voice pages
 // run in their own Chromium with fake media devices, so the real WebRTC media path is exercised over loopback.
-module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
+module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }) {
+  // 15.0: the first open of the picker asks for favourites (C8 covers that); the other chat tests start set up
+  const skipSetup = (p) => p.evaluate(async () => { const C = await import('/js/chat.js'); C.ensureChat(window.__cc.profile).setup = true; });
+  const match = async (run, o) => { const r = await match0(run, o); for (const p of Object.values(run.pages)) if (!p.isClosed()) await skipSetup(p); return r; };
   const chatLog = (p, who) => p.evaluate(async (who) => (await import('/js/chat.js')).chat.log.filter((l) => !who || l.name === who).map((l) => `${l.name}: ${l.text}`), who || null);
   const say = (p, ref) => p.evaluate(async (ref) => (await import('/js/chat.js')).chat.say(ref), ref);
   const raw = (p, m) => p.evaluate((m) => window.__cc.session.client.send(m), m);
@@ -19,8 +22,12 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     await tap(c, '#s-game [data-act="emotes"]');
     run.check(await L.visible(c, '#emote-menu .qc-tabs'), 'c1: quick chat tabs not visible');
     const tabs = await c.evaluate(() => [...document.querySelectorAll('#emote-menu .qc-tab')].map((t) => t.textContent));
-    run.check(tabs.includes('Tactics') && tabs.includes('Players') && tabs.includes('Log'), `c1: tabs ${tabs}`);
-    await c.evaluate(() => document.querySelector('#emote-menu [data-tab="tactic"]').click()); await sleep(150);
+    run.check(tabs[0] === 'Favourites' && tabs.includes('All Phrases') && tabs.includes('Players') && tabs.includes('Log'), `c1: tabs ${tabs}`);
+    run.check(await c.evaluate(() => document.querySelector('#emote-menu .qc-tab.on').dataset.tab === 'fav' && document.querySelectorAll('#emote-menu .qc-p').length === 8), 'c1: picker did not open on 8 favourites');
+    await c.evaluate(() => document.querySelector('#emote-menu [data-tab="all"]').click()); await sleep(150);
+    const heads = await c.evaluate(() => [...document.querySelectorAll('#emote-menu .qc-h')].map((h) => h.textContent));
+    run.check(heads.includes('Hello') && heads.includes('Tactics') && heads.includes('GG'), `c1: All Phrases sections ${heads}`);
+    await c.evaluate(() => document.querySelector('#emote-menu .qc-cat[data-tab="tactic"]').click()); await sleep(150);
     const n = await c.evaluate(() => document.querySelectorAll('#emote-menu .qc-p').length);
     run.check(n >= 15, `c1: only ${n} tactic phrases`);
     await run.shot('c1', 'picker');
@@ -42,6 +49,57 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     const bots = await host.evaluate(() => window.__cc.session.host.s.units.filter((u) => u.bot).map((u) => u.pid));
     const ok = await host.evaluate(async (pid) => { const C = await import('/js/chat.js'); const s = window.__cc.session.host.s; return !!C.hostCheck({}, pid, { k: 'r.nice' }, s) && !C.hostCheck({}, pid, { x: 'free text' }, s); }, bots[0]);
     run.check(ok, 'host: bot preset should pass and bot free text should be refused');
+    run.check(!errorsOn(run), 'page errors');
+  };
+
+  // C8 (15.0): first open asks for favourites (6-10, default 8); the picker then opens on them; Edit Favourites; All Phrases
+  S['C8-chat-favourites'] = async (run) => {
+    const { host, c } = await match0(run, { bots: 2 });
+    await autoplay(host, false); await autoplay(c, false);
+    await skipSetup(host);
+    const st = () => c.evaluate(() => { const m = document.querySelector('#emote-menu'), q = (s) => m.querySelector(s); return { open: !m.classList.contains('hidden'), pick: m.classList.contains('qc-picking'), head: (q('.qc-pick-h b') || {}).textContent || '', n: (q('.qc-pick-n') || {}).textContent || '', done: q('[data-qc="pick-done"]') ? { dis: q('[data-qc="pick-done"]').disabled, txt: q('[data-qc="pick-done"]').textContent } : null, tab: (q('.qc-tab.on') || { dataset: {} }).dataset.tab, phrases: [...m.querySelectorAll('.qc-body [data-say]')].map((b) => b.dataset.say), setup: window.__cc.profile.chat && window.__cc.profile.chat.setup, fav: window.__cc.profile.chat && window.__cc.profile.chat.fav }; });
+    await tap(c, '#s-game [data-act="emotes"]'); await sleep(200);
+    let v = await st();
+    run.check(v.open && v.pick && /Pick your favourites/.test(v.head), `c1: first open did not ask for favourites ${JSON.stringify(v)}`);
+    run.check(v.done && !v.done.dis && v.n === '8 / 10', `c1: chooser should start from the 8 suggested ${JSON.stringify(v)}`);
+    await run.shot('c1', 'fav-setup');
+    // clear the suggestions, then pick 5 (not enough), then 7
+    for (const r of v.fav.filter(Boolean)) await c.evaluate((r) => document.querySelector(`#emote-menu [data-tog="${r}"]`).click(), r);
+    const pickList = ['t.king', 't.help', 'r.wow', 'r.clutch', 'x.check', 'k.ggwp', 'g.hi'];
+    for (const r of pickList.slice(0, 5)) await c.evaluate((r) => document.querySelector(`#emote-menu [data-tog="${r}"]`).click(), r);
+    v = await st(); run.check(v.done.dis && /Pick 1 more/.test(v.done.txt), `c1: Done enabled with 5 ${JSON.stringify(v.done)}`);
+    for (const r of pickList.slice(5)) await c.evaluate((r) => document.querySelector(`#emote-menu [data-tog="${r}"]`).click(), r);
+    v = await st(); run.check(!v.done.dis && v.n === '7 / 10', `c1: Done should be on with 7 ${JSON.stringify(v)}`);
+    await c.evaluate(() => document.querySelector('#emote-menu [data-qc="pick-done"]').click()); await sleep(200);
+    v = await st();
+    run.check(v.setup && v.tab === 'fav' && JSON.stringify(v.phrases) === JSON.stringify(pickList), `c1: favourites view ${JSON.stringify(v)}`);
+    // closing and reopening goes straight to the favourites
+    await c.evaluate(() => document.querySelector('#emote-menu [data-qc="close"]').click()); await sleep(150);
+    await tap(c, '#s-game [data-act="emotes"]'); await sleep(200);
+    v = await st(); run.check(!v.pick && v.tab === 'fav' && v.phrases.length === 7, `c1: reopen ${JSON.stringify(v)}`);
+    // 10 is the cap
+    await c.evaluate(() => document.querySelector('#emote-menu [data-qc="favs"]').click()); await sleep(150);
+    for (const r of ['t.storm', 't.omw', 't.ult', 't.low']) await c.evaluate((r) => document.querySelector(`#emote-menu [data-tog="${r}"]`).click(), r);
+    v = await st(); run.check(v.n === '10 / 10', `c1: cap at 10 ${v.n}`);
+    await c.evaluate(() => document.querySelector('#emote-menu [data-qc="pick-cancel"]').click()); await sleep(150);
+    v = await st(); run.check(v.phrases.length === 7, `c1: cancel changed favourites ${v.phrases.length}`);
+    // a favourite says the phrase to the host
+    await c.evaluate(() => document.querySelector('#emote-menu [data-say="t.king"]').click()); await sleep(700);
+    const hl = await host.evaluate(async () => (await import('/js/chat.js')).chat.log.map((l) => l.text));
+    run.check(hl.includes('Go for the King'), `host did not get the favourite ${JSON.stringify(hl)}`);
+    // All Phrases: organised by category, chips filter
+    await sleep(1600); await tap(c, '#s-game [data-act="emotes"]'); await sleep(150);
+    await c.evaluate(() => document.querySelector('#emote-menu [data-tab="all"]').click()); await sleep(150);
+    const all = await c.evaluate(() => ({ heads: [...document.querySelectorAll('#emote-menu .qc-h')].map((h) => h.textContent), n: document.querySelectorAll('#emote-menu .qc-body [data-say]').length, chips: [...document.querySelectorAll('#emote-menu .qc-cat')].map((b) => b.textContent) }));
+    run.note(`All Phrases: ${all.n} phrases, sections ${all.heads.join('/')}`);
+    run.check(all.n >= 70 && all.heads.length >= 5 && all.chips[0] === 'All', `All Phrases view ${JSON.stringify(all)}`);
+    await run.shot('c1', 'all-phrases');
+    await c.evaluate(() => document.querySelector('#emote-menu .qc-cat[data-tab="thanks"]').click()); await sleep(150);
+    const gg = await c.evaluate(() => ({ heads: [...document.querySelectorAll('#emote-menu .qc-h')].map((h) => h.textContent), n: document.querySelectorAll('#emote-menu .qc-body [data-say]').length }));
+    run.check(gg.heads.length === 1 && gg.heads[0] === 'GG' && gg.n === 12, `GG chip ${JSON.stringify(gg)}`);
+    // the slot count lives in Customise too (6-10)
+    const favn = await c.evaluate(async () => { const C = (await import('/js/chat.js')).chat; C.close(); C.openModal(); const m = document.querySelector('#m-chat'); for (let i = 0; i < 6; i++) m.querySelector('[data-favn="-1"]').click(); const a = window.__cc.profile.chat.favN; for (let i = 0; i < 6; i++) m.querySelector('[data-favn="1"]').click(); const b = window.__cc.profile.chat.favN; C.closeModal(); return [a, b, document.querySelectorAll('#qcm-favs .qcm-slot').length]; });
+    run.check(favn[0] === 6 && favn[1] === 10 && favn[2] === 10, `Customise slot count ${favn}`);
     run.check(!errorsOn(run), 'page errors');
   };
 

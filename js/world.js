@@ -193,7 +193,7 @@ function tileTexture(L, th, par, v) {
 
 // ---------- static board (cached by Renderer.floorCache) ----------
 export const isSolidT = (t) => t === 'wall' || t === 'rubble' || t === 'crate' || t === 'chest';
-export function solidsKey(s) { let h = 0; for (let i = 0; i < s.tiles.length; i++) { const t = s.tiles[i].t; if (isSolidT(t) || (t === 'shrine' && s.tiles[i].cd === 0)) h = (Math.imul(h, 31) + i * 7 + t.length) | 0; else if (t === 'pit' || t === 'crumble') h = (Math.imul(h, 31) + HZ.bakeKey(s.tiles[i], i)) | 0; } return h; }
+export function solidsKey(s) { let h = 0; for (let i = 0; i < s.tiles.length; i++) { const t = s.tiles[i].t; if (isSolidT(t) || (t === 'shrine' && s.tiles[i].cd === 0)) h = (Math.imul(h, 31) + i * 7 + t.length) | 0; else if (t === 'pit' || t === 'crumble') h = (Math.imul(h, 31) + HZ.bakeKey(s.tiles[i], i)) | 0; else if (t === 'lava' || t === 'ice' || t === 'poison') h = (Math.imul(h, 31) + i * 3 + t.length) | 0; } return h; } // R 15.0: + tiles a location event can create mid-match (their light cuts are baked)
 export function paintBoard(r, ctx, live) {
   const s = r.state, th = r.theme, L = r.lookOf();
   const FB = r.bounds || { x0: 0, y0: 0, x1: SIZE - 1, y1: SIZE - 1 };
@@ -530,6 +530,7 @@ export function bakeLight(r, g) {
     else if (k === 'ice') cut(x + 0.5, y + 0.5, 0.9, 0.25);
     else if (k === 'geyser') cut(x + 0.5, y + 0.5, 1.2, 0.4);
     else if (k === 'conveyor') cut(x + 0.5, y + 0.5, 0.8, 0.15);
+    else if (k === 'poison') cut(x + 0.5, y + 0.5, 1.1, 0.4); // R 15.0: bog pools glow faintly
   }
   if (s.hill && s.tiles[(HILL.y0 + 1) * SIZE + HILL.x0 + 1].t === 'throne') { cut(HILL.x0 + 2, HILL.y0 + 2, 3.6, 0.75); for (const [px, py] of [[0, 0], [4, 0], [0, 4], [4, 4]]) cut(HILL.x0 + px, HILL.y0 + py - 0.4, 1.4, 0.7); } // B4: throne + braziers
   q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
@@ -757,6 +758,28 @@ export function statusIcon(kind) {
   else if (kind === 'root') { g.lineWidth = 3.5; g.moveTo(24, 10); g.lineTo(24, 30); g.moveTo(24, 30); g.lineTo(14, 37); g.moveTo(24, 30); g.lineTo(34, 37); g.moveTo(24, 22); g.lineTo(16, 18); g.moveTo(24, 26); g.lineTo(32, 21); g.stroke(); }
   else { g.font = '700 22px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(kind)[0].toUpperCase(), 24, 25); }
   ICON.set(kind, c); return c;
+}
+// R 15.0: pips for C's statuses (u.status [{k, t, n}]) next to the HP bar: dark disc, coloured rim, glyph; stacks
+// (poison, Exposed) print their count. Cached per kind + count.
+export const PIP_COL = { burn: '#ff7a2a', poison: '#7dff4a', freeze: '#9fe6ff', stun: '#ffe14d', slow: '#b49cff', shield: '#6fb4ff', haste: '#4dffe1', exposed: '#ff4d4d', enrage: '#ff2a3a' };
+const PIP = new Map();
+export function statusPip(k, n) {
+  const col = PIP_COL[k]; if (!col) return null;
+  const cnt = (k === 'poison' || k === 'exposed') && n > 1 ? Math.min(9, n | 0) : 0, key = k + cnt; let c = PIP.get(key); if (c) return c;
+  c = mkC(48, 48); const g = c.getContext('2d');
+  g.fillStyle = '#0d0b13'; g.beginPath(); g.arc(24, 24, 22, 0, TAU); g.fill(); g.strokeStyle = col; g.lineWidth = 3; g.stroke();
+  g.fillStyle = col; g.strokeStyle = col; g.lineWidth = 4; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath();
+  if (k === 'burn') { g.moveTo(24, 9); g.bezierCurveTo(34, 19, 35, 26, 33, 31); g.bezierCurveTo(31, 38, 17, 38, 15, 31); g.bezierCurveTo(13, 25, 17, 21, 19, 18); g.bezierCurveTo(20, 23, 22, 24, 24, 24); g.bezierCurveTo(23, 18, 22, 14, 24, 9); g.fill(); }
+  else if (k === 'poison') { g.moveTo(24, 9); g.quadraticCurveTo(36, 24, 34, 30); g.arc(24, 29, 10, 0, Math.PI); g.quadraticCurveTo(12, 24, 24, 9); g.fill(); }
+  else if (k === 'freeze') { for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3; g.moveTo(24 + Math.cos(a) * 14, 24 + Math.sin(a) * 14); g.lineTo(24 - Math.cos(a) * 14, 24 - Math.sin(a) * 14); } g.stroke(); }
+  else if (k === 'stun') { for (let j = 0; j < 10; j++) { const r = j % 2 ? 6 : 15, a = j * Math.PI / 5 - Math.PI / 2; g[j ? 'lineTo' : 'moveTo'](24 + Math.cos(a) * r, 24 + Math.sin(a) * r); } g.closePath(); g.fill(); }
+  else if (k === 'slow') { g.moveTo(14, 15); g.lineTo(24, 24); g.lineTo(34, 15); g.moveTo(14, 25); g.lineTo(24, 34); g.lineTo(34, 25); g.stroke(); }
+  else if (k === 'shield') { for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + Math.PI / 6; g[i ? 'lineTo' : 'moveTo'](24 + Math.cos(a) * 14, 24 + Math.sin(a) * 15); } g.closePath(); g.lineWidth = 3.5; g.stroke(); g.globalAlpha = 0.35; g.fill(); g.globalAlpha = 1; }
+  else if (k === 'haste') { g.moveTo(27, 8); g.lineTo(15, 26); g.lineTo(24, 26); g.lineTo(21, 40); g.lineTo(33, 21); g.lineTo(24, 21); g.closePath(); g.fill(); }
+  else if (k === 'exposed') { g.moveTo(24, 10); g.lineTo(36, 15); g.quadraticCurveTo(36, 31, 24, 38); g.quadraticCurveTo(12, 31, 12, 15); g.closePath(); g.lineWidth = 3; g.stroke(); g.lineWidth = 2.5; g.beginPath(); g.moveTo(26, 12); g.lineTo(21, 22); g.lineTo(27, 26); g.lineTo(22, 36); g.stroke(); }
+  else if (k === 'enrage') { g.moveTo(12, 34); g.lineTo(16, 14); g.lineTo(21, 24); g.lineTo(24, 10); g.lineTo(27, 24); g.lineTo(32, 14); g.lineTo(36, 34); g.closePath(); g.fill(); }
+  if (cnt) { g.fillStyle = '#0d0b13'; g.beginPath(); g.arc(36, 36, 11, 0, TAU); g.fill(); g.fillStyle = '#ffffff'; g.font = '800 17px "Chakra Petch", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(cnt), 36, 37); }
+  PIP.set(key, c); return c;
 }
 export function statusesOf(s, u) {
   const out = [];

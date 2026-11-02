@@ -1,17 +1,25 @@
 // Board renderer: themed tiles, pieces, telegraphs, sequenced combat VFX, camera juice.
 import { SIZE, BOARDS, ABILITIES, TRAILS } from './data.js';
-import { drawPiece, skinOf, PIECE_TOP, pieceKind, isAnimatedSkin } from './pieces.js';
+import { drawPiece, skinOf, PIECE_TOP, pieceKind, isAnimatedSkin, drawPieceAura, hasAura } from './pieces.js';
 import { hiSprite } from './fx.js';
 import { ringOf, stats, unitById, previewDamage } from './engine.js';
 import { FX } from './fx.js';
 import * as W10 from './world.js'; // A5 10.0: materials, lighting, void, weather, overlays
 import { CamDirector } from './camdir.js'; // R 10.3: turn-by-turn camera beats
 import * as HZ from './hazards10.js'; // A9 10.0: fallback visuals for new hazard tiles / unit states
+import * as BD from './backdrop.js'; // E1 15.0: location backdrops
+import { LOCATIONS } from './locations.js'; // R 15.0: location weather (W)
 
 const ease = (t) => 1 - Math.pow(1 - t, 3);
 const easeBack = (t) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 const lerp = (a, b, t) => a + (b - a) * t;
 const byY = (a, b) => a.y - b.y;
+// R 15.0: statuses as shown. SV = fx's per-unit status map (V; updated by status events in sequence and by
+// statusSync at the end of each sequence), so tints and pips appear with the hit that applied them. Falls back to the
+// raw state (C's u.status = [{k, t, n}]) when fx has no map.
+let SV = null;
+const hasSt = (u, k) => { if (!u) return false; if (SV) { const m = SV.get(u.id); return !!(m && m.has(k)); } return !!(u.status && u.status.some((q) => q.k === k)); };
+const stN = (u, k) => { if (!u) return 0; if (SV) { const m = SV.get(u.id), q = m && m.get(k); return q ? q.n || 0 : 0; } const q = u.status && u.status.find((v) => v.k === k); return q ? q.n || 0 : 0; };
 const FPAD = 0.7; // static floor cache covers [-FPAD, SIZE+FPAD] in world units
 const MELEE = new Set(['pawnStrike', 'hollowClaw', 'royalStrike', 'pickpocket', 'shove', 'execute', 'tstrike', 'stagger', 'slam', 'lance']);
 const IMPACT = { pawnStrike: 0.12, hollowClaw: 0.12, royalStrike: 0.14, pickpocket: 0.12, shove: 0.12, execute: 0.16, tstrike: 0.12, stagger: 0.12, slam: 0.12, ray: 0.08, siege: 0.25, cross: 0.1, checkmate: 0.1, starburst: 0.1, dominion: 0.1, trample: 0.1, charge: 0.04, decree: 0.04, tripwire: 0.05, lance: 0.1, penance: 0.24, quake: 0.12, gambit: 0.1, colossusSlam: 0.3, phalanx: 0.1, outflank: 0.12, consecrate: 0.2, repel: 0.08, bombard: 0.3, gravity: 0.3, hexBolt: 0.2, soulLance: 0.14, wraithStep: 0.05 };
@@ -92,6 +100,7 @@ export class Renderer {
     this.hooks = hooks;
     this.cam = { x: SIZE / 2, y: SIZE / 2, z: 40, tx: SIZE / 2, ty: SIZE / 2, tz: 40 };
     this.fx = new FX(); this.cd = new CamDirector(this); this.beats = [];
+    this.fx.tagTop = (id) => this.tagTopOf(id); // R 15.0: world y just above a unit's name tag (last frame), for V's head glyphs
     this.disp = new Map(); this.floats = []; this.bubbles = [];
     this.shake = 0; this.time = 0; this.real = 0; this.state = null; this.overlay = null; this.myId = null;
     this.hitFlash = new Map(); this.follow = true; this.hs = 0; this.slow = null; this.punch = 0;
@@ -122,7 +131,17 @@ export class Renderer {
     this.lowQ = next === 2; this.resize();
   }
   setTheme(id) { this.themeId = BOARDS[id] ? id : 'hall'; this.theme = BOARDS[this.themeId]; this.look = null; this.wallSpr = null; this.weather = new W10.Weather(); this.fcache = null; }
-  lookOf() { if (!this.look || this.look.th !== this.theme) { this.look = W10.lookOf(this.themeId, this.theme); this.look.th = this.theme; } return this.look; }
+  lookOf() {
+    if (!this.look || this.look.th !== this.theme || this.look.loc !== this.locId) {
+      this.look = W10.lookOf(this.themeId, this.theme); this.look.th = this.theme; this.look.loc = this.locId;
+      // R 15.0: World Tour: the store board stays the surface (materials, tiles, frame); the weather and ground fog are
+      // the location's (W's LOCATIONS[id].weather / .mood.fog)
+      const L = this.locId && LOCATIONS[this.locId];
+      if (L) { this.look.weather = (L.weather && L.weather[0]) || this.look.weather; this.look.weather2 = (L.weather && L.weather[1]) || null; if (L.mood && L.mood.fog) this.look.fog = L.mood.fog; }
+    }
+    return this.look;
+  }
+  locSync(s) { const id = s && s.location && LOCATIONS[s.location] ? s.location : null; if (id !== this.locId) { this.locId = id; this.look = null; this.weather = new W10.Weather(); } }
   light(x, y, col, rad, life, a) { W10.addLight(this, x, y, col, rad, life, a); }
   // cinematic framing: briefly push the camera in on a big moment, then hand control back
   // R 10.3: shots go through the camera director (respects the Camera setting, a finger on the board and a manual pan)
@@ -143,11 +162,36 @@ export class Renderer {
     this.VW = Math.max(160, this.W - (this.pad.r || 0)); this.CX = this.VW / 2;
     const bw = this.bounds ? this.bounds.x1 - this.bounds.x0 + 1 : SIZE, bh = this.bounds ? this.bounds.y1 - this.bounds.y0 + 1 : SIZE;
     this.fitZoom = Math.min(this.VW / (bw + 1.2), this.VH / (bh + 1.2));
-    this.minZ = this.fitZoom * 0.9; this.maxZ = Math.max(this.fitZoom * 3, 70);
+    this.minZ = this.fitZoom * 0.9; this.maxZ = Math.max(this.fitZoom * 3, 70, this.closeZoom() * 1.6);
     if (!this.zoomSet) { this.cam.z = this.cam.tz = this.defaultZoom(); }
   }
   setPad(t, b, r = 0) { this.pad = { t, b, r }; this.resize(); }
-  defaultZoom() { return this.bounds ? this.fitZoom : Math.max(this.fitZoom, Math.min(this.VW || this.W, this.VH) / 10.5); }
+  // R 15.0: two zoom levels. 'close' = an 8x8-tile window (the short side of the board viewport spans 8 tiles, like a
+  // chessboard), 'board' = the whole arena. defaultZoom() is the current level's zoom: every camera beat, recentre and
+  // shot is relative to it, so the director frames action within the level the player picked. Pinch stays continuous
+  // and snaps the level to whichever one is nearer.
+  closeZoom() { return Math.max(this.fitZoom || 1, Math.min(this.VW || this.W, this.VH || this.H) / 8); }
+  defaultZoom() { return this.zoomLevel === 'board' ? this.fitZoom : this.closeZoom(); }
+  zoomFloor() { return this.zoomLevel === 'board' ? this.fitZoom : Math.max(this.fitZoom, this.closeZoom() * 0.8); }
+  setZoomLevel(l, glide = true) {
+    l = l === 'board' ? 'board' : 'close'; const was = this.zoomLevel; this.zoomLevel = l; this.zoomSet = true;
+    if (l !== was) this.zoomUI();
+    if (!glide || !this.state) return;
+    const cd = this.cd, b = this.bounds;
+    if (l === 'board') { cd.user = false; cd.glide(b ? (b.x0 + b.x1 + 1) / 2 : SIZE / 2, b ? (b.y0 + b.y1 + 1) / 2 : SIZE / 2, this.fitZoom, { force: true }); return; }
+    const me = this.myId != null ? unitById(this.state, this.myId) : null, id = me && me.alive ? me.id : (cd.watch ?? this.state.active), d = this.disp.get(id);
+    cd.user = false; cd.watch = me && me.alive ? null : cd.watch;
+    if (d) cd.glide(d.tx + 0.5, d.ty + 0.5, this.closeZoom(), { force: true }); else cd.glide(null, null, this.closeZoom(), { force: true });
+  }
+  toggleZoom() { this.setZoomLevel(this.zoomLevel === 'board' ? 'close' : 'board'); return this.zoomLevel; }
+  // keeps the HUD toggle (#s-game [data-act=zoom]) in step: data-level + label, for pinch-driven level changes too
+  zoomUI() {
+    if (this.c.id !== 'board' || typeof document === 'undefined') return;
+    const b = this.zoomBtn || (this.zoomBtn = document.querySelector('#s-game [data-act="zoom"]')); if (!b) return;
+    const board = this.zoomLevel === 'board'; b.dataset.level = this.zoomLevel; b.setAttribute('aria-pressed', board ? 'true' : 'false');
+    b.setAttribute('aria-label', board ? 'Zoom in to your piece' : 'Show the whole board');
+    const t = b.querySelector('.zl-t'); if (t) t.textContent = board ? 'Board' : '8x8';
+  }
   setBounds(b) { this.bounds = b; this.zoomSet = false; this.resize(); if (b) { this.cam.x = this.cam.tx = (b.x0 + b.x1 + 1) / 2; this.cam.y = this.cam.ty = (b.y0 + b.y1 + 1) / 2; } }
   get z() { return this.cam.z * (1 + this.punch); }
   toScreen(wx, wy) { return [(wx - this.cam.x) * this.z + (this.CX ?? this.W / 2), (wy - this.cam.y) * this.z + this.CY]; }
@@ -178,11 +222,26 @@ export class Renderer {
     this.zoomSet = true; this.cam.vx = this.cam.vy = this.cam.vz = 0; this.cd.manual();
     const [nx, ny] = this.toWorld(sx, sy);
     this.cam.x += wx - nx; this.cam.y += wy - ny; this.cam.tx = this.cam.x; this.cam.ty = this.cam.y;
+    // R 15.0: pinch / wheel stay continuous; the level follows whichever is nearer (geometric midpoint)
+    const lv = this.cam.z < Math.sqrt(this.fitZoom * this.closeZoom()) ? 'board' : 'close';
+    if (lv !== this.zoomLevel) { this.zoomLevel = lv; this.zoomUI(); }
   }
   pan(dx, dy) { this.cam.x -= dx / this.z; this.cam.y -= dy / this.z; this.cam.tx = this.cam.x; this.cam.ty = this.cam.y; this.cam.vx = this.cam.vy = 0; this.cd.manual(); }
-  overview() { const b = this.bounds; this.cd.manual(); this.cd.glide(b ? (b.x0 + b.x1 + 1) / 2 : SIZE / 2, b ? (b.y0 + b.y1 + 1) / 2 : SIZE / 2, this.fitZoom, { force: true }); this.zoomSet = true; }
-  closeup() { const cd = this.cd; cd.user = false; this.zoomSet = true; const d = this.disp.get(this.state && this.state.active); if (d) cd.glide(d.tx + 0.5, d.ty + 0.5, this.defaultZoom(), { force: true }); else cd.glide(null, null, this.defaultZoom(), { force: true }); }
-  reset() { this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; this.banner = null; this.dim = null; this.lights = []; this.fcache = null; this.cd.reset(); this.beats = []; this.cineFree = 0; this.lastActEnd = 0; this.introEnd = 0; this.lastBase = null; }
+  // R 15.0 (menu slowdown): called once when the game screen is left. Drops everything a finished match pins: the
+  // timeline (closures over old states), particles, the full-screen background bakes, both floor bakes, name / tint
+  // sprites, the location backdrop layers (E1, up to ~30 MB) and the board canvas's own backing store; resize() (from
+  // game.enter) restores the canvas size, and every cache rebuilds lazily on the next match.
+  sleep() {
+    if (this.asleep) return; this.asleep = true;
+    this.reset(); this.bgCache = null; this.fcache = this.fcache2 = null; this.fcMemo = null; this.redVg = null; this.look = null; this.locId = null;
+    if (this.nameC) this.nameC.clear(); if (this.tintC) this.tintC.clear(); this.labels = []; this.nLabels = 0; this.drawPool = []; this.drawList = []; this.lights = [];
+    this.weather = new W10.Weather(); this.loupe = null;
+    try { if (BD.releaseBackdrops) BD.releaseBackdrops(); } catch {}
+    this.c.width = this.c.height = 1; // ~5 MB of canvas memory on a phone; resize() puts it back
+  }
+  overview() { this.setZoomLevel('board'); }
+  closeup() { this.setZoomLevel('close'); }
+  reset() { this.zoomLevel = 'close'; this.zoomUI(); this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; this.banner = null; this.dim = null; this.lights = []; this.fcache = null; this.cd.reset(); this.beats = []; this.cineFree = 0; this.lastActEnd = 0; this.introEnd = 0; this.lastBase = null; }
 
   kick(n) { if (this.shakeOn && !this.reduced) this.shake = Math.min(16, this.shake + n); }
   hitstop(t) { if (!this.reduced) this.hs = Math.max(this.hs, t); }
@@ -256,6 +315,10 @@ export class Renderer {
     }
     const prevActive = this.state ? this.state.active : null;
     this.state = s;
+    // V 15.0: status auras, boss King, crown telegraph follow the state; after the first state this runs at the end of
+    // each sequence (the safety sync below) so auras appear with the hit that applied them, not when the message lands
+    if (first && this.fx.statusSync) this.fx.statusSync(s.units, s);
+    this.locSync(s); // R 15.0: the location drives weather (the board stays the player's store board)
     if (first) return;
     // R 10.3: turns queue one after another (no interleaving, no cut-off). Far behind: squeeze what follows the current
     // beat; only a huge backlog (a hidden tab coming back) falls back to the instant flush.
@@ -330,7 +393,7 @@ export class Renderer {
           if (d && MELEE.has(e.ab)) { const dx = e.anchor.x - e.from.x, dy = e.anchor.y - e.from.y, l = Math.hypot(dx, dy) || 1; d.lunge = { t0: this.time, dx: dx / l, dy: dy / l, dur: 0.26 }; }
           this.fx.ability(e, this.colorOf(e.id), this.glowOf(e.id));
           this.light(e.anchor.x + 0.5, e.anchor.y + 0.5, this.glowOf(e.id), e.slot === 'ult' ? 3.4 : 2.2, e.slot === 'ult' ? 0.9 : 0.5);
-          this.sfx('ab:' + e.ab);
+          this.sfx('ab:' + e.ab + (e.asc ? ':asc' : '')); // AU 15.0: Ascended ultimates get an empowered layer
           if (e.ab === 'colossusSlam' && d) { d.squash = 1; this.later(0.26, () => { d.squash = 1; this.punch = Math.max(this.punch, 0.08); this.hitstop(0.07); this.haptic([60, 30, 90]); }); }
           if (e.ab === 'quake') this.haptic([30, 20, 30, 20, 30]);
         });
@@ -382,6 +445,7 @@ export class Renderer {
     if (hits >= 2 && lastAb) this.later(t, () => { const a = events.find((q) => q.e === 'ability'); if (a) this.floats.push({ x: a.anchor.x + 0.5, y: a.anchor.y - 1, text: `${hits} HITS`, t: 0, life: 1.1, color: '#ffd24d', size: 0.75 }); });
     // safety sync after the sequence plays
     this.later(t + 0.15, () => {
+      if (this.fx.statusSync) this.fx.statusSync(this.state.units, this.state); // V 15.0 (R: in step with the sequence)
       for (const u of this.state.units) {
         const d = this.disp.get(u.id); if (!d) continue;
         d.hp = u.alive ? u.hp : 0;
@@ -397,9 +461,19 @@ export class Renderer {
   onDmg(e, n) {
     const d = this.disp.get(e.id); if (!d) return;
     const x = d.x + 0.5, y = d.y;
-    d.hp = Math.max(0, d.hp - e.n);
+    if (!e.shield) d.hp = Math.max(0, d.hp - e.n); // R 15.0: a shield absorb ({shield:true}, n = absorbed) never touches HP
     const srcD = e.src != null ? this.disp.get(e.src) : null, ang = srcD && srcD !== d ? Math.atan2(d.y - srcD.y, d.x - srcD.x) : -Math.PI / 2;
-    const fxHit = () => this.fx.hit(x, y + 0.45, { n: e.n, crit: e.crit, elem: e.self ? 'self' : e.lava ? 'lava' : e.storm ? 'storm' : e.trap ? 'trap' : e.thorns ? 'thorns' : null, ang });
+    const fxHit = () => this.fx.hit(x, y + 0.45, { n: e.n, crit: e.crit, elem: e.self ? 'self' : e.lava ? 'lava' : e.storm ? 'storm' : e.trap ? 'trap' : e.thorns ? 'thorns' : null, ang, dot: e.dot, shield: e.shield }); // V 15.0: dot / shield
+    if (e.shield) { // R 15.0: absorb number in shield blue, no HP chip
+      this.floats.push({ x: x + (n > 1 ? (Math.random() - 0.5) * 0.3 : 0), y: y - 0.95, text: 'ABSORB ' + e.n, t: 0, life: 1, color: '#9fd0ff', size: 0.62 });
+      fxHit(); this.light(x, y + 0.5, '#6fb4ff', 1.3, 0.25, 0.7); this.kick(Math.min(4, 1 + e.n / 12)); this.sfx('block');
+      return;
+    }
+    if (e.dot) { // R 15.0: status ticks (burn / poison) read as their colour, small, no camera juice
+      this.floats.push({ x: x + 0.22, y: y - 0.85, text: '-' + e.n, t: 0, life: 1.05, color: e.dot === 'poison' ? '#9bff5a' : e.dot === 'burn' ? '#ff9a3d' : '#ffb0b0', size: 0.78 });
+      fxHit(); this.hitFlash.set(e.id, 0.45); this.sfx('dot:' + e.dot); if (e.id === this.myId) { this.haptic(15); this.hurt = Math.max(this.hurt || 0, 0.5); }
+      return;
+    }
     if (e.self) { // Gambit's blood price: muted, no camera juice
       this.floats.push({ x: x + 0.25, y: y - 0.8, text: '-' + e.n, t: 0, life: 1, color: '#c97a80', size: 0.7 });
       fxHit(); this.hitFlash.set(e.id, 0.5);
@@ -416,7 +490,7 @@ export class Renderer {
     this.kick(e.crit ? 10 : Math.min(7, 2 + e.n / 8));
     if (e.crit) { this.hitstop(0.09); this.punch = Math.max(this.punch, 0.05); }
     else if (e.n >= 20) this.hitstop(0.045);
-    this.sfx(e.shield ? 'block' : e.crit ? 'crit' : e.storm ? 'burn' : 'hit');
+    this.sfx(e.dot ? 'dot:' + e.dot : e.shield ? 'block' : e.crit ? 'crit' : e.storm ? 'burn' : 'hit'); // AU 15.0: status ticks
     if (e.id === this.myId) { this.haptic(e.crit ? [30, 40, 60] : 25); this.hurt = 1; }
   }
   onDeath(e) {
@@ -436,11 +510,12 @@ export class Renderer {
       this.punch = Math.max(this.punch, final ? 0.22 : 0.1);
       if (e.by === this.myId || e.id === this.myId) this.haptic([40, 30, 80]);
       if (e.streak) this.hooks.streak && this.hooks.streak(e);
-      if (e.regicide) { this.fx.flash(0.5, '#ffe7a0'); this.punch = Math.max(this.punch, 0.2); this.slowmo(0.2, 1.2); this.fx.ring(d.x + 0.5, d.y + 0.86, '#ffd24d', 4.5, 0.9, 0.16); }
+      if (e.regicide) { this.fx.flash(0.5, '#ffe7a0'); this.punch = Math.max(this.punch, 0.2); this.slowmo(0.2, 1.2); this.fx.ring(d.x + 0.5, d.y + 0.86, '#ffd24d', 4.5, 0.9, 0.16); if (this.fx.regicide) this.fx.regicide(d.x + 0.5, d.y + 0.86); if (!s.over) this.shot(d.x, d.y, 1.3, 1.3, 'shot', e.id); }
       if (e.shutdown) { this.fx.flash(0.35, '#9fd4ff'); this.punch = Math.max(this.punch, 0.16); this.fx.shock(d.x + 0.5, d.y + 0.6, 'rgba(160,210,255,0.5)', 2.4, 0.5); }
     }
   }
   onFx(e) {
+    this.sfx(e); // AU 15.0: audio.js voices the new event objects (status, boss King, location...) and ignores the rest
     const fx = this.fx, s = this.state;
     const at = (id) => { const d = this.disp.get(id); return d ? [d.x + 0.5, d.y] : [0, 0]; };
     switch (e.e) {
@@ -460,12 +535,12 @@ export class Renderer {
       }
       case 'promote': case 'crowned': {
         const [x, y] = at(e.id);
-        fx.promote(x, y + 0.86, this.colorOf(e.id), this.glowOf(e.id), { crowned: e.e === 'crowned' });
+        fx.promote(x, y + 0.86, this.colorOf(e.id), this.glowOf(e.id), { crowned: e.e === 'crowned', ev: e }); // V 15.0: Ascension / Veteran / Champion / coronation
         this.light(x, y + 0.6, e.e === 'crowned' ? '#ffd24d' : this.glowOf(e.id), 3.6, 1.2);
         if (e.e === 'crowned' || e.id === this.myId) { const d = this.disp.get(e.id); if (d) this.shot(d.x, d.y, 1.25, 1.1, 'shot', e.id); }
         this.kick(9); this.hitstop(0.1); this.punch = Math.max(this.punch, 0.1);
         if (e.id === this.myId) { this.slowmo(0.4, 0.6); this.haptic([20, 40, 20, 40, 60]); }
-        this.sfx(e.e === 'crowned' ? 'crown' : e.piece ? 'promote:' + e.piece : 'promote');
+        this.sfx(e.e === 'crowned' ? 'crown' : e.piece ? 'promote:' + e.piece + (e.type === 'hone' ? ':h' + (e.hone || 1) : '') : 'promote'); // AU 15.0: hone 3 = Ascension
         break;
       }
       case 'shrine': this.light(e.x + 0.5, e.y + 0.5, '#7fe0ff', 2.6, 0.9); fx.ring(e.x + 0.5, e.y + 0.7, '#7fe0ff', 2.4, 0.9); fx.pillar(e.x + 0.5, e.y + 0.86, '#7fe0ff', 0.6, 0.8, 4); this.sfx('shrine'); break;
@@ -508,7 +583,7 @@ export class Renderer {
         else if (e.kind === 'shardRain') { e.tiles.forEach((t, i) => fx.meteor(t.x + 0.5, t.y + 0.5, i * 0.12, '#9df3ff')); this.sfx('pickup'); }
         else if (e.kind === 'supply') { fx.pillar(e.x + 0.5, e.y + 0.86, '#ffd24d', 1, 1.4, 9); fx.meteor(e.x + 0.5, e.y + 0.6, 0, '#ffd24d', () => { this.kick(10); this.sfx('land'); }); }
         else if (e.kind === 'bloodMoon') { fx.flash(0.4, '#ff2a2a'); this.sfx('dark'); }
-        else { if (fx.event) fx.event(e, at); this.sfx('world:' + e.kind); } // A6/A9: earthquake, manaSurge, eclipse, frenzy, bounty, restless...
+        else { if (fx.event) fx.event(e, at); this.sfx('world:' + e.kind + (e.phase ? ':' + e.phase : '')); } // A6/A9 (AU 15.0: + phase, warn = tell, strike = hit): earthquake, manaSurge, eclipse, frenzy, bounty, restless...
         break;
       case 'over': {
         const w = unitById(s, e.winner); const d = w && this.disp.get(w.id);
@@ -619,6 +694,12 @@ export class Renderer {
       default: { // A6 fx.event draws A9's hazard / world / siege-role events
         if (this.fx.event) this.fx.event(e, at);
         HZ.event(this, e, at); // B4 10.1: tile-anchored hazard art (eruption columns, rift tears, throne pulses, pit collapses)
+        if (e.e === 'kingPhase' || e.e === 'bossPhase') { // R 15.0: boss King phase (66% / 33%): a framed beat on the King
+          const d = this.disp.get(e.id), hard = e.phase >= 2 || e.phase === 33;
+          if (d) { this.shot(d.x, d.y, 1.22, 1.1, 'shot', e.id); this.light(d.x + 0.5, d.y + 0.6, hard ? '#ff2a3a' : '#ffb03d', 4.2, 1.1); this.floats.push({ x: d.x + 0.5, y: d.y - 1.6, text: hard ? 'FINAL PHASE' : 'PHASE TWO', t: 0, life: 1.6, color: hard ? '#ff5a5a' : '#ffc46b', size: 0.8 }); }
+          this.kick(hard ? 14 : 10); this.hitstop(0.1); this.slowmo(0.35, 0.8); this.punch = Math.max(this.punch, 0.14); this.fx.flash(hard ? 0.45 : 0.3, hard ? '#ff2a3a' : '#ffb03d'); this.haptic([60, 40, 100]);
+        }
+        if (e.e === 'status' && e.k === 'exposed' && e.on !== false) { const d = this.disp.get(e.id); if (d) this.floats.push({ x: d.x + 0.5, y: d.y - 1.3, text: `EXPOSED x${e.n || 1}`, t: 0, life: 1.1, color: '#ff6b6b', size: 0.6 }); }
         const SN = { split: 'split', shieldBreak: 'shieldbreak', summon: 'summon', bountyClaim: 'bountyclaim', enrage: 'enrage' };
         if (e.e === 'hazard' && e.kind) this.sfx('hazard:' + e.kind + ':' + (e.phase || 'go'));
         else if (e.e === 'hill') this.sfx(e.contested ? 'hill:contested' : 'hill:score');
@@ -630,6 +711,7 @@ export class Renderer {
   }
 
   frame(realDt) {
+    if (this.asleep) { this.asleep = false; if (this.c.width <= 1) this.resize(); } // R 15.0: woken by the next match
     this.real += realDt;
     if (this.quality === 'auto') this.autoQuality(realDt);
     if (this.reduced) this.punch = 0;
@@ -697,8 +779,9 @@ export class Renderer {
   draw() {
     const { x: ctx, W, H, dpr } = this;
     const s = this.state, th = this.theme;
+    SV = this.fx.st instanceof Map ? this.fx.st : null; // R 15.0: statuses as shown (see hasSt)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const bk = W + 'x' + H + th.name + this.CY + 'x' + dpr;
+    const bk =W + 'x' + H + th.name + this.CY + 'x' + dpr;
     if (!this.bgCache || this.bgCache.k !== bk) { // pre-rendered 1:1 so each frame is a plain blit, not a gradient fill
       const bg = ctx.createRadialGradient(W / 2, this.CY, 10, W / 2, this.CY, Math.max(W, H) * 0.8);
       bg.addColorStop(0, th.bg[0]); bg.addColorStop(1, th.bg[1]);
@@ -707,12 +790,12 @@ export class Renderer {
       const mk = (fill) => { const c = document.createElement('canvas'); c.width = this.c.width; c.height = this.c.height; const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.fillStyle = fill; g.fillRect(0, 0, W, H); return c; };
       this.bgCache = { k: bk, bg, vg0, bgC: mk(bg), vgC: mk(vg0) };
     }
-    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.bgCache.bgC, 0, 0); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const sh = this.shake, ox = (Math.random() - 0.5) * sh, oy = (Math.random() - 0.5) * sh; // E1 15.0: moved up so the backdrop rim shakes with the board
+    const bdId = s && BD.backdropId(s); // E1 15.0: World Tour location scenery (js/backdrop.js); plain gradient when none / still loading
+    if (!bdId || !BD.drawBackdrop(ctx, bdId, BD.viewOf(this, ox, oy), this.time)) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.bgCache.bgC, 0, 0); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
     if (!s) return;
     if (s.bloodMoon) { const mx = W * 0.8, my = this.pad.t + 70; ctx.globalAlpha = 0.7; ctx.drawImage(glowSprite('#ff3c28'), mx - 160, my - 160, 320, 320); ctx.globalAlpha = 1; ctx.fillStyle = '#ff5a40'; ctx.beginPath(); ctx.arc(mx, my, 34, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = 'rgba(120,10,10,0.5)'; ctx.beginPath(); ctx.arc(mx + 8, my - 6, 30, 0, Math.PI * 2); ctx.fill(); }
     const z = this.z, T = this.time;
-    const sh = this.shake;
-    const ox = (Math.random() - 0.5) * sh, oy = (Math.random() - 0.5) * sh;
     ctx.save();
     ctx.translate((this.CX ?? W / 2) + ox, this.CY + oy); ctx.scale(z, z); ctx.translate(-this.cam.x, -this.cam.y);
 
@@ -792,6 +875,7 @@ export class Renderer {
       }
     }
 
+    if (s.locWarn) HZ.warn(this, ctx, s, T); // R 15.0: telegraphed location events (blizzard, eruption, flood, gravity well, toxic fog)
     for (const u of s.units) if (u.alive && u.mark) { ctx.strokeStyle = '#c9a6ff'; ctx.lineWidth = 0.04; ctx.setLineDash([0.1, 0.08]); ctx.beginPath(); ctx.arc(u.mark.x + 0.5, u.mark.y + 0.5, 0.32, T, T + Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
     for (const it of s.items) if (this.tileVisible(it.x, it.y) >= 1) this.drawItem(it, T);
     if (s.teams || s.siege) this.drawBonds(T);
@@ -813,8 +897,8 @@ export class Renderer {
     this.nLabels = 0;
     draws.sort(byY);
     for (const e of draws) { if (e.t === 0) this.drawSolid(e.a, e.b % SIZE, (e.b / SIZE) | 0, e.c); else this.drawUnit(e.a, e.b, T); }
+    if (bdId) BD.drawBackdropFront(ctx, bdId, this, T); // E1 15.0: the location's light tint over the board
     HZ.overlay(this, ctx, s, T); // A9: shields, role rings, bounty, eclipse
-    for (let i = 0; i < this.nLabels; i++) this.drawLabel(this.labels[i], T);
 
     this.weather.draw(this, ctx, T, Math.min(0.05, this._wdt || 0.016));
     this.fx.drawAbove(ctx);
@@ -823,6 +907,8 @@ export class Renderer {
     { const tint = this.lookOf().tint; if (tint) { ctx.fillStyle = tint; ctx.fillRect(0, 0, W, H); } }
     if (s.bloodMoon) { ctx.globalAlpha = 0.16 + 0.04 * Math.sin(this.real * 2); ctx.fillStyle = '#ff1a1a'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
     if (this.dim) { ctx.globalAlpha = Math.min(0.5, this.dim.t * 0.3); ctx.fillStyle = '#12020a'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    this.drawTags(ox, oy, T); // R 15.0: screen-space name tags, HP bars, status pips
+    this.drawCrownWarn(ox, oy, T);
     this.drawScreenText(ox, oy);
 
     // screen flash / vignettes
@@ -1013,12 +1099,17 @@ export class Renderer {
     const key = mk.pre + px + mk.post;
     let fc = this.fcache;
     if (fc && fc.key === key) return fc;
+    // R 15.0: two bakes (one per zoom level), so the level toggle swaps instead of rebaking (15-50 ms each way)
+    if (this.fcache2 && this.fcache2.key === key) { this.fcache = this.fcache2; this.fcache2 = fc; return this.fcache; }
     const kNoPx = mk.pre + mk.post;
     if (fc && fc.kNoPx === kNoPx && Math.abs(this.cam.z - this.cam.tz) > this.cam.tz * 0.04) return fc; // A5: keep scaling the old bake mid-zoom; rebake once the zoom settles
     // B3 10.1: only the zoom changed and the old bake is within 0.8-1.25x of the screen scale: keep scaling it (a bake costs
     // 15-50 ms, and camera shots used to cost two of them); a zoom back near rest still rebakes for the exact 1:1 copy
     if (fc && fc.kNoPx === kNoPx && fc.px && px !== Math.round(span * rest) / span && want / fc.px > 0.8 && want / fc.px < 1.25) return fc;
     const n = Math.round(span * px);
+    if (fc && fc.kNoPx === kNoPx && fc.px && Math.abs(fc.px / px - 1) > 0.25) { // a different zoom level: keep this bake as the spare
+      const spare = this.fcache2; this.fcache2 = fc; fc = this.fcache = spare && spare.kNoPx !== kNoPx ? spare : { c: document.createElement('canvas') };
+    } else if (this.fcache2 && this.fcache2.kNoPx !== kNoPx) this.fcache2 = null; // board changed: the spare is stale
     if (!fc) fc = this.fcache = { c: document.createElement('canvas') };
     if (fc.c.width !== n) { fc.c.width = n; fc.c.height = n; }
     const g = fc.c.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, n, n);
@@ -1294,6 +1385,16 @@ export class Renderer {
     ctx.beginPath(); ctx.moveTo(-0.24, 0.12); ctx.lineTo(-0.26, -0.14); ctx.lineTo(-0.12, -0.02); ctx.lineTo(0, -0.2); ctx.lineTo(0.12, -0.02); ctx.lineTo(0.26, -0.14); ctx.lineTo(0.24, 0.12); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#ff4d6d'; ctx.beginPath(); ctx.arc(0, 0.04, 0.04, 0, Math.PI * 2); ctx.fill();
   }
+  // R 15.0: a piece silhouette filled with one colour (status tints, move afterimages); rebuilt when the sprite upgrades
+  tintSprite(pk, skin, col) {
+    const w = hiSprite(pk, skin, 'white'); if (!w || !w.width) return null;
+    const C = this.tintC || (this.tintC = new Map()), key = pk + '|' + skin + '|' + col; let e = C.get(key);
+    if (e && e.src === w && e.w === w.width) return e.c;
+    const c = e ? e.c : document.createElement('canvas'); c.width = w.width; c.height = w.height;
+    const g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height); g.drawImage(w, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = col; g.fillRect(0, 0, c.width, c.height);
+    if (!e && C.size >= 24) { const k0 = C.keys().next().value; C.delete(k0); }
+    C.set(key, { c, src: w, w: w.width }); return c;
+  }
   badge(x, y, text, col = '#5fd8ff') { this.x.drawImage(badgeSprite(text, col), x - 0.135, y - 0.135, 0.27, 0.27); }
   glowDot(x, y, r, color, a = 1) { const ctx = this.x, pa = ctx.globalAlpha; ctx.globalAlpha = pa * a; ctx.drawImage(glowSprite(color), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = pa; }
 
@@ -1320,7 +1421,7 @@ export class Renderer {
     const mine = u.id === this.myId;
     const sk = skinOf(u.skin);
     const dying = !u.alive;
-    const boss = !!u.boss, BS = boss ? 1.5 : u.role === 'mite' ? 0.7 : 1;
+    const boss = !!u.boss, BS = this.scaleOf(u); // R 15.0: the boss King stands 22% taller
     // portal warp (shrink into the gate, pop out of its twin)
     let wx = 1, wy = 1;
     if (d.warp) {
@@ -1399,15 +1500,36 @@ export class Renderer {
     if (u.kind === 'hollow') ctx.translate(0, Math.sin(T * 3 + u.id) * 0.04);
     let fl = this.hitFlash.get(u.id) || (dying ? 1 : 0);
     if (d.reviveAt != null) { const rk = 1 - (this.time - d.reviveAt) / 0.7; if (rk <= 0) d.reviveAt = null; else fl = Math.max(fl, rk); }
-    const pk = pieceKind(u); // A4: the Colossus has its own model
+    const pk = pieceKind(u, s); // A4: the Colossus has its own model (CA 15.0: + Ascended / boss King variants, needs the state)
+    const S = 1 / 160, SW = 192 * S, SH = 240 * S, SX = -96 * S, SY = -224 * S;
     if (isAnimatedSkin(u.skin)) drawPiece(ctx, pk, u.skin, { flash: fl, alpha: 1, t: T, outline: mine ? 'rgba(255,255,255,0.22)' : null });
     else {
-      const sp = hiSprite(pk, u.skin), S = 1 / 160;
-      if (mine) { ctx.globalAlpha = 0.22; ctx.drawImage(hiSprite(pk, u.skin, 'white'), -96 * S * 1.06, -224 * S * 1.03, 192 * S * 1.06, 240 * S * 1.03); ctx.globalAlpha = 1; }
-      ctx.drawImage(sp, -96 * S, -224 * S, 192 * S, 240 * S);
-      if (fl > 0) { ctx.globalAlpha = Math.min(1, fl); ctx.drawImage(hiSprite(pk, u.skin, 'white'), -96 * S, -224 * S, 192 * S, 240 * S); ctx.globalAlpha = 1; }
+      const sp = hiSprite(pk, u.skin), aura = !dying && hasAura(pk) && !this.lowQ;
+      if (aura) drawPieceAura(ctx, pk, u.skin, T, 'back'); // CA 15.0: the hiSprite path draws the aura itself
+      if (mine) { ctx.globalAlpha = 0.22; ctx.drawImage(hiSprite(pk, u.skin, 'white'), SX * 1.06, SY * 1.03, SW * 1.06, SH * 1.03); ctx.globalAlpha = 1; }
+      ctx.drawImage(sp, SX, SY, SW, SH);
+      if (fl > 0) { ctx.globalAlpha = Math.min(1, fl); ctx.drawImage(hiSprite(pk, u.skin, 'white'), SX, SY, SW, SH); ctx.globalAlpha = 1; }
+      if (aura) drawPieceAura(ctx, pk, u.skin, T, 'front');
+    }
+    // R 15.0: status tints on the piece itself (V's fx draws the flames, bubbles, crystals and stars around it)
+    if (!dying && (SV ? SV.has(u.id) : u.status && u.status.length)) {
+      const ph = 0.5 + 0.5 * Math.sin(T * 3 + u.id), tint = (col, a, op) => { const t = this.tintSprite(pk, u.skin, col); if (!t) return; ctx.globalCompositeOperation = op || 'source-over'; ctx.globalAlpha = a; ctx.drawImage(t, SX, SY, SW, SH); };
+      if (hasSt(u, 'freeze')) { tint('#cfefff', 0.5); tint('#9fdcff', 0.35, 'lighter'); }
+      else if (hasSt(u, 'poison')) tint('#58d61c', 0.22 + 0.08 * stN(u, 'poison') + ph * 0.08);
+      if (hasSt(u, 'burn')) tint('#ff6a1e', (this.reduced ? 0.2 : 0.14 + 0.12 * Math.abs(Math.sin(T * 9 + u.id))), 'lighter');
+      if (hasSt(u, 'stun')) tint('#fff3a0', 0.12 + 0.1 * ph, 'lighter');
+      if (this.isKingBoss(u) && hasSt(u, 'exposed')) tint('#ff3a3a', 0.1 + 0.05 * stN(u, 'exposed') * ph, 'lighter');
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
     }
     ctx.restore();
+    // R 15.0: haste / slow move trails: tinted afterimages along the path while the piece moves
+    if (!dying && d.moving && !this.reduced && (hasSt(u, 'haste') || hasSt(u, 'slow'))) {
+      const hst = hasSt(u, 'haste'), col = hst ? '#4dffe1' : '#9a7dff', tw = this.tintSprite(pk, u.skin, col);
+      if (tw) for (let k = 1; k <= (this.lowQ ? 2 : 3); k++) {
+        const tt = Math.max(0, (d.mt || 0) - k * (hst ? 0.12 : 0.07)), e = ease(tt), gx = lerp(d.sx, d.tx, e) + 0.5, gy = lerp(d.sy, d.ty, e) + 0.86;
+        ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = (hst ? 0.34 : 0.28) / k; ctx.translate(gx, gy); ctx.scale(0.92 * BS * (u.piece === 'knight' ? (d.face || 1) : 1), 0.92 * BS); ctx.drawImage(tw, SX, SY, SW, SH); ctx.restore();
+      }
+    }
     if (!dying && u.buffs && u.buffs.some((b) => b.k === 'def' && !b.bond && b.v > 1)) { // A5: shield dome for DEF buffs
       const p = 0.5 + 0.5 * Math.sin(T * 3 + u.id), h = 1.25 * BS, w = 1.0 * BS, y0 = base - d.lift + dropY;
       ctx.globalAlpha = 0.45 + p * 0.2; ctx.drawImage(W10.shieldDome(), cx - w / 2, y0 - h * 0.86, w, h); ctx.globalAlpha = 1;
@@ -1445,11 +1567,141 @@ export class Renderer {
       L.u = u; L.d = d; L.cx = cx; L.base = base; L.mine = mine; L.active = active; this.nLabels++;
     }
   }
-  drawLabel(L, T) {
-    const ctx = this.x, { u, d, cx, base, mine, active } = L, boss = !!u.boss, BS = boss ? 1.5 : u.role === 'mite' ? 0.7 : 1;
-      const top = base + (PIECE_TOP[pieceKind(u)] || -1) * 0.92 * BS - 0.14 - d.lift;
+  // R 15.0: name tags, HP bars and status pips are drawn in screen pixels after the world pass, so they stay the same
+  // readable size at both zoom levels. Each tag sits just above its own piece's head; when that spot would cover
+  // another piece (the one on the tile above, a neighbour's tag), it slides down onto its own head, then tries
+  // below the base, and finally drops the name and keeps only the bar on its own head. Boss bars (Colossus, Regent)
+  // stay in world units (they are big on purpose).
+  scaleOf(u) { return u.boss ? 1.5 : u.role === 'mite' ? 0.7 : this.isKingBoss(u) ? 1.22 : 1; }
+  isKingBoss(u) { const kb = this.state && this.state.kingBoss; return !!(kb && kb.id === u.id && u.piece === 'king'); }
+  drawTags(ox, oy, T) {
+    const n = this.nLabels; if (!n) return;
+    const ctx = this.x, z = this.z, s = this.state, cx0 = (this.CX ?? this.W / 2) + ox, cy0 = this.CY + oy;
+    const SX = (wx) => (wx - this.cam.x) * z + cx0, SY = (wy) => (wy - this.cam.y) * z + cy0;
+    const fpx = Math.round(Math.max(11, Math.min(13, z * 0.24))), barW = Math.max(30, Math.min(46, z * 0.74)), barH = Math.max(4, Math.min(6, z * 0.1));
+    const maxName = Math.max(barW * 1.7, Math.min(z * 2.4, 120));
+    // every drawn piece's body rect (screen px), for the overlap test
+    const bodies = this.tagBodies || (this.tagBodies = []); bodies.length = 0;
+    for (let i = 0; i < n; i++) {
+      const L = this.labels[i], u = L.u, BS = this.scaleOf(u), h = -(PIECE_TOP[pieceKind(u, s)] || -1) * 0.92 * BS;
+      const top = L.base - h - L.d.lift;
+      L.sx = SX(L.cx); L.headY = SY(top); L.baseY = SY(L.base); L.bw = 0.36 * BS * z;
+      bodies.push({ x: L.sx - L.bw, y: L.headY + 2, w: L.bw * 2, h: L.baseY - L.headY - 2, i });
+    }
+    const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const blocked = (r, i) => { for (const b of bodies) if (b.i !== i && hit(r, b)) return true; for (const p of placed) if (hit(r, p)) return true; return false; };
+    const placed = this.tagPlaced || (this.tagPlaced = []); placed.length = 0;
+    // mine and the active piece place first (they win the good spots)
+    const order = this.tagOrder || (this.tagOrder = []); order.length = 0; for (let i = 0; i < n; i++) order.push(i);
+    order.sort((a, b) => (this.labels[b].mine * 2 + this.labels[b].active) - (this.labels[a].mine * 2 + this.labels[a].active));
+    ctx.save(); ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    for (const i of order) {
+      const L = this.labels[i], u = L.u;
+      if (u.boss) { ctx.save(); ctx.translate(cx0, cy0); ctx.scale(z, z); ctx.translate(-this.cam.x, -this.cam.y); this.drawBossLabel(L, T); ctx.restore(); continue; }
+      const player = u.kind === 'player';
+      const name = player ? this.nameSprite(u.name, u.color, fpx, L.mine, maxName) : null;
+      const tagH = (name ? name.h + 2 : 0) + barH + 2, tagW = Math.max(barW + 4, name ? name.w : 0);
+      // candidate spots: above the head, slid down onto the head (up to 35% of the piece), below the base
+      const pieceH = L.baseY - L.headY, slide = Math.min(pieceH * 0.35, tagH);
+      let y = L.headY - 3 - tagH, mode = 0, r = { x: L.sx - tagW / 2, y, w: tagW, h: tagH };
+      if (blocked(r, i)) {
+        let ok = false;
+        for (let k = 1; k <= 3 && !ok; k++) { r.y = y + slide * k / 3; if (!blocked(r, i)) { ok = true; y = r.y; } }
+        if (!ok && name) { const r2 = { x: L.sx - name.w / 2, y: L.baseY + 3, w: name.w, h: name.h }; if (!blocked(r2, i)) { ok = true; mode = 1; y = L.headY + Math.min(slide, 4) - barH - 2; placed.push(r2); this.blitName(name, L.sx, L.baseY + 3 + name.h / 2); } }
+        if (!ok) { mode = 2; y = L.headY + slide - barH - 2; } // compact: bar only, on its own head
+      }
+      const barY = y + tagH - barH - 2;
+      placed.push({ x: L.sx - barW / 2 - 2, y: barY - 1, w: barW + 4, h: barH + 3 });
+      if (mode === 0 && name) { placed.push({ x: L.sx - name.w / 2, y, w: name.w, h: name.h }); this.blitName(name, L.sx, y + name.h / 2); }
+      this.drawBar(L, L.sx - barW / 2, barY, barW, barH, T);
+      // above the tag: crown (Kings), turn arrow (active piece)
+      let ty = (mode === 0 ? y : barY) - 2;
+      if (player && u.piece === 'king') { const cs = Math.max(13, Math.min(20, z * 0.36)) * (this.isKingBoss(u) ? 1.25 : 1); ctx.save(); ctx.translate(L.sx, ty - cs * 0.42 + Math.sin(T * 2) * 1.2); ctx.scale(cs * 1.6, cs * 1.6); this.crownShape(ctx); ctx.restore(); ty -= cs * 0.9; }
+      if (L.active) {
+        const aw = Math.max(9, Math.min(13, z * 0.22)), ay = ty - 3 - Math.abs(Math.sin(T * 4)) * 4;
+        ctx.lineJoin = 'round'; ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(8,6,14,0.85)'; ctx.fillStyle = L.mine ? '#ffe3a1' : u.color || '#ffffff';
+        ctx.beginPath(); ctx.moveTo(L.sx - aw, ay - aw * 0.9); ctx.lineTo(L.sx + aw, ay - aw * 0.9); ctx.lineTo(L.sx, ay); ctx.closePath(); ctx.stroke(); ctx.fill();
+      }
+      L.tagTop = ty; // world-free screen y above the whole tag (fx head glyphs can stack from here: r.tagTopOf(id))
+    }
+    ctx.restore();
+  }
+  // R 15.0: the Crown's landing spot one round ahead (C: s.crownWarn = {x, y, round}; V draws the pillar on the tile).
+  // On screen: a "CROWN NEXT ROUND" tag over the tile. Off screen: an edge arrow with a crown, pointing at it.
+  drawCrownWarn(ox, oy, T) {
+    const s = this.state, w = s && s.crownWarn; if (!w || w.x == null || s.over) return;
+    const ctx = this.x, [sx, sy] = this.toScreen(w.x + 0.5, w.y + 0.5); const x0 = 8, y0 = this.pad.t + 8, x1 = (this.VW || this.W) - 8, y1 = this.pad.t + this.VH - 8;
+    const bob = this.reduced ? 0 : Math.sin(T * 3) * 2;
+    if (sx > x0 && sx < x1 && sy > y0 && sy < y1) {
+      const e = this.nameSprite(w.round > (s.round || 0) + 1 ? 'CROWN SOON' : 'CROWN NEXT ROUND', '#ffd24d', 11, true, 200);
+      this.blitName(e, sx + ox, sy - this.z * 0.95 - e.h + bob + oy);
+      return;
+    }
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, dx = sx - cx, dy = sy - cy, k = Math.min((x1 - x0 - 36) / 2 / Math.abs(dx || 1e-3), (y1 - y0 - 36) / 2 / Math.abs(dy || 1e-3));
+    const ex = cx + dx * k, ey = cy + dy * k, a = Math.atan2(dy, dx);
+    ctx.save(); ctx.translate(ex, ey + bob);
+    ctx.fillStyle = 'rgba(14,10,4,0.88)'; ctx.strokeStyle = '#ffd24d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.save(); ctx.rotate(a); ctx.fillStyle = '#ffd24d'; ctx.beginPath(); ctx.moveTo(24, 0); ctx.lineTo(16, -7); ctx.lineTo(16, 7); ctx.closePath(); ctx.fill(); ctx.restore();
+    ctx.scale(30, 30); ctx.translate(0, 0.02); this.crownShape(ctx);
+    ctx.restore();
+  }
+  // world y just above a unit's tag (for fx glyphs drawn above heads), or null when it has no tag this frame
+  tagTopOf(id) { for (let i = 0; i < this.nLabels; i++) { const L = this.labels[i]; if (L.u.id === id && L.tagTop != null) return (L.tagTop - this.CY) / this.z + this.cam.y; } return null; }
+  nameSprite(name, color, px, mine, maxW) {
+    const C = this.nameC || (this.nameC = new Map()), dpr = this.dpr, key = name + '|' + color + '|' + px + '|' + dpr + '|' + (mine ? 1 : 0) + '|' + Math.round(maxW);
+    let e = C.get(key); if (e) return e;
+    const m = (this.nameM ||= document.createElement('canvas').getContext('2d')); const font = `700 ${px}px "Chakra Petch", sans-serif`; m.font = font;
+    let t = String(name || ''); const pad = 7, stripe = 3;
+    if (m.measureText(t).width + pad * 2 + stripe > maxW) { while (t.length > 2 && m.measureText(t + '…').width + pad * 2 + stripe > maxW) t = t.slice(0, -1); t += '…'; }
+    const w = Math.ceil(m.measureText(t).width + pad * 2 + stripe), h = Math.ceil(px + 6);
+    const c = document.createElement('canvas'); c.width = Math.ceil(w * dpr); c.height = Math.ceil(h * dpr);
+    const g = c.getContext('2d'); g.scale(dpr, dpr);
+    g.fillStyle = mine ? 'rgba(34,26,10,0.88)' : 'rgba(10,9,16,0.8)'; roundRect(g, 0.5, 0.5, w - 1, h - 1, Math.min(6, h / 2)); g.fill();
+    g.strokeStyle = mine ? 'rgba(255,214,120,0.75)' : 'rgba(255,255,255,0.14)'; g.lineWidth = 1; g.stroke();
+    g.fillStyle = color || '#ffffff'; g.fillRect(2, 3, stripe, h - 6);
+    g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = mine ? '#ffe9b0' : '#f1ecff'; g.fillText(t, stripe + (w - stripe) / 2, h / 2 + 0.5);
+    if (C.size > 64) C.clear();
+    e = { c, w, h }; C.set(key, e); return e;
+  }
+  blitName(e, x, y) { this.x.drawImage(e.c, Math.round(x - e.w / 2), Math.round(y - e.h / 2), e.w, e.h); }
+  // screen-space HP bar: held damage chunk, hit flash, heal glow, 25-HP ticks, shield overlay, status pips to the left
+  drawBar(L, bx, by, w, bh, T) {
+    const ctx = this.x, { u, d } = L;
+    let mx; try { mx = stats(u).maxHp || 1; } catch { mx = Math.max(1, d.hp || 1); } // a half-built unit must not stop the frame
+    const r = Math.max(0, Math.min(1, d.hp / mx)), gr = Math.max(0, Math.min(1, d.ghost / mx));
+    bx = Math.round(bx); by = Math.round(by);
+    ctx.fillStyle = 'rgba(8,6,14,0.9)'; ctx.fillRect(bx - 1.5, by - 1.5, w + 3, bh + 3);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(bx, by, w, bh);
+    if (gr > r) { ctx.fillStyle = d.chipHold > 0 ? '#fff4e0' : '#ff8a6a'; ctx.fillRect(bx + w * r, by, w * (gr - r), bh); }
+    const poison = hasSt(u, 'poison'), hc = u.kind === 'hollow' ? (u.wave ? '#b49cf0' : '#a7a4d6') : poison ? '#9bea3a' : r > 0.5 ? '#5cff9d' : r > 0.25 ? '#ffd24d' : '#ff4d6d';
+    ctx.fillStyle = hc; ctx.fillRect(bx, by, w * r, bh);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(bx, by + bh * 0.62, w * r, bh * 0.38);
+    ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fillRect(bx, by, w * r, 1);
+    const sh = stN(u, 'shield', 'n') + (u.shield || 0); // absorb left (status shield + Brute shield), drawn over the bar's end
+    if (sh > 0) { const sw = Math.min(w, w * sh / mx); ctx.fillStyle = 'rgba(120,190,255,0.85)'; ctx.fillRect(bx + Math.max(0, w * r - sw), by - 1, sw, 2); ctx.fillStyle = 'rgba(200,230,255,0.9)'; ctx.fillRect(bx + Math.max(0, w * r - sw), by + bh - 1, sw, 1); }
+    if (mx > 0 && mx <= 400 && w / (mx / 25) >= 3) { ctx.fillStyle = 'rgba(8,6,14,0.55)'; for (let hp = 25; hp < mx; hp += 25) ctx.fillRect(Math.round(bx + w * hp / mx), by, 1, bh); }
+    if (d.barFlash > 0) { ctx.globalAlpha = d.barFlash; ctx.fillStyle = '#ffffff'; ctx.fillRect(bx - 1.5, by - 1.5, w + 3, bh + 3); ctx.globalAlpha = 1; }
+    if (d.healGlow > 0) { ctx.globalAlpha = d.healGlow * 0.6; ctx.fillStyle = '#b8ffd6'; ctx.fillRect(bx, by, w * r, bh); ctx.globalAlpha = 1; }
+    if (u.kind === 'player') { ctx.fillStyle = u.color; ctx.fillRect(bx - 1.5, by - 3.5, Math.min(10, w * 0.25), 2); }
+    if (u.wave) { ctx.fillStyle = '#a06bff'; ctx.beginPath(); ctx.moveTo(bx - 7, by + bh / 2); ctx.lineTo(bx - 4, by - 1); ctx.lineTo(bx - 1, by + bh / 2); ctx.lineTo(bx - 4, by + bh + 1); ctx.closePath(); ctx.fill(); }
+    // status pips (15.0 statuses first, then the 10.x buff icons), right-aligned against the bar's left end
+    const pips = this.pipsOf(u), ps = Math.max(10, Math.min(13, bh + 7));
+    for (let i = 0; i < pips.length && i < 5; i++) { const p = pips[i], x = bx - 3 - ps - i * (ps + 1), y = by + bh / 2 - ps / 2 + (p.k === 'root' || p.k === 'stun' ? Math.sin(T * 6 + i) * 0.8 : 0); ctx.drawImage(p.img, x, y, ps, ps); }
+    if (u.shards > 0) ctx.drawImage(badgeSprite(String(u.shards), '#5fd8ff'), bx + w + 2, by + bh / 2 - ps * 0.6, ps * 1.2, ps * 1.2);
+  }
+  pipsOf(u) {
+    const out = this.pipBuf || (this.pipBuf = []); out.length = 0;
+    const m = SV && SV.get(u.id);
+    if (SV) { if (m) for (const [k, q] of m) { const img = W10.statusPip(k, q.n); if (img) out.push({ k, img }); } }
+    else for (const q of u.status || []) { const img = W10.statusPip(q.k, q.n); if (img) out.push({ k: q.k, img }); }
+    for (const k of W10.statusesOf(this.state, u)) if (!out.some((p) => p.k === k || (k === 'spd' && p.k === 'haste'))) out.push({ k, img: W10.statusIcon(k) });
+    return out;
+  }
+  drawBossLabel(L, T) {
+    const ctx = this.x, { u, d, cx, base } = L, BS = this.scaleOf(u);
+      const top = base + (PIECE_TOP[pieceKind(u, this.state)] || -1) * 0.92 * BS - 0.14 - d.lift;
       const mx = stats(u).maxHp, r = Math.max(0, Math.min(1, d.hp / mx)), gr = Math.max(0, Math.min(1, d.ghost / mx));
-      if (boss) {
+      {
         const w = 1.4, bx = cx - w / 2, h = 0.12;
         ctx.fillStyle = 'rgba(8,6,14,0.92)'; ctx.fillRect(bx - 0.04, top - 0.04, w + 0.08, h + 0.08);
         ctx.strokeStyle = '#c9a6ff'; ctx.lineWidth = 0.025; ctx.strokeRect(bx - 0.04, top - 0.04, w + 0.08, h + 0.08);
@@ -1460,37 +1712,6 @@ export class Renderer {
         ctx.font = '800 0.2px Cinzel, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillStyle = 'rgba(8,6,14,0.9)'; ctx.fillText(u.name.toUpperCase(), cx + 0.015, top - 0.05 + 0.015);
         ctx.fillStyle = '#e0c8ff'; ctx.fillText(u.name.toUpperCase(), cx, top - 0.05);
-        return;
-      }
-      // A5: bevelled HP bar with held damage chunk, hit flash, heal glow and 25-HP ticks
-      const w = 0.72, bx = cx - w / 2, bh = 0.075;
-      ctx.fillStyle = 'rgba(8,6,14,0.9)'; ctx.fillRect(bx - 0.03, top - 0.03, w + 0.06, bh + 0.06);
-      ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(bx, top, w, bh);
-      if (gr > r) { ctx.fillStyle = d.chipHold > 0 ? '#fff4e0' : '#ff8a6a'; ctx.fillRect(bx + w * r, top, w * (gr - r), bh); }
-      const hc = u.kind === 'hollow' ? (u.wave ? '#b49cf0' : '#a7a4d6') : r > 0.5 ? '#5cff9d' : r > 0.25 ? '#ffd24d' : '#ff4d6d';
-      ctx.fillStyle = hc; ctx.fillRect(bx, top, w * r, bh);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(bx, top + bh * 0.62, w * r, bh * 0.38);
-      if (mx > 0 && mx <= 400) { ctx.fillStyle = 'rgba(8,6,14,0.55)'; for (let hp = 25; hp < mx; hp += 25) ctx.fillRect(bx + w * hp / mx - 0.004, top, 0.008, bh); }
-      if (d.barFlash > 0) { ctx.globalAlpha = d.barFlash; ctx.fillStyle = '#ffffff'; ctx.fillRect(bx - 0.03, top - 0.03, w + 0.06, bh + 0.06); ctx.globalAlpha = 1; }
-      if (d.healGlow > 0) { ctx.globalAlpha = d.healGlow * 0.6; ctx.fillStyle = '#b8ffd6'; ctx.fillRect(bx, top, w * r, bh); ctx.globalAlpha = 1; }
-      { const st = W10.statusesOf(this.state, u); for (let i = 0; i < st.length && i < 4; i++) { const sz = 0.17, ix = bx - 0.05 - sz - i * (sz + 0.02), iy = top + bh / 2 - sz / 2 + (st[i] === 'root' ? Math.sin(T * 6) * 0.01 : 0); ctx.drawImage(W10.statusIcon(st[i]), ix, iy, sz, sz); } }
-      if (u.wave) { ctx.fillStyle = '#a06bff'; ctx.beginPath(); ctx.moveTo(bx - 0.1, top + 0.035); ctx.lineTo(bx - 0.05, top - 0.02); ctx.lineTo(bx, top + 0.035); ctx.lineTo(bx - 0.05, top + 0.09); ctx.closePath(); ctx.fill(); }
-      ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(bx, top, w * r, 0.02);
-      if (u.kind === 'player') {
-        ctx.fillStyle = u.color; ctx.fillRect(bx - 0.025, top - 0.055, 0.14, 0.03);
-        if (this.z > 34) {
-          ctx.font = `700 0.17px "Chakra Petch", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-          ctx.fillStyle = 'rgba(8,6,14,0.85)'; ctx.fillText(u.name, cx + 0.012, top - 0.03 + 0.012);
-          ctx.fillStyle = mine ? '#ffffff' : '#d8d2e8'; ctx.fillText(u.name, cx, top - 0.03);
-        }
-        if (u.shards > 0) this.badge(cx + 0.44, top + 0.03, String(u.shards));
-        if (u.piece === 'king') { ctx.save(); ctx.translate(cx, top - (this.z > 34 ? 0.34 : 0.16) + Math.sin(T * 2) * 0.03); ctx.scale(0.7, 0.7); this.crownShape(ctx); ctx.restore(); }
-      }
-      if (active) {
-        const ay = top - (this.z > 34 ? 0.45 : 0.25) - Math.abs(Math.sin(T * 4)) * 0.12 - (u.piece === 'king' ? 0.2 : 0);
-        if (!mine) { ctx.globalAlpha = 0.85; ctx.scale(1, 1); }
-        ctx.strokeStyle = 'rgba(8,6,14,0.85)'; ctx.lineWidth = 0.04; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(cx - 0.12, ay - 0.1); ctx.lineTo(cx + 0.12, ay - 0.1); ctx.lineTo(cx, ay + 0.04); ctx.closePath(); ctx.stroke();
-        ctx.fillStyle = mine ? '#ffe3a1' : u.color || '#ffffff'; ctx.globalAlpha = 1; ctx.beginPath(); ctx.moveTo(cx - 0.12, ay - 0.1); ctx.lineTo(cx + 0.12, ay - 0.1); ctx.lineTo(cx, ay + 0.04); ctx.closePath(); ctx.fill();
       }
   }
 

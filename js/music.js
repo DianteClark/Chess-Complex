@@ -17,7 +17,7 @@
 //   music.sting(name)             victory | defeat | end | crowned | final | wave | boss
 //   music.duck(ms, depth)         dip the music under a big moment (depth 0..1 = remaining level)
 //   music.stats()                 scheduler cost for QA
-import { getCtx, buses, settings } from './audio.js';
+import { getCtx, buses, settings, isLite, onCtxSwap, onSfxEvent } from './audio.js';
 
 const LOOK = 0.3;        // seconds scheduled ahead (survives ~250 ms main-thread stalls on phones)
 const TICK = 50;         // scheduler period (ms)
@@ -32,12 +32,12 @@ const human = (ms) => (rnd() + rnd() - 1) * ms / 1000; // triangular jitter
 const SCALES = {
   ionian: [0, 2, 4, 5, 7, 9, 11], dorian: [0, 2, 3, 5, 7, 9, 10], phrygian: [0, 1, 3, 5, 7, 8, 10],
   lydian: [0, 2, 4, 6, 7, 9, 11], mixolydian: [0, 2, 4, 5, 7, 9, 10], aeolian: [0, 2, 3, 5, 7, 8, 10],
-  harmonic: [0, 2, 3, 5, 7, 8, 11],
+  harmonic: [0, 2, 3, 5, 7, 8, 11], phrygdom: [0, 1, 4, 5, 7, 8, 10],
 };
 const ROMAN = { I: 0, II: 2, III: 4, IV: 5, V: 7, VI: 9, VII: 11 };
 // 'bVI', 'iv', 'V7', 'IM7', 'i9', 'Vsus', 'viio' -> semitones above the key tonic
 function chord(sym) {
-  const m = /^([b#]?)(i{1,3}|iv|vi{0,2}|I{1,3}|IV|VI{0,2})(.*)$/.exec(sym);
+  const m = /^([b#]?)(iv|i{1,3}|vi{0,2}|IV|I{1,3}|VI{0,2})(.*)$/.exec(sym); // iv / IV before i / I (15.0 fix: IV used to parse as I + 'V')
   if (!m) throw new Error('chord ' + sym);
   const root = ROMAN[m[2].toUpperCase()] + (m[1] === 'b' ? -1 : m[1] === '#' ? 1 : 0);
   const minor = m[2] === m[2].toLowerCase(), q = m[3];
@@ -225,6 +225,46 @@ for (const th of Object.values(THEMES)) {
   th.bass = th.bass.map(([e, p]) => [e, [...p].map((ch, i) => { if (ch === '.' || ch === '-') return null; let len = 1; while (p[i + len] === '-') len++; return { k: ch, len }; })]);
   th.scaleArr = SCALES[th.scale];
 }
+
+// ---------------------------------------------------------------- 15.0 World Tour: location flavours
+// The mode theme sets the intensity (tempo range, drum / bass / arp patterns per energy, layer thresholds, lead
+// treatment); the location sets key, scale, harmony, instrumentation, a signature "colour" voice and an ambient bed.
+// Mode x location themes are composed on demand ('royale@forge') so every pairing is seamless: same groove engine,
+// same Crown Motif, new place. Dramatic themes (duel, final, boss, king) keep their own harmony and take the
+// location's key, instruments and colour, so a match never changes key when the stakes rise.
+// prog: harmony for the open themes. color: per-16th signature voice. bed: filtered-noise ambience under everything.
+const LOC = {
+  citadel: { key: 50, scale: 'dorian', prog: ['i', 'bVII', 'IV', 'i', 'bVI', 'bVII', 'IVsus2', ['IV', 'V']], pad: { wave: 'triangle', cut: 1500, lfo: 0.06 }, bassWave: 'sine', arpWave: 'bell', leadWave: ['triangle', 'sine'], rev: 0.42, dly: 0.26, swing: 0, color: 'ice', bed: { type: 'bandpass', f: 900, q: 1.6, v: 0.05, lfo: 0.09, depth: 500 } },
+  forge: { key: 48, scale: 'phrygian', prog: ['i', 'bII', 'bvii', 'i', 'bVI', 'bII', 'iv', ['bvii', 'bII']], pad: { wave: 'sawtooth', cut: 600, lfo: 0.12 }, bassWave: 'sawtooth', arpWave: 'saw', leadWave: ['sawtooth', 'square'], rev: 0.24, dly: 0.12, swing: 0, brass: true, color: 'anvil', bed: { type: 'lowpass', f: 180, q: 0.8, v: 0.11, lfo: 0.05, depth: 60 } },
+  temple: { key: 54, scale: 'aeolian', prog: ['i', 'bVIM7', 'bIII', 'bVII', 'i', 'iv7', 'bVIM7', ['bVII', 'Vsus']], pad: { wave: 'sine', cut: 1200, lfo: 0.05 }, bassWave: 'sine', arpWave: 'pluck', leadWave: ['sine', 'triangle'], rev: 0.46, dly: 0.42, swing: 0.03, color: 'drip', bed: { type: 'bandpass', f: 420, q: 2.2, v: 0.06, lfo: 0.11, depth: 160 } },
+  gardens: { key: 55, scale: 'ionian', prog: ['I', 'V', 'vi', 'IV', 'I', 'iii', 'IV', ['ii7', 'Vsus']], pad: { wave: 'triangle', cut: 1700, lfo: 0.07 }, bassWave: 'triangle', arpWave: 'pluck', leadWave: ['triangle', 'sine'], rev: 0.34, dly: 0.24, swing: 0.07, color: 'birds', bed: { type: 'bandpass', f: 2400, q: 0.9, v: 0.025, lfo: 0.07, depth: 900 } },
+  ruins: { key: 52, scale: 'phrygdom', prog: ['I', 'bII', 'I', 'bvii', 'iv', 'bII', ['bvii', 'bII'], 'I'], pad: { wave: 'sawtooth', cut: 800, lfo: 0.08 }, bassWave: 'triangle', arpWave: 'pluck', leadWave: ['sawtooth', 'triangle'], rev: 0.3, dly: 0.2, swing: 0.05, vib: 22, color: 'darbuka', bed: { type: 'highpass', f: 3200, q: 0.7, v: 0.03, lfo: 0.13, depth: 1400 } },
+  works: { key: 53, scale: 'aeolian', prog: ['i', 'i', 'bVI', 'bVII', 'i', 'i', 'iv', ['V', 'V7']], pad: { wave: 'sawtooth', cut: 650, lfo: 0.04 }, bassWave: 'square', arpWave: 'square', leadWave: ['square', 'sawtooth'], rev: 0.2, dly: 0.16, swing: 0, color: 'clank', bed: { type: 'lowpass', f: 140, q: 6, v: 0.08, lfo: 0.5, depth: 20 } },
+  rift: { key: 51, scale: 'lydian', prog: ['IM7', 'II', 'IM7', 'II', 'vi', 'II', 'V', ['IM7', 'II']], pad: { wave: 'sawtooth', cut: 2000, lfo: 0.18 }, bassWave: 'sine', arpWave: 'bell', leadWave: ['sine', 'triangle'], rev: 0.5, dly: 0.34, swing: 0, color: 'shimmer', bed: { type: 'bandpass', f: 5200, q: 3, v: 0.018, lfo: 0.04, depth: 2500 } },
+  bog: { key: 47, scale: 'harmonic', prog: ['i', 'bVI', 'i', 'V', 'iv', 'bVI', 'iio', 'V'], pad: { wave: 'triangle', cut: 520, lfo: 0.1 }, bassWave: 'sine', arpWave: 'pluck', leadWave: ['triangle', 'sawtooth'], rev: 0.4, dly: 0.3, swing: 0.1, vib: 18, color: 'croak', bed: { type: 'lowpass', f: 320, q: 1.2, v: 0.07, lfo: 0.06, depth: 120 } },
+};
+const LOC_ALIAS = { frost: 'citadel', volcano: 'forge', volcanic: 'forge', sunken: 'temple', royal: 'gardens', garden: 'gardens', desert: 'ruins', iron: 'works', ironworks: 'works', astral: 'rift', witchwood: 'bog', swamp: 'bog' };
+// themes whose harmony stays their own under a location (only key, instruments and colour change)
+const KEEP_HARMONY = new Set(['duel', 'final', 'boss', 'king']);
+const MATCH_THEMES = new Set(['royale', 'blitz', 'duel', 'squads', 'siege', 'boss', 'final', 'king']);
+for (const L of Object.values(LOC)) { L.chords = L.prog.map((c) => (Array.isArray(c) ? c : [c]).map(chord)); L.scaleArr = SCALES[L.scale]; }
+const locId = (id) => { if (!id || typeof id !== 'string') return null; const k = id.toLowerCase().replace(/^loc_/, ''); return LOC[k] ? k : LOC_ALIAS[k] || (LOC[k.split(/[^a-z]/)[0]] ? k.split(/[^a-z]/)[0] : null); };
+function themeOf(id) {
+  if (THEMES[id]) return THEMES[id];
+  const [m, l] = String(id).split('@'), base = THEMES[m], L = LOC[l];
+  if (!base || !L) return THEMES.royale;
+  const keep = KEEP_HARMONY.has(m), th = THEMES[id] = {
+    ...base, base: m, loc: l, key: L.key + (keep && base.scale === 'phrygian' ? -1 : 0),
+    pad: { ...base.pad, wave: L.pad.wave, cut: Math.round((base.pad.cut + L.pad.cut) / 2), lfo: L.pad.lfo },
+    bassWave: L.bassWave, arpWave: L.arpWave, leadWave: keep && base.lead && base.lead.brass ? base.leadWave : L.leadWave,
+    rev: +(base.rev * 0.4 + L.rev * 0.6).toFixed(3), dly: +(base.dly * 0.4 + L.dly * 0.6).toFixed(3), swing: keep ? base.swing : L.swing,
+    color: L.color, bed: L.bed, vib: L.vib,
+    lead: base.lead && { ...base.lead, brass: base.lead.brass || (L.brass && !keep) },
+  };
+  if (!keep) { th.scale = L.scale; th.scaleArr = L.scaleArr; th.prog = L.prog; th.chords = L.chords; }
+  return th;
+}
+export const LOCATION_MUSIC = Object.keys(LOC);
 const NOP = { setValueAtTime() {}, setTargetAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} };
 const pick = (tiers, e) => { let r = null; for (const t of tiers) if (e >= t[0]) r = t[1]; return r; };
 
@@ -281,6 +321,7 @@ class Music {
       lead: layer('lead', 2.6, 0.55, 0.45, null),
       bell: layer('bell', 1.6, 0.7, 0.5, null),
       sting: layer('sting', 1.3, 0.6, 0.15, null),
+      color: layer('color', 1.2, 0.6, 0.45, null), // 15.0: the location's signature voice
     };
     this.L.sting.gate.gain.value = 1;
     // pump (kick-keyed dip on pad + arp)
@@ -321,6 +362,20 @@ class Music {
     const flt = (type, f, q, dst) => { const x = a.createBiquadFilter(); x.type = type; x.frequency.value = f; x.Q.value = q; kr(x.frequency, x.Q, x.gain, x.detune); x.connect(dst); return x; };
     const D = this.L.drums.in;
     this.fx = { snare: flt('bandpass', 1900, 0.7, D), clap: flt('bandpass', 1300, 1.1, D), hat: flt('highpass', 7600, 0.7, D), shaker: flt('bandpass', 5800, 1.8, D), rim: flt('bandpass', 2600, 4, D), crash: flt('highpass', 4200, 0.5, D), riser: flt('bandpass', 400, 3, this.L.sting.in) };
+    // 15.0 location ambience: one looping noise source -> filter (slow LFO on the cutoff) -> gain, straight to the mix
+    if (isLite()) { this.bed = null; return; } // voice mode: keep the graph light
+    const bf = a.createBiquadFilter(); bf.type = 'bandpass'; bf.frequency.value = 800; kr(bf.frequency, bf.Q);
+    const bg = a.createGain(); bg.gain.value = 0; bf.connect(bg); bg.connect(this.mix);
+    const lfo = a.createOscillator(), lg = a.createGain(); lfo.frequency.value = 0.08; lg.gain.value = 0; lfo.connect(lg); lg.connect(bf.frequency); lfo.start();
+    this.bed = { f: bf, g: bg, lfo, lg, src: null };
+  }
+  bedTo(b, t) { // crossfade the ambience to a location's settings (b null = off)
+    const B = this.bed; if (!B) return;
+    const want = b && !this.mute ? b.v : 0;
+    if (want && !B.src && this.noiseReady) { const s = this.a.createBufferSource(); s.buffer = this.noise; s.loop = true; s.connect(B.f); s.start(t); B.src = s; }
+    B.g.gain.setTargetAtTime(want * 1.6, t, 1.2);
+    if (b) { B.f.type = b.type; B.f.frequency.setTargetAtTime(b.f, t, 0.8); B.f.Q.setTargetAtTime(b.q, t, 0.8); B.lfo.frequency.setValueAtTime(b.lfo, t); B.lg.gain.setTargetAtTime(b.depth, t, 0.8); }
+    this.bedOn = b || null;
   }
   buildDelay() {
     const a = this.a, G = this.G, comp = this.comp;
@@ -332,15 +387,16 @@ class Music {
     if (a.createChannelMerger) { const mg = a.createChannelMerger(2); dL.connect(mg, 0, 0); dR.connect(mg, 0, 1); mg.connect(ret); } else { dL.connect(ret); dR.connect(ret); }
     ret.connect(comp); ret.connect(this.revIn);
     this.dL = dL; this.dR = dR;
+    const dt = 60 / (this.bpm || this.theme.bpm[0]) * 0.75; dL.delayTime.value = dt; dR.delayTime.value = dt; // 15.0: was left at 0 until the tempo changed
   }
   go(ctx) {
     const a = this.a;
-    this.fade.gain.setValueAtTime(0, a.currentTime); this.fade.gain.linearRampToValueAtTime(1, a.currentTime + 2.5);
+    this.fade.gain.setValueAtTime(0, a.currentTime); this.fade.gain.linearRampToValueAtTime(1, a.currentTime + (this._swapFade || 2.5)); this._swapFade = 0;
     this.next = a.currentTime + 0.12;
     this.live = true;
     if (ctx) return;
     this.timer = setInterval(() => this.schedule(), TICK);
-    document.addEventListener('visibilitychange', () => this.visibility());
+    if (!this._vis) { this._vis = true; document.addEventListener('visibilitychange', () => this.visibility()); }
   }
   noiseSteps() {
     const CH = 32768; let buf, d, len;
@@ -351,7 +407,7 @@ class Music {
   }
   reverbSteps() {
     // generated IR, darkened tail, 18 ms predelay; low quality keeps the delay send only
-    if (globalThis.__mNoVerb || settings.quality === 'low') return [];
+    if (globalThis.__mNoVerb || settings.quality === 'low' || isLite()) return []; // voice mode: no convolver (iOS mic crackle)
     const a = this.a, sr = a.sampleRate, len = Math.floor(sr * 1.3), pre = Math.floor(sr * 0.018), CH = 24576;
     let ir; const lp = [0, 0], st = [() => { ir = a.createBuffer(1, len, sr); }];
     for (let c = 0; c < 1; c++) for (let s0 = pre; s0 < len; s0 += CH) st.push(() => { const d = ir.getChannelData(c); let v = lp[c], env = Math.exp(-6.9 * (s0 - pre) / (len - pre)); const dk = Math.exp(-6.9 / (len - pre)); for (let i = s0, e = Math.min(len, s0 + CH); i < e; i++) { const k = (i - pre) / (len - pre); v += (rnd() * 2 - 1 - v) * (0.55 - 0.4 * k); d[i] = v * env; env *= dk; } lp[c] = v; });
@@ -369,23 +425,43 @@ class Music {
     if (document.hidden) { clearInterval(this.timer); this.timer = null; this.fade.gain.cancelScheduledValues(t); this.fade.gain.setTargetAtTime(0, t, 0.05); }
     else if (!this.timer) { this.next = t + 0.1; this._lastCall = 0; this.fade.gain.cancelScheduledValues(t); this.fade.gain.setTargetAtTime(1, t + 0.05, 0.4); this.timer = setInterval(() => this.schedule(), TICK); }
   }
+  // 15.0: audio.js rebuilt its context (voice chat took or released the mic). Drop the old graph and build it again on
+  // the new context, keeping theme, location, energy and bar position, so the music carries on after a short fade.
+  rebind() {
+    if (!this.on) return;
+    clearInterval(this.timer); this.timer = null;
+    this.on = false; this.live = false; this.noiseReady = false; this.noise = null; this._conv = null;
+    this.layerOn = {}; this.leadArr = null; this.leadPrevEnd = 0; this.hold = false; this.mute = false; this.bed = null; this.bedOn = null;
+    this.forceSwitch = true; this.pending = this.themeId; this._swapFade = 0.8; this._st.rebinds = (this._st.rebinds || 0) + 1;
+    this.start();
+  }
+  // location id (W's js/locations.js ids; null = none). Changes take effect on the next bar line.
+  location(id) {
+    const l = locId(id); if (l === (this.loc || null)) return;
+    this.loc = l;
+    const base = (this.theme && this.theme.base) || this.themeId.split('@')[0];
+    if (MATCH_THEMES.has(base)) this.want(base, this.target); // re-colour the running match theme
+  }
   // ---------- public control
   set(level, mood) {
-    const id = THEMES[mood] ? mood : ALIAS[mood] || (mood ? 'royale' : this.themeId);
-    const th = THEMES[id];
+    if (typeof mood === 'string' && /^loc_/.test(mood)) { this.location(mood); mood = 'royale'; } // W: LOCATIONS[id].music
+    const id = THEMES[mood] || /@/.test(mood || '') ? mood : ALIAS[mood] || (mood ? 'royale' : this.themeId);
+    const th = themeOf(id);
     const e = th.fixed != null ? th.fixed : [0.2, 0.4, 0.7, 0.95][clamp(level | 0, 0, 3)];
     this.want(id, e);
   }
   want(id, e) {
-    const th = THEMES[id];
+    if (this.loc && MATCH_THEMES.has(id)) id = id + '@' + this.loc; // the match's location colours every match theme
+    const th = themeOf(id);
     this.target = clamp(Math.max(e, th.floor || 0), 0, 1);
     if (id !== this.themeId || (this.pending && this.pending !== id)) this.pending = id === this.themeId ? null : id;
   }
-  newMatch() { this.m = null; this.ringBase = null; this.set(1, 'royale'); }
+  newMatch() { this.m = null; this.ringBase = null; this.loc = null; this.kingPh = 0; this.set(1, 'royale'); }
   // read the match state; pick theme + energy; fire stingers on edges
   match(s, me) {
     if (!s) return;
     if (s.tutorial) { this.m = null; this.ringBase = null; return this.want('royale', 0.3); }
+    if (s.location !== undefined && locId(s.location) !== (this.loc || null)) this.location(s.location); // 15.0 World Tour
     const players = s.units.filter((u) => u.kind === 'player'), alive = players.filter((u) => u.alive).length, total = Math.max(2, players.length);
     const ring0 = (s.storm && s.storm.ring) || 0, crack = !!(s.storm && s.storm.crack);
     if (!this.m || this.ringBase == null) this.ringBase = ring0; // Duel starts with the arena already ringed in
@@ -407,7 +483,8 @@ class Music {
     else if (mode === 'hill' && s.hill) { // King of the Hill: the regal theme, building as anyone nears the goal
       const top = Math.max(0, ...Object.values(s.hill.score || {})); id = 'king'; e = 0.45 + 0.5 * top / (s.hill.goal || 10) + 0.05 * ring;
     }
-    else if (king && me && king.id === me.id) { id = 'king'; e = 0.6 + 0.08 * ring + 0.2 * (1 - (alive - 1) / (total - 1)); }
+    else if (king && me && king.id === me.id) { id = 'king'; e = 0.6 + 0.08 * ring + 0.2 * (1 - (alive - 1) / (total - 1)) + 0.08 * (this.kingPh || 0); }
+    else if (king && !teams && mode !== 'hill' && (!s.kingBoss || s.kingBoss.id === king.id || king.kingBoss)) { id = 'boss'; e = 0.72 + 0.06 * ring + 0.08 * (this.kingPh || 0); } // 15.0: the King is a raid boss for everyone else
     else {
       id = mode === 'blitz' || mode === 'chaos' ? 'blitz' : mode === 'squads' || teams ? 'squads' : 'royale';
       const frac = 1 - (alive - 1) / (total - 1);
@@ -432,7 +509,7 @@ class Music {
     if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(t); else { g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); }
     g.setTargetAtTime(clamp(depth, 0, 1), t, 0.05); g.setTargetAtTime(1, t + ms / 1000, 0.35);
   }
-  stats() { const s = this._st; return { theme: this.themeId, sting: this.lastSting || null, hold: !!this.hold, energy: +this.energy.toFixed(2), bpm: this.bpm, look: +(this.look || LOOK).toFixed(2), calls: s.calls, avgMs: s.calls ? +(s.ms / s.calls).toFixed(4) : 0, maxMs: +s.max.toFixed(3), over2ms: s.slow || 0, notes: s.notes, nodesPerSec: this.a ? +(s.notes / Math.max(1, this.a.currentTime - s.since)).toFixed(1) : 0 }; }
+  stats() { const s = this._st; return { theme: this.themeId, loc: this.loc || null, rebinds: s.rebinds || 0, ctxRate: this.a ? this.a.sampleRate : 0, reverb: !!this._conv, sting: this.lastSting || null, hold: !!this.hold, energy: +this.energy.toFixed(2), bpm: this.bpm, look: +(this.look || LOOK).toFixed(2), calls: s.calls, avgMs: s.calls ? +(s.ms / s.calls).toFixed(4) : 0, maxMs: +s.max.toFixed(3), over2ms: s.slow || 0, notes: s.notes, nodesPerSec: this.a ? +(s.notes / Math.max(1, this.a.currentTime - s.since)).toFixed(1) : 0 }; }
   // ---------- scheduler
   get six() { return 60 / this.bpm / 4; }
   schedule() {
@@ -485,19 +562,66 @@ class Music {
       if (n) this.leadNote(n, ch, tt + human(7), pos);
       else if (this.leadEnd && k === this.leadEnd) this.leadOff(tt);
     }
+    if (th.color) this.color(th.color, pos, tt, ch);
+  }
+  // ---------- 15.0 location colour voices: sparse, one or two nodes per hit, all on the 'color' layer
+  metal(m, t, d, v, ratio = 2.76, idx = 2.2) {
+    const a = this.a, f = mtof(m), [o, g] = this.osc('sine', f, t, t + d + 0.3, this.L.color.in);
+    g.setValueAtTime(0, t); g.linearRampToValueAtTime(v, t + 0.002); g.setTargetAtTime(0, t + 0.006, d * 0.35);
+    const mo = a.createOscillator(), mg = a.createGain(); mo.frequency.value = f * ratio; mg.gain.setValueAtTime(f * idx, t); mg.gain.setTargetAtTime(0, t, d * 0.2);
+    mo.connect(mg); mg.connect(o.frequency); mo.start(t); mo.stop(t + d + 0.3); this._st.notes++;
+  }
+  blip(f0, f1, t, d, v, type = 'sine') {
+    const [o, g] = this.osc(type, f0, t, t + d + 0.05, this.L.color.in);
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + d);
+    g.setValueAtTime(0, t); g.linearRampToValueAtTime(v, t + 0.004); g.setTargetAtTime(0, t + d * 0.4, d * 0.3);
+  }
+  color(kind, pos, t, ch) {
+    const e = this.energy, bar = this.bar, vs = this.voices, r = rnd(), tone = (i, o = 0) => vs[i % 4] + o;
+    if (kind === 'ice') { // glass chimes on the chord, frost sparkles
+      if (pos === 0 && bar % 2 === 0) this.bell(tone(3, 24), t, 2.2, 0.035, this.L.color.in);
+      else if (pos === 6 && bar % 4 === 1) this.bell(tone(1, 36), t, 1.6, 0.022, this.L.color.in);
+      if (r < 0.04 + 0.05 * e) this.blip(mtof(tone(pos, 36)), mtof(tone(pos, 36)) * 1.01, t, 0.08, 0.012);
+    } else if (kind === 'anvil') { // forge hammer on the downbeats, low taiko underneath
+      if ((pos === 0 || (e > 0.55 && pos === 8)) && bar % 2 === 0) this.metal(tone(0, 24), t, 0.9, 0.05, 2.76, 3);
+      if (pos === 0 || (e > 0.45 && pos === 10)) { const [o, g] = this.osc('sine', 110, t, t + 0.9, this.L.color.in); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.12); g.setValueAtTime(0.16 + e * 0.1, t); g.setTargetAtTime(0, t + 0.02, 0.22); }
+    } else if (kind === 'drip') { // cave drops, a temple gong every four bars
+      if (r < 0.05 + 0.03 * e && pos % 2 === 1) { const f = 900 + rnd() * 900; this.blip(f, f * 2.2, t, 0.05, 0.03); }
+      if (pos === 0 && bar % 4 === 0) this.metal(tone(0, -12), t, 3.2, 0.05, 1.41, 1.2);
+    } else if (kind === 'birds') { // garden birdsong
+      if (r < 0.035 && pos % 2 === 1) { const f = 2400 + rnd() * 1400; this.blip(f, f * 1.45, t, 0.035, 0.016); this.blip(f * 1.1, f * 1.6, t + 0.07, 0.03, 0.013); }
+    } else if (kind === 'darbuka') { // doum / tek: maqsum-like hand drum
+      const P = 'D..T..T.D.D.T...', c = P[pos];
+      if (c === 'D') { const [o, g] = this.osc('sine', 120, t, t + 0.4, this.L.color.in); o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(80, t + 0.06); g.setValueAtTime(0.12 + e * 0.06, t); g.setTargetAtTime(0, t + 0.01, 0.09); }
+      else if (c === 'T') this.noiseHit(this.fx.rim, t, 0.16 + e * 0.1, 0.02, 0.08);
+      else if (e > 0.5 && pos % 2 === 1 && r < 0.3) this.noiseHit(this.fx.rim, t, 0.06, 0.012, 0.05);
+    } else if (kind === 'clank') { // machinery: off-beat metal clanks, factory ticking
+      if (pos === 4 || pos === 12) this.metal(tone(2, 12) + (bar % 2 ? 1 : 0), t, 0.35, 0.03 + e * 0.015, 1.41, 3.5);
+      if (e > 0.3 && pos % 2 === 0) this.noiseHit(this.fx.hat, t, 0.03, 0.008, 0.04);
+    } else if (kind === 'shimmer') { // slow swells of a high fifth: starlight
+      if (pos === 0 && bar % 2 === 0) for (const [k, det] of [[0, -4], [7, 5]]) {
+        const d = 16 * this.six * 1.6, [o, g] = this.osc('sine', mtof(tone(0, 24 + k)), t, t + d + 0.3, this.L.color.in); o.detune.value = det;
+        g.setValueAtTime(0, t); g.linearRampToValueAtTime(0.018, t + d * 0.6); g.linearRampToValueAtTime(0, t + d);
+      }
+      if (r < 0.03) this.bell(tone(pos, 36), t, 1.2, 0.012, this.L.color.in);
+    } else if (kind === 'croak') { // bog frogs and a wobbling drone
+      if (r < 0.03 && pos % 4 === 2) for (let i = 0; i < 2 + (rnd() * 2 | 0); i++) { const [o, g] = this.osc('square', 95 + rnd() * 30, t + i * 0.09, t + i * 0.09 + 0.08, this.L.color.in); g.setValueAtTime(0, t + i * 0.09); g.linearRampToValueAtTime(0.012, t + i * 0.09 + 0.01); g.setTargetAtTime(0, t + i * 0.09 + 0.03, 0.015); o.frequency.setTargetAtTime(70, t + i * 0.09, 0.03); }
+      if (pos === 0 && bar % 4 === 0) { const d = 4 * 16 * this.six, [o, g] = this.osc('triangle', mtof(this.bassRoot(ch)), t, t + d, this.L.color.in); o.detune.setValueAtTime(-30, t); o.detune.linearRampToValueAtTime(25, t + d * 0.5); o.detune.linearRampToValueAtTime(-20, t + d); g.setValueAtTime(0, t); g.linearRampToValueAtTime(0.05, t + d * 0.3); g.linearRampToValueAtTime(0, t + d); }
+    }
   }
   barStart(t) {
     if (this.hold && t >= this.holdUntil) { this.hold = false; this.bar = 0; if (!this.pending) this.pending = this.themeId; this.forceSwitch = true; }
     if (this.hold) return;
     // music volume 0: stop generating notes (pads fade, CPU idles)
     const muted = !(settings.music > 0.001);
-    if (muted !== this.mute) { this.mute = muted; if (muted) for (const k in this.L) if (k !== 'sting') this.gateTo(k, false, t); }
+    if (muted !== this.mute) { this.mute = muted; if (muted) for (const k in this.L) if (k !== 'sting') this.gateTo(k, false, t); this.bedTo(muted ? null : this.theme.bed, t); }
     if (muted) return;
+    if (this.bed && this.theme.bed && !this.bed.src && this.noiseReady) this.bedTo(this.theme.bed, t); // ambience waits for the noise buffer
     if (this.pending) {
       const id = this.pending; this.pending = null;
       if (id !== this.themeId || this.forceSwitch) {
-        const big = this.target >= 0.5 && THEMES[id] !== this.theme;
-        this.themeId = id; this.theme = THEMES[id]; this.bar = 0; this.applyTheme(this.theme, t);
+        const big = this.target >= 0.5 && themeOf(id) !== this.theme;
+        this.themeId = id; this.theme = themeOf(id); this.bar = 0; this.applyTheme(this.theme, t);
         if (big && !this.theme.silent) this.drum('crash', t, 0.7);
         if (this.energy > this.target + 0.2 || this.theme.fixed != null) this.energy = this.target; // drop straight to calm themes
       }
@@ -512,7 +636,7 @@ class Music {
     // phrase + arrangement
     this.phraseBar = this.bar % 8; const phrase = this.bar / 8 | 0;
     for (const k of ['bass', 'arp', 'drums', 'bell']) this.gateTo(k, e >= th.layers[k], t);
-    this.gateTo('pad', !th.silent, t);
+    this.gateTo('pad', !th.silent, t); this.gateTo('color', !!th.color, t);
     this.drumPat = pick(th.drums, e); this.bassPat = pick(th.bass, e); this.arpPat = pick(th.arp, e);
     this.fill = this.phraseBar === 7 && e >= 0.5 && th.layers.drums < 1;
     const ld = th.lead, leadOn = ld && e >= th.layers.lead && phrase >= ld.start && (phrase - ld.start) % ld.every === 0;
@@ -540,6 +664,7 @@ class Music {
     this.lo = th.key - 5; this.hi = th.key + 19;
     if (first) this.voices = voiceLead([th.key, th.key + 4, th.key + 7, th.key + 12], th.chords[0][0].map((x) => (th.key + x) % 12), this.lo, this.hi);
     this.leadArr = null; this.bpm = this.bpm || th.bpm[0];
+    this.bedTo(th.silent ? null : th.bed || null, t);
   }
   gateTo(k, on, t) {
     if (this.layerOn[k] === on) return; this.layerOn[k] = on;
@@ -601,7 +726,7 @@ class Music {
     amp.setTargetAtTime(0, t + dur * 0.94, 0.05);
     const cut = ld.brass ? 900 + this.energy * 1600 : 1600 + this.energy * 1800;
     fq.setTargetAtTime(cut * 2.2, t, ld.brass ? 0.04 : 0.01); fq.setTargetAtTime(cut, t + 0.08, 0.2); fq.setValueAtTime(cut, t + Math.min(dur, 1.1));
-    const vb = this.vibG.gain; vb.setTargetAtTime(0, t, 0.02); if (dur > 0.35) vb.setTargetAtTime(14, t + 0.22, 0.2);
+    const vb = this.vibG.gain; vb.setTargetAtTime(0, t, 0.02); if (dur > 0.35) vb.setTargetAtTime(th.vib || 14, t + 0.22, 0.2);
     this.leadPrevEnd = t + dur;
     if (ld.bell) this.bell(m, t, Math.min(1.8, dur * 1.5), v * 0.9, this.L.lead.in); else if (this.layerOn.bell) this.bell(m + 12, t, Math.min(1.6, dur * 1.5), v * 0.35, this.L.bell.in);
     if (this.dbl) { const [, g] = this.osc('sawtooth', f * 2, t, t + dur + 0.1, this.L.lead.in); g.setValueAtTime(0, t); g.linearRampToValueAtTime(v * 0.18, t + 0.02); g.setTargetAtTime(0, t + dur * 0.9, 0.05); }
@@ -711,6 +836,11 @@ class Music {
       boom(t, 0.6); crash(t, 0.8);
       [38, 45, 50].forEach((m) => B(m, t, 1.4, 0.05)); [39, 46, 51].forEach((m) => B(m, t + 1.4, 1.2, 0.05));
       for (let i = 0; i < 6; i++) tom(t + 1.4 + i * 0.2, 0.5 + i * 0.08, 55);
+    } else if (name === 'phase') { // 15.0 boss King phase (66% / 33%): a hit and a climbing brass cluster in the bed's key
+      dur = 2;
+      boom(t, 0.55); crash(t, 0.9); tom(t, 0.8, 50); tom(t + 0.16, 0.6, 50);
+      [45, 48, 51].forEach((m, i) => B(m + o, t + i * 0.12, 1.3 - i * 0.12, 0.045)); B(57 + o, t + 0.36, 1.1, 0.05);
+      this.riser(t + 0.3, 1.5);
     } else return;
     this.lastSting = name;
     if (stop) { this.hold = true; this.holdUntil = t + dur - 0.2; for (const k in this.L) if (k !== 'sting') this.gateTo(k, false, t); this.leadOff(t); this.layerOn = { sting: true }; }
@@ -720,4 +850,10 @@ class Music {
 
 export { Music };
 export const music = new Music();
+// 15.0: survive audio.js rebuilding the context (voice chat mic on / off), and react to a few game events
+onCtxSwap(() => { try { music.rebind(); } catch (e) { console.warn('music rebind', e); } });
+onSfxEvent((e) => {
+  if (e.e === 'location' && e.id) music.location(e.id);
+  else if (/^(kingPhase|bossPhase|phase)$/.test(e.e) || (e.e === 'king' && e.phase)) { const n = +(e.phase || e.n || 1) || 1; music.kingPh = Math.max(music.kingPh || 0, n); music.sting('phase'); }
+});
 export const MUSIC_THEMES = Object.keys(THEMES).filter((k) => k !== 'silence');

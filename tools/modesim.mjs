@@ -6,7 +6,7 @@ import { roster, play, avg, pct } from './run.mjs';
 
 const G = +process.argv[2] || 80;
 const only = process.argv[3] ? process.argv[3].split(',') : null;
-const SIZES = { royale: [8], blitz: [8], duel: [2], squads: [8], siege: [1, 2, 4], daily: [8], hill: [8, 4], chaos: [8], gauntlet: [1, 2, 4], mirror: [8] };
+const SIZES = { royale: [8], blitz: [8], duel: [2], squads: [8], siege: [1, 2, 4], daily: [8], hill: [8, 4], chaos: [8], gauntlet: [1, 2, 4] };
 for (const mode of Object.keys(MODES)) {
   if (only && !only.includes(mode)) continue;
   for (const n of SIZES[mode] || [8]) {

@@ -3,11 +3,15 @@ import {
   SIZE, PIECES, ABILITIES, EVOLVE, EVOLVE_COST, MAX_HONE, honeCost, STAT_GAIN,
   PLAYER_COLORS, HOLLOW_STATS, ATTUNE, MODES, STEADFAST_ROUND, CALM_ROUNDS, TEAM_COLORS, MUTATORS, PASSIVES,
 } from './data.js';
+import { MODE_ALIAS } from './data.js'; // 15.0 (W)
+import { STATUS, ASCEND, evolveCost, WORLD_EVENTS } from './data.js'; // 15.0 (C)
+import { LOCATIONS, LOC_EVENTS, LOC_T, chooseLocation, sanitizeCustom, stormRules, eventWeights, weightedPick } from './locations.js'; // 15.0 (W)
 
 const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 const ORTH = DIRS8.slice(0, 4);
 const DIAG = DIRS8.slice(4);
 const KNIGHT = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
+const RING8 = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]; // 15.0: neighbours in clockwise order (Sweep arcs)
 
 export const STORM = { firstCrack: 5, every: 3, maxRing: 7 };
 export const CROWN_ROUND = 7;
@@ -31,7 +35,7 @@ export const unitAt = (s, x, y) => s.units.find((u) => u.alive && u.x === x && u
 export const unitById = (s, id) => s.units.find((u) => u.id === id) || null;
 const SOLID = { wall: 1, rubble: 1, crate: 1, chest: 1, out: 1, pit: 1 };
 // 10.0: hazard themes. A match has one (s.mutator) or, in Chaos, several (s.mutators).
-export const HAZARDS = ['lava', 'ice', 'portals', 'geysers', 'conveyor', 'crumble', 'rift'];
+export const HAZARDS = ['lava', 'ice', 'portals', 'geysers', 'conveyor', 'crumble', 'rift', 'poison']; // 15.0 (W): + bog poison pools
 export const mutOn = (s, k) => s.mutator === k || !!(s.mutators && s.mutators.includes(k));
 export const HILL = { x0: 6, y0: 6, x1: 9, y1: 9 };
 export const onThrone = (s, x, y) => { const t = tileAt(s, x, y); return !!t && t.t === 'throne' && !isVoid(s, x, y); };
@@ -66,14 +70,15 @@ export function stats(u) {
   const b = baseStats(u), a = u.attune || 0;
   const maxHp = Math.round(b.hp * (1 + ATTUNE.hp * a));
   let atkM = u.buffs.reduce((m, q) => (q.k === 'atk' ? m * q.v : m), 1);
+  if (u.status && u.status.some((q) => q.k === 'enrage')) atkM *= KING_T.enrage; // 15.0 boss King phase enrage
   if (u.passive === 'laststand' && u.hp > 0 && u.hp < maxHp * 0.3) atkM *= 1.3;
   return {
     maxHp, atk: Math.round(b.atk * (1 + ATTUNE.atk * a) * atkM), def: Math.round(b.def * (1 + ATTUNE.def * a)),
     spd: b.spd + attuneSpd(u) + (u.momentum || 0) * 2 + buffSum(u, 'spd'),
   };
 }
-function buffSum(u, k) { return u.buffs.reduce((a, b) => a + (b.k === k ? b.v : 0), 0); }
-function defMul(u) { return u.buffs.reduce((a, b) => (b.k === 'def' ? a * b.v : a), 1); }
+function buffSum(u, k) { let v = u.buffs.reduce((a, b) => a + (b.k === k ? b.v : 0), 0); if (k === 'spd' && u.status) for (const q of u.status) v += q.k === 'haste' ? 3 : q.k === 'slow' ? -3 : 0; return v; } // 15.0: haste and slow
+function defMul(u) { let m = u.buffs.reduce((a, b) => (b.k === 'def' ? a * b.v : a), 1); const x = u.status && u.status.find((q) => q.k === 'exposed'); if (x) m *= Math.max(0.2, 1 - KING_T.expose * (x.n || 1)); return m; } // 15.0: Exposed King
 // Diminishing returns past 12 so stacking SPD is not a free win.
 export const effSpd = (u) => { const v = Math.max(3, stats(u).spd); return v <= 12 ? v : 12 + (v - 12) * 0.5; };
 export const honed = (u) => (u.hone[u.piece] || 0) > 0;
@@ -83,6 +88,7 @@ const SPAWNS = [[1, 1], [14, 14], [14, 1], [1, 14], [7, 1], [8, 14], [1, 8], [14
 const TEAM_SPAWNS = [[[1, 1], [3, 2]], [[14, 14], [12, 13]], [[14, 1], [13, 3]], [[1, 14], [2, 12]]];
 
 export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts = {}) {
+  opts = matchOpts(opts); // 15.0 (W): retired mode ids (mirror), validated Custom rules in opts.custom
   const modeId = MODES[opts.mode] ? opts.mode : 'royale', M = MODES[modeId];
   const s = {
     seed, v: 0, round: 1, roundTurns: 0, turnNo: 0, over: false, winner: null,
@@ -92,14 +98,16 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     mutator: 'none', teams: M.teams || 0, siege: M.siege ? { wave: 0, waves: M.siege.waves, next: 2, since: 0, gauntlet: !!M.siege.gauntlet } : null, finalTwo: false,
     hill: M.hill ? { goal: M.hill.goal, alone: M.hill.alone || 2, contested: M.hill.contested ?? 1, score: {}, holder: null } : null, eclipse: 0, frenzy: 0, bounty: null,
   };
-  // 10.0 Mirror Match: one random build, rolled from the seed, for everyone
-  if (M.mirror) {
+  locSetup(s, opts); // 15.0 (W): s.location, Custom storm speed
+  // 10.0 Mirror Match: one random build, rolled from the seed, for everyone. 15.0 (W): Daily (build of the day) and Custom mirror builds
+  if (M.mirror || opts.custom.mirror) {
     const pts = { hp: 0, atk: 0, def: 0, spd: 0 }, keys = Object.keys(pts);
     for (let i = 0; i < 10; i++) { let k = keys[ri(s, 4)]; if (pts[k] >= 5) k = keys.find((q) => pts[q] < 5); pts[k]++; }
     const pas = Object.keys(PASSIVES), equips = {};
     for (const pc of Object.keys(PIECES)) if (PIECES[pc].equips.length) equips[pc] = PIECES[pc].equips[ri(s, PIECES[pc].equips.length)];
-    s.mirrorBuild = { pts, passive: pas[ri(s, pas.length)], equips };
-    players = players.map((p) => ({ ...p, build: { pts: { ...pts }, passive: s.mirrorBuild.passive, equips: { ...equips } } }));
+    s.mirrorBuild = mirrorGiven(players, opts, modeId) || { pts, passive: pas[ri(s, pas.length)], equips };
+    const B = s.mirrorBuild;
+    players = players.map((p) => ({ ...p, build: { pts: { ...B.pts }, passive: B.passive, equips: { ...B.equips } } }));
   }
   for (let i = 0; i < SIZE * SIZE; i++) s.tiles.push({ t: 'floor' });
   const A = s.arena;
@@ -139,10 +147,8 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     for (let k = 0; k < 4; k++) { if (free(x, y)) set(x, y, 'bramble'); const d = DIRS8[ri(s, 8)]; x += d[0]; y += d[1]; }
   }
   // 5.0 map mutators: one hazard theme per match
-  let mut = MUTATORS[opts.mutator] ? opts.mutator : A || s.siege ? 'none' : M.chaos ? 'chaos' : ['none', 'none', 'lava', 'ice', 'portals', 'geysers', 'conveyor', 'crumble', 'rift'][ri(s, 9)];
-  if (mut === 'chaos' && !M.chaos && !opts.mutator) mut = 'none';
-  s.mutator = mut;
-  if (mut === 'chaos') { const pool = HAZARDS.slice(); s.mutators = []; for (let i = 0; i < 2; i++) s.mutators.push(pool.splice(ri(s, pool.length), 1)[0]); }
+  // 15.0 (W): the hazard now comes from the location (locHazards); opts.mutator still forces a theme
+  const mut = locHazards(s, M, opts, !!A);
   for (const hz of mut === 'chaos' ? s.mutators : [mut]) genHazard(hz);
   function genHazard(mut) {
   if (mut === 'lava' || mut === 'ice') {
@@ -175,6 +181,13 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
       let [x, y] = p;
       for (let k = 0; k < 4; k++) { if (free(x, y)) set(x, y, 'crumble', { hp: 2 }); const d = ORTH[ri(s, 4)]; x += d[0]; y += d[1]; }
     }
+  } else if (mut === 'poison' || mut === 'brambles') { // 15.0 (W): Witchwood Bog pools; Royal Gardens hedges
+    const P = mut === 'poison';
+    for (let c = 0; c < (P ? 5 : 6); c++) {
+      const p = randFree(2); if (!p) continue;
+      let [x, y] = p;
+      for (let k = 0; k < (P ? 4 : 5); k++) { if (free(x, y)) set(x, y, P ? 'poison' : 'bramble'); const d = (P ? ORTH : DIRS8)[ri(s, P ? 4 : 8)]; x += d[0]; y += d[1]; }
+    }
   }
   }
   for (let i = 0; i < Math.round(20 * sc); i++) { const p = randFree(1); if (p) set(p[0], p[1], 'crate', { hp: 1 }); }
@@ -187,8 +200,9 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
       team: s.teams ? Math.floor(i / s.teams) : s.siege ? 0 : null,
       color: s.teams ? TEAM_COLORS[Math.floor(i / s.teams) % TEAM_COLORS.length] : PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter', trail: p.trail || 'none', title: String(p.title || '').slice(0, 24),
       piece: 'pawn', hone: {}, pts: { ...p.build.pts }, passive: p.build.passive, equips: { ...p.build.equips },
-      x, y, hp: 1, gauge: rand(s) * 40, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [],
+      x, y, hp: 1, gauge: rand(s) * 40, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [], status: [],
       alive: true, kills: 0, momentum: 0, mark: null, place: 0, dmgDealt: 0, attune: 0, ult: 0, ults: 0, botLevel: p.botLevel || 'normal', pref: rand(s) < 0.5 ? 'knight' : 'bishop',
+      plan: botPlan(rand(s)), // 15.0 (C): the bot's promotion road (queen, rook, ascend, pawn line)
     };
     u.hp = stats(u).maxHp; u.shards = M.startShards || 0;
     s.units.push(u);
@@ -205,7 +219,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     const [x, y] = p;
     const h = {
       id: s.nextId++, kind: 'hollow', name: 'Hollow', piece: 'hollow', x, y, hx: x, hy: y, hp: HOLLOW_STATS.hp,
-      gauge: rand(s) * 50, shards: 2, cd: { sig: 0, eq: 0 }, buffs: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow',
+      gauge: rand(s) * 50, shards: 2, cd: { sig: 0, eq: 0 }, buffs: [], status: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow',
     };
     s.units.push(h);
     const around = DIRS8.map(([dx, dy]) => [x + dx, y + dy]).filter(([ax, ay]) => free(ax, ay) && !s.items.some((it) => it.x === ax && it.y === ay));
@@ -220,7 +234,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
 // ---------- tutorial arena ----------
 export const ARENA = { x0: 4, y0: 5, x1: 11, y1: 11 };
 export function createTutorial(player) {
-  const s = createMatch([player], 7, { mutator: 'none' });
+  const s = createMatch([player], 7, { mutator: 'none', location: 'gardens' });
   s.tutorial = true; s.units = s.units.filter((u) => u.kind === 'player'); s.items = [];
   for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
     const inside = x >= ARENA.x0 && x <= ARENA.x1 && y >= ARENA.y0 && y <= ARENA.y1;
@@ -233,7 +247,7 @@ export function createTutorial(player) {
 export function spawnDummy(s, x, y, hp = 40) {
   const old = unitAt(s, x, y); if (old) return old;
   if (tileAt(s, x, y)) s.tiles[y * SIZE + x] = { t: 'floor' };
-  const d = { id: s.nextId++, kind: 'hollow', dummy: true, name: 'Dummy', piece: 'hollow', x, y, hx: x, hy: y, hp, hpMax: hp, gauge: 0, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow' };
+  const d = { id: s.nextId++, kind: 'hollow', dummy: true, name: 'Dummy', piece: 'hollow', x, y, hx: x, hy: y, hp, hpMax: hp, gauge: 0, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [], status: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow' };
   s.units.push(d);
   return d;
 }
@@ -267,10 +281,14 @@ export function canAct(s, u) { return s.turn && s.active === u.id && !s.turn.act
 export function canUse(s, u, slot) {
   if (!s.turn || s.active !== u.id) return false;
   const id = slotAbility(u, slot); if (!id) return false;
+  if (s.turn.stunned) return false; // 15.0: a stunned piece cannot act at all this turn (free actions included)
   if (slot === 'ult') return (u.ult || 0) >= 100 && !s.turn.acted;
   if (slot !== 'atk' && u.cd[slot] > 0) return false;
   return ABILITIES[id].free ? true : !s.turn.acted;
 }
+// 15.0 (C): bot promotion roads, rolled once per player at match start
+export const BOT_PLANS = { queen: 0.32, rook: 0.18, ascend: 0.28, pawn: 0.22 };
+function botPlan(r) { let a = 0; for (const [k, w] of Object.entries(BOT_PLANS)) { a += w; if (r < a) return k; } return 'queen'; }
 
 // ---------- abilities ----------
 export function slotAbility(u, slot) {
@@ -281,13 +299,13 @@ export function slotAbility(u, slot) {
   }
   if (slot === 'atk') return PIECES[u.piece].attack;
   if (slot === 'sig') return PIECES[u.piece].sig;
-  if (slot === 'eq') return u.piece === 'king' ? null : u.equips[u.piece] || PIECES[u.piece].equips[0];
+  if (slot === 'eq') { if (u.piece === 'king') return null; const pc = PIECES[u.piece].equipFrom || u.piece, L = PIECES[pc].equips, e = u.equips && u.equips[pc]; return L.includes(e) ? e : L[0] || null; } // pawn line keeps the Pawn's equip
   if (slot === 'ult') return PIECES[u.piece].ult;
   return null;
 }
 export function abilityCd(u, id) {
   const base = ABILITIES[id].cd;
-  if ((id === 'vault' || id === 'transpose' || id === 'decree') && honed(u)) return base - 1;
+  if ((id === 'vault' || id === 'transpose' || id === 'decree' || id === 'heroicLeap') && honed(u)) return base - 1;
   return base;
 }
 
@@ -318,6 +336,8 @@ export function abilityOptions(s, u, slot) {
   const o = [];
   const opt = (anchor, tiles, mult, extra = {}) => o.push({ anchor, tiles, mult, hits: mult > 0 ? hitsOn(s, u, tiles) : [], ...extra });
   const self = pt(u.x, u.y);
+  // 15.0: leap to (x, y) and hit tiles around the landing (never the tile the piece leaves)
+  const leapOpt = (x, y, tiles, mult) => { const tl = tiles.filter((t) => !(t.x === u.x && t.y === u.y)); o.push({ anchor: pt(x, y), tiles: tl, mult, hits: tl.map((t) => unitAt(s, t.x, t.y)).filter((v) => v && v !== u).map((v) => v.id), kind: 'leap', data: { x, y } }); };
   switch (id) {
     case 'pawnStrike': for (const [dx, dy] of DIAG) if (inB(u.x + dx, u.y + dy)) opt(pt(u.x + dx, u.y + dy), [pt(u.x + dx, u.y + dy)], 1.0); break;
     case 'hollowClaw':
@@ -459,6 +479,43 @@ export function abilityOptions(s, u, slot) {
       const pulled = s.units.filter((v) => v.alive && v !== u && !ally(u, v) && cheb(u, v) <= 2).map((v) => v.id);
       o.push({ anchor: self, tiles: ring, mult: 0.7, hits: pulled, kind: 'pull' }); break;
     }
+    // ---- 15.0 (C) status equips and the pawn line ----
+    case 'firebrand': case 'skirmish': case 'halberd':
+      for (const t of around8(u.x, u.y)) opt(t, [t], id === 'firebrand' ? 0.85 : id === 'skirmish' ? 0.95 : 1.1, id === 'skirmish' ? { util: hasSt(u, 'haste') ? 0 : 3 } : {}); break;
+    case 'dart': case 'hex':
+      for (const [dx, dy] of id === 'dart' ? DIRS8 : DIAG) {
+        const tl = lineTiles(s, u, dx, dy, id === 'dart' ? 4 : 5, { stopAtUnit: true }); const last = tl[tl.length - 1];
+        const v = last && unitAt(s, last.x, last.y);
+        if (v && v !== u && !ally(u, v)) opt(last, tl, id === 'dart' ? 0.55 : 0.6, { kind: 'shot' });
+      } break;
+    case 'hoarfrost':
+      for (const [dx, dy] of KNIGHT) { const x = u.x + dx, y = u.y + dy; if (canStand(s, x, y)) leapOpt(x, y, around8(x, y), 0.5); } break;
+    case 'blessing': opt(self, [self], 0, { kind: 'buff', util: 2 + (1 - u.hp / stats(u).maxHp) * 30 + (harmed(u) ? 12 : 0) - (hasSt(u, 'shield') ? 8 : 0) }); break;
+    case 'shieldWall': {
+      const adj = s.units.filter((v) => v.alive && v !== u && !ally(u, v) && cheb(u, v) === 1).length;
+      opt(self, around8(u.x, u.y), 0, { kind: 'buff', util: 2 + (1 - u.hp / stats(u).maxHp) * 26 + adj * 3 - (hasSt(u, 'shield') ? 8 : 0) }); break;
+    }
+    case 'scorch':
+      for (const [dx, dy] of ORTH) {
+        const cx = u.x + dx, cy = u.y + dy, px = dy !== 0 ? 1 : 0, py = dx !== 0 ? 1 : 0;
+        if (inB(cx, cy)) opt(pt(cx, cy), [pt(cx - px, cy - py), pt(cx, cy), pt(cx + px, cy + py)].filter((t) => inB(t.x, t.y)), 0.8);
+      } break;
+    case 'concuss': for (const [dx, dy] of ORTH) { const t = pt(u.x + dx, u.y + dy); if (inB(t.x, t.y)) opt(t, [t], 1.0); } break;
+    case 'frostNova': case 'plague': { const tl = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if ((dx || dy) && inB(u.x + dx, u.y + dy)) tl.push(pt(u.x + dx, u.y + dy)); opt(self, tl, id === 'frostNova' ? 0.45 : 0.3); break; }
+    case 'warcry': opt(self, around8(u.x, u.y), 1.4); break;
+    case 'sweep':
+      for (let i = 0; i < 8; i++) {
+        const arc = [RING8[(i + 7) % 8], RING8[i], RING8[(i + 1) % 8]].map(([dx, dy]) => pt(u.x + dx, u.y + dy)).filter((t) => inB(t.x, t.y));
+        const c = pt(u.x + RING8[i][0], u.y + RING8[i][1]); if (inB(c.x, c.y)) opt(c, arc, 0.9);
+      } break;
+    case 'heroicLeap':
+      for (const [dx, dy] of DIRS8) for (const k of [2, 3]) { const x = u.x + dx * k, y = u.y + dy * k; if (canStand(s, x, y)) leapOpt(x, y, around8(x, y), 0.7); } break;
+    case 'valor':
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+        const x = u.x + dx, y = u.y + dy; if ((!dx && !dy) || !canStand(s, x, y)) continue;
+        const tl = []; for (let b = -2; b <= 2; b++) for (let a = -2; a <= 2; a++) if ((a || b) && inB(x + a, y + b)) tl.push(pt(x + a, y + b));
+        leapOpt(x, y, tl, 1.2);
+      } break;
     // ---- 10.0 Siege enemies ----
     case 'hexBolt': case 'soulLance':
       for (const [dx, dy] of DIRS8) {
@@ -472,39 +529,187 @@ export function abilityOptions(s, u, slot) {
         if (canStand(s, x, y) && !isVoid(s, x, y) && !o.some((q) => q.anchor.x === x && q.anchor.y === y)) opt(pt(x, y), [pt(x, y)], 0, { kind: 'teleport', data: { at: p.id } });
       } break;
   }
+  if (slot === 'ult' && ascended(u)) for (const q of o) { q.mult *= 1.3; q.asc = true; } // 15.0 Ascension: empowered ultimate
   // no friendly fire: allies never count as hits
   if (u.team != null) for (const q of o) q.hits = q.hits.filter((id) => !ally(u, unitById(s, id)));
   return o;
+}
+
+// ---------- 15.0 (C): status effects ----------
+// u.status = [{ k, t, n?, src?, live?, by? }]. t counts down at the affected unit's turn start; freeze and stun take
+// effect at that turn start (live) and end with that turn. Events: {e:'status', id, k, on, t, n, src?}, DoT ticks
+// {e:'dmg', id, n, dot:k}, {e:'resist', id, k} when an immunity blocks one, {e:'cleanse', id, ks}.
+export const getSt = (u, k) => (u && u.status ? u.status.find((q) => q.k === k) || null : null);
+export const hasSt = (u, k) => !!getSt(u, k);
+export const stN = (u, k) => { const q = getSt(u, k); return q ? q.n || 0 : 0; };
+export const harmed = (u) => !!(u && u.status && u.status.some((q) => STATUS[q.k] && STATUS[q.k].bad && q.k !== 'exposed'));
+export const ascended = (u) => !!(u && u.kind === 'player' && ASCEND[u.piece] && ((u.hone && u.hone[u.piece]) || 0) >= MAX_HONE);
+// Boss King tuning (tools/sim15.mjs sweeps these). converge/focus: how hard bots gang up on it.
+// Tuned with 300-game sweeps for ~40% King wins in 8-bot Royale (15.0). HP pool = (piece HP x hp + 5) x (1 + hpPer per rival beyond 1).
+export const KING_T = { hp: 0.95, hpPer: 0.04, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.015, converge: 1.2, focus: 16 };
+export function addStatus(s, u, k, ev, o = {}) {
+  if (!u || !u.alive || s.over || !STATUS[k]) return false;
+  let t = Math.max(1, Math.round(o.t ?? STATUS[k].t));
+  const resist = (u.passive === 'ward' && (k === 'freeze' || k === 'stun' || k === 'slow')) || (ascended(u) && u.piece === 'queen' && (k === 'slow' || k === 'freeze'))
+    || (k === 'freeze' && hasSt(u, 'stun')) || (k === 'stun' && hasSt(u, 'freeze')); // never locked out of both move and action
+  if (resist) { ev.push({ e: 'resist', id: u.id, k }); return false; }
+  if (u.passive === 'ward' && (k === 'burn' || k === 'poison')) t = Math.max(1, t - 1);
+  if (k === 'burn' && hasSt(u, 'freeze')) removeStatus(s, u, 'freeze', ev, 'melt'); // fire thaws
+  if (k === 'freeze' && hasSt(u, 'burn')) removeStatus(s, u, 'burn', ev, 'snuff'); // frost puts the fire out
+  if (!u.status) u.status = [];
+  let q = getSt(u, k);
+  if (!q) { q = { k, t: 0 }; u.status.push(q); }
+  q.t = Math.max(q.t, t);
+  if (k === 'poison') q.n = Math.min(3, (q.n || 0) + Math.max(1, o.n || 1));
+  else if (k === 'shield') q.n = Math.max(q.n || 0, Math.max(1, Math.round(o.n || 1)));
+  else if (k === 'exposed') q.n = o.n || 1;
+  if (o.src != null) q.src = o.src;
+  if (k === 'freeze' || k === 'stun') q.live = false;
+  const e = { e: 'status', id: u.id, k, on: true, t: q.t, n: q.n || 0 }; if (o.src != null) e.src = o.src; if (typeof o.src === 'number') e.by = o.src; // by: the unit that applied it
+  ev.push(e);
+  return true;
+}
+export const applyStatus = addStatus; // name W's location code asked for
+// why (optional): 'melt' (fire thawed a freeze), 'snuff' (frost put out a burn), 'break' (shield popped), 'cleanse'
+export function removeStatus(s, u, k, ev, why) {
+  if (!u || !u.status) return;
+  const i = u.status.findIndex((q) => q.k === k); if (i < 0) return;
+  u.status.splice(i, 1);
+  const e = { e: 'status', id: u.id, k, on: false, t: 0, n: 0 }; if (why) e.why = why;
+  ev.push(e);
+}
+function cleanse(s, u, ev) {
+  const ks = (u.status || []).filter((q) => STATUS[q.k] && STATUS[q.k].bad && q.k !== 'exposed').map((q) => q.k);
+  for (const k of ks) removeStatus(s, u, k, ev, 'cleanse');
+  if (ks.length) ev.push({ e: 'cleanse', id: u.id, ks });
+  return ks.length;
+}
+// Shields soak damage before HP: the status shield first, then a Siege Brute's shield. Returns what is left.
+function soak(s, u, dmg, ev, src, crit) {
+  const q = getSt(u, 'shield');
+  if (q && dmg > 0) {
+    const ab = Math.min(q.n || 0, dmg); q.n -= ab; dmg -= ab;
+    if (ab > 0) { const e = { e: 'dmg', id: u.id, n: ab, shield: true }; if (src) e.src = src.id; if (crit) e.crit = true; ev.push(e); }
+    if (q.n <= 0) { removeStatus(s, u, 'shield', ev, 'break'); ev.push({ e: 'shieldBreak', id: u.id }); }
+  }
+  if (u.shield > 0 && dmg > 0) {
+    const ab = Math.min(u.shield, dmg); u.shield -= ab; dmg -= ab;
+    const e = { e: 'dmg', id: u.id, n: ab, shield: true }; if (src) e.src = src.id; if (crit) e.crit = true; ev.push(e);
+    if (u.shield <= 0) { u.shield = 0; ev.push({ e: 'shieldBreak', id: u.id }); }
+  }
+  return dmg;
+}
+// Burn and poison ticks. The piece that applied it gets the credit (and the kill).
+function dot(s, u, n, k, srcId, ev) {
+  if (s.over || !u.alive) return;
+  const src = srcId != null ? unitById(s, srcId) : null, by = src && src.alive && src !== u ? src : null;
+  let dmg = soak(s, u, Math.max(1, Math.round(n)), ev, null, false);
+  if (dmg <= 0) return;
+  u.hp -= dmg; ev.push({ e: 'dmg', id: u.id, n: dmg, dot: k });
+  if (u.kind === 'player') chargeUlt(u, dmg * 0.8, ev);
+  if (by && by.kind === 'player') { by.dmgDealt = (by.dmgDealt || 0) + dmg; chargeUlt(by, dmg * 0.5, ev); }
+  if (u.hp <= 0) kill(s, u, by, ev, k);
+}
+// Turn start: burn and poison tick, freeze and stun take hold, timers count down, passives fire.
+function statusTurn(s, u, ev) {
+  if (u.status && u.status.length) {
+    const mx = stats(u).maxHp;
+    for (const q of u.status.slice()) {
+      if (!u.alive || s.over) return;
+      if (q.k === 'burn') dot(s, u, mx * 0.06, 'burn', q.src, ev);
+      else if (q.k === 'poison') dot(s, u, mx * 0.03 * (q.n || 1), 'poison', q.src, ev);
+      else if (q.k === 'freeze') { s.turn.rooted = true; q.live = true; }
+      else if (q.k === 'stun') { s.turn.stunned = true; s.turn.acted = true; q.live = true; }
+    }
+    if (!u.alive || s.over) return;
+    for (const q of u.status.slice()) if (!q.live && --q.t <= 0) removeStatus(s, u, q.k, ev);
+  }
+  if (u.kind !== 'player') return;
+  if (u.passive === 'aegis') { u.aegisN = ((u.aegisN || 0) + 1) % 3; if (u.aegisN === 0) addStatus(s, u, 'shield', ev, { n: stats(u).maxHp * 0.1, t: 1 }); }
+  if (ascended(u) && u.piece === 'bishop') heal(s, u, stats(u).maxHp * 0.05, ev);
+  // the King's royal aura slows every enemy that starts a turn near it
+  const K = s.kingBoss && unitById(s, s.kingBoss.id);
+  if (K && K.alive && K !== u && !ally(K, u) && cheb(K, u) <= KING_T.aura) addStatus(s, u, 'slow', ev, { t: 1, src: K.id });
+}
+// Freeze and stun end with the turn they spoiled.
+function statusTurnEnd(s, u, ev) {
+  if (!u || !u.status) return;
+  for (const q of u.status.slice()) if (q.live) removeStatus(s, u, q.k, ev);
+}
+// On-hit effects for the action being resolved: the ability's own statuses, passives and Ascension.
+function actProcs(s, src, tgt, ev) {
+  const A = s._act;
+  if (!tgt.alive || s.over || A.done.includes(tgt.id)) return;
+  A.done.push(tgt.id);
+  const o = { src: src.id };
+  if (A.st) A.st(tgt, o);
+  if (src.passive === 'kindle' && A.slot === 'atk') addStatus(s, tgt, 'burn', ev, o);
+  if (src.passive === 'venom') addStatus(s, tgt, 'poison', ev, o);
+  if (src.passive === 'rime') addStatus(s, tgt, 'slow', ev, o);
+  if (ascended(src)) {
+    if (src.piece === 'bishop' && A.id === 'ray') addStatus(s, tgt, 'poison', ev, o);
+    else if (src.piece === 'rook' && A.id === 'slam') addStatus(s, tgt, 'slow', ev, o);
+    else if (A.slot === 'ult') addStatus(s, tgt, { knight: 'stun', bishop: 'burn', queen: 'freeze' }[src.piece] || 'slow', ev, o);
+  }
+}
+// Exposed: every different attacker that hits the King before its next turn strips more DEF.
+function expose(s, king, src, ev) {
+  if (!king.alive || src === king || ally(src, king)) return;
+  let q = getSt(king, 'exposed');
+  if (q && (q.by || []).includes(src.id)) return;
+  const by = q ? [...(q.by || []), src.id] : [src.id];
+  addStatus(s, king, 'exposed', ev, { n: Math.min(KING_T.exposeMax, by.length), t: 1 });
+  q = getSt(king, 'exposed'); if (q) q.by = by;
+}
+// Boss King phases: crossing 66% and 33% HP sets off a free shockwave and a short enrage.
+function kingPhase(s, ev) {
+  const K = s.kingBoss; if (!K || s.over) return;
+  const u = unitById(s, K.id); if (!u || !u.alive || u.piece !== 'king') return;
+  const r = u.hp / stats(u).maxHp, want = r <= 0.33 ? 2 : r <= 0.66 ? 1 : 0;
+  while (K.phase < want && u.alive && !s.over) {
+    K.phase++;
+    const tiles = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if ((dx || dy) && inB(u.x + dx, u.y + dy)) tiles.push(pt(u.x + dx, u.y + dy));
+    ev.push({ e: 'kingPhase', id: u.id, phase: K.phase, tiles });
+    const victims = s.units.filter((v) => v.alive && v !== u && !ally(u, v) && cheb(u, v) <= 2).sort((a, b) => cheb(u, a) - cheb(u, b) || a.id - b.id);
+    for (const v of victims) { if (s.over || !u.alive) break; if (!v.alive) continue; dealDamage(s, u, v, KING_T.shock, ev, { reflect: false }); if (v.alive && !s.over) pushUnit(s, u, v, sgn(v.x - u.x), sgn(v.y - u.y), 1, 0.3, ev); }
+    if (!u.alive || s.over) break;
+    addStatus(s, u, 'enrage', ev, { t: 2 }); ev.push({ e: 'enrage', id: u.id });
+    addStatus(s, u, 'haste', ev, { t: 2 });
+    s.log.push(`${u.name} is enraged`);
+  }
+  syncBoss(s);
+}
+function syncBoss(s) {
+  const K = s.kingBoss; if (!K) return;
+  const u = unitById(s, K.id);
+  if (!u || !u.alive || u.piece !== 'king') { s.kingBoss = null; return; }
+  K.hp = u.hp; K.hpMax = stats(u).maxHp;
 }
 
 // ---------- damage ----------
 function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
   if (s.over || !tgt.alive || mult <= 0 || ally(src, tgt)) return 0;
   const a = stats(src), d = stats(tgt);
-  let m = mult * (0.9 + rand(s) * 0.2);
-  if (src.passive === 'first' && tgt.hp >= d.maxHp * 0.6) m *= 1.5;
-  if (src.passive === 'predator' && tgt.hp < d.maxHp * 0.35) m *= 1.25;
-  if (tgt.braced) m *= 0.8;
+  let m = mult * (0.9 + rand(s) * 0.2) * dmgMods(src, tgt);
   const crit = rand(s) < (s.eclipse ? 0.2 : 0.1);
   if (crit) m *= 1.5;
   if (s.bloodMoon) m *= 1.3;
-  if (tgt.piece === 'king') m *= 1.1;
   let dmg = Math.max(1, Math.round(a.atk * m * 30 / (30 + d.def * defMul(tgt))));
   if (s.round < STEADFAST_ROUND && tgt.kind === 'player' && (tgt.hp >= d.maxHp || (s._guard && s._guard.has(tgt.id))) && dmg >= tgt.hp) { dmg = tgt.hp - 1; ev.push({ e: 'steadfast', id: tgt.id }); }
   if (s.round < STEADFAST_ROUND && tgt.kind === 'player' && tgt.hp >= d.maxHp) (s._guard || (s._guard = new Set())).add(tgt.id);
-  if (tgt.shield > 0) { // 10.0 Brute shields soak damage first
-    const ab = Math.min(tgt.shield, dmg); tgt.shield -= ab; dmg -= ab;
-    ev.push({ e: 'dmg', id: tgt.id, src: src.id, n: ab, shield: true, crit });
-    if (tgt.shield <= 0) { tgt.shield = 0; ev.push({ e: 'shieldBreak', id: tgt.id }); }
-    if (src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + ab; chargeUlt(src, ab * 0.8, ev); }
-    if (dmg <= 0) return ab;
-  }
+  const raw = dmg;
+  dmg = soak(s, tgt, dmg, ev, src, crit); // 15.0: status shields, then Siege Brute shields
+  if (raw > dmg && src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + raw - dmg; chargeUlt(src, (raw - dmg) * 0.8, ev); }
+  if (tgt.piece === 'king' && tgt.kind === 'player') expose(s, tgt, src, ev);
+  if (dmg <= 0) { if (s._act && s._act.src === src.id) actProcs(s, src, tgt, ev); return raw; }
   tgt.hp -= dmg;
   if (src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + dmg; chargeUlt(src, dmg * 1.1, ev); }
   if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
   ev.push({ e: 'dmg', id: tgt.id, src: src.id, n: dmg, crit });
   if (tgt.hp <= 0) kill(s, tgt, src, ev);
-  if (!s.over && src.alive && src.passive === 'lifesteal' && src !== tgt) heal(s, src, Math.max(1, dmg * 0.1), ev);
+  else adrenaline(s, tgt, ev);
+  if (s._act && s._act.src === src.id && !s.over) actProcs(s, src, tgt, ev);
+  if (!s.over && src.alive && src.passive === 'lifesteal' && src !== tgt) heal(s, src, Math.max(1, dmg * 0.14), ev); // 15.0: 10% -> 14% (sims: weakest base ability)
   if (!s.over && tgt.alive && reflect && tgt.passive === 'thorns' && src !== tgt && cheb(src, tgt) <= 1 && src.alive && !ally(src, tgt)) {
     const r = Math.max(1, Math.round(dmg * 0.3));
     src.hp -= r; ev.push({ e: 'dmg', id: src.id, src: tgt.id, n: r, thorns: true });
@@ -514,18 +719,39 @@ function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
 }
 function chargeUlt(u, n, ev) {
   if (u.kind !== 'player' || !u.alive) return;
-  const was = u.ult || 0; u.ult = Math.min(100, was + (u.piece === 'king' ? n * 0.5 : n));
+  const was = u.ult || 0; u.ult = Math.min(100, was + n); // 15.0: the boss King charges at the normal rate
   if (was < 100 && u.ult >= 100) ev.push({ e: 'ultReady', id: u.id });
+}
+// Damage modifiers that do not roll dice (shared with previewDamage).
+function dmgMods(src, tgt) {
+  const d = stats(tgt); let m = 1;
+  if (src.passive === 'first' && tgt.hp >= d.maxHp * 0.6) m *= 1.5;
+  if (src.passive === 'predator' && tgt.hp < d.maxHp * 0.35) m *= 1.25;
+  if (src.passive === 'opportunist' && harmed(tgt)) m *= 1.25;
+  if (src.passive === 'rime' && hasSt(tgt, 'freeze')) m *= 1.25;
+  if (ascended(src)) m *= src.piece === 'knight' ? 1.2 : src.piece === 'bishop' ? 1.15 : src.piece === 'queen' ? 1.1 : 1;
+  if (tgt.braced) m *= 0.8;
+  if (ascended(tgt) && tgt.piece === 'rook') m *= 0.85;
+  return m;
+}
+function adrenaline(s, u, ev) {
+  if (u.passive !== 'adrenaline' || !u.alive || u.kind !== 'player' || (u.adrenAt && s.round < u.adrenAt)) return;
+  const mx = stats(u).maxHp; if (u.hp >= mx * 0.5) return;
+  u.adrenAt = s.round + 3;
+  addStatus(s, u, 'haste', ev, { t: 2 }); addStatus(s, u, 'shield', ev, { n: mx * 0.16, t: 2 });
 }
 function dealFixed(s, tgt, n, ev, tag) {
   if (s.over || !tgt.alive) return;
-  const dmg = Math.max(1, Math.round(n * (s.bloodMoon ? 1.3 : 1)));
+  let dmg = Math.max(1, Math.round(n * (s.bloodMoon ? 1.3 : 1)));
+  dmg = soak(s, tgt, dmg, ev, null, false);
+  if (dmg <= 0) return 0;
   tgt.hp -= dmg; ev.push({ e: 'dmg', id: tgt.id, n: dmg, [tag]: true });
   if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
-  if (tgt.hp <= 0) kill(s, tgt, null, ev, tag);
+  if (tgt.hp <= 0) kill(s, tgt, null, ev, tag); else adrenaline(s, tgt, ev);
   return dmg;
 }
 function heal(s, u, n, ev) {
+  if (hasSt(u, 'poison')) n *= 0.5; // 15.0: poison halves healing
   const mx = stats(u).maxHp; const h = Math.min(mx - u.hp, Math.round(n));
   if (h > 0) { u.hp += h; ev.push({ e: 'heal', id: u.id, n: h }); }
 }
@@ -578,7 +804,8 @@ function aoe(s, u, tiles, mult, ev, onHit) {
 
 function kill(s, v, killer, ev, cause = null) {
   if (!v.alive) return;
-  v.alive = false; v.hp = 0;
+  v.alive = false; v.hp = 0; v.status = []; // 15.0: statuses end with the piece (the death event implies it)
+  if (s.kingBoss && s.kingBoss.id === v.id) s.kingBoss = null;
   ev.push({ e: 'death', id: v.id, by: killer ? killer.id : null, x: v.x, y: v.y, cause });
   if (killer && killer !== v) chargeUlt(killer, 20, ev);
   const loot = (v.shards || 0);
@@ -601,7 +828,7 @@ function kill(s, v, killer, ev, cause = null) {
   }
   if (v.kind === 'player') {
     const wasKing = v.piece === 'king';
-    s.log.push(`${killer && killer !== v ? killer.name : cause === 'meteor' ? 'A meteor' : cause === 'lava' ? 'The lava' : cause === 'trap' ? 'A trap' : cause === 'geyser' ? 'A geyser' : cause === 'crumble' ? 'The crumbling floor' : 'The storm'} eliminated ${v.name}`);
+    s.log.push(`${killer && killer !== v ? killer.name : cause === 'meteor' ? 'A meteor' : cause === 'lava' ? 'The lava' : cause === 'trap' ? 'A trap' : cause === 'geyser' ? 'A geyser' : cause === 'crumble' ? 'The crumbling floor' : cause === 'burn' ? 'Fire' : cause === 'poison' ? 'Poison' : WORLD_EVENTS[cause] ? 'The ' + WORLD_EVENTS[cause].name : 'The storm'} eliminated ${v.name}`);
     if (killer && killer !== v && killer.kind === 'player') {
       killer.kills++;
       if (killer.passive === 'momentum') killer.momentum = Math.min(4, killer.momentum + 1);
@@ -642,7 +869,7 @@ function kill(s, v, killer, ev, cause = null) {
 // ---------- 5.0: Siege ----------
 function mkHollow(s, x, y, extra) {
   const h = { id: s.nextId++, kind: 'hollow', name: 'Hollow', piece: 'hollow', x, y, hx: x, hy: y, hpMax: HOLLOW_STATS.hp, atkB: HOLLOW_STATS.atk, defB: HOLLOW_STATS.def, spdB: HOLLOW_STATS.spd,
-    gauge: rand(s) * 60, shards: 1, cd: { sig: 0, eq: 0 }, buffs: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow', ...extra };
+    gauge: rand(s) * 60, shards: 1, cd: { sig: 0, eq: 0 }, buffs: [], status: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow', ...extra };
   h.hp = h.hpMax; s.units.push(h); return h;
 }
 export const isBossWave = (S, w) => !!S.gauntlet || w === S.waves || w === Math.floor(S.waves / 2);
@@ -776,15 +1003,16 @@ function land(s, u, ev) {
     }
     s.items.splice(i, 1);
     if (it.k === 'shard') { ev.push({ e: 'pickup', id: u.id, k: 'shard', n: it.n }); gainShards(s, u, it.n, ev); }
-    else if (it.k === 'potion') { ev.push({ e: 'pickup', id: u.id, k: 'potion' }); heal(s, u, stats(u).maxHp * 0.35, ev); }
+    else if (it.k === 'potion') { ev.push({ e: 'pickup', id: u.id, k: 'potion' }); cleanse(s, u, ev); heal(s, u, stats(u).maxHp * 0.35, ev); } // 15.0: potions and shrines also cleanse
     else if (it.k === 'haste') { ev.push({ e: 'pickup', id: u.id, k: 'haste' }); u.gauge += 45; }
     else if (it.k === 'crown') crown(s, u, ev);
   }
   if (t && t.t === 'shrine' && t.cd === 0) {
     t.cd = 4; ev.push({ e: 'shrine', x: u.x, y: u.y, id: u.id });
-    heal(s, u, stats(u).maxHp * 0.4, ev);
+    cleanse(s, u, ev); heal(s, u, stats(u).maxHp * 0.4, ev);
   }
   if (t && t.t === 'bramble') { u.gauge -= 25; ev.push({ e: 'bramble', id: u.id }); }
+  if (t && t.t === 'poison') locPoisonPool(s, u, ev); // 15.0 (W)
   if (t && t.t === 'portal' && !s._porting) {
     let dest = null;
     for (let y = 0; y < SIZE && !dest; y++) for (let x = 0; x < SIZE && !dest; x++) { const q = s.tiles[y * SIZE + x]; if (q.t === 'portal' && q.pair === t.pair && (x !== u.x || y !== u.y) && canStand(s, x, y) && !isVoid(s, x, y)) dest = pt(x, y); }
@@ -805,7 +1033,7 @@ function nearestStand(s, x, y) {
 function revive(s, v, by, ev) {
   const spot = around8(by.x, by.y).find((t) => canStand(s, t.x, t.y) && !isVoid(s, t.x, t.y));
   if (!spot) return false;
-  v.alive = true; v.x = spot.x; v.y = spot.y; v.place = 0; v.buffs = []; v.gauge = 40; v.mark = null;
+  v.alive = true; v.x = spot.x; v.y = spot.y; v.place = 0; v.buffs = []; v.status = []; v.gauge = 40; v.mark = null;
   if (v.piece === 'king') { v.piece = v.kingFrom || 'pawn'; v.kingStats = null; v.cd = { sig: 0, eq: 0 }; } // the Crown shattered when they fell
   v.hp = Math.max(1, Math.round(stats(v).maxHp * 0.4));
   ev.push({ e: 'revive', id: v.id, by: by.id, x: v.x, y: v.y });
@@ -818,16 +1046,20 @@ function crown(s, u, ev) {
   const before = stats(u).maxHp;
   st.maxHp = st.hp;
   u.kingFrom = u.piece;
-  u.kingStats = { hp: Math.round(st.maxHp * 1.05) + 5, atk: st.atk + 1, def: st.def + 1, spd: Math.max(6, PIECES[u.piece].spd + u.pts.spd - 3) };
+  // 15.0 (C): the King is a raid boss. Its HP pool grows with the number of rivals left to fight it.
+  const rivals = alivePlayers(s).filter((w) => w !== u && !ally(u, w)).length;
+  u.kingStats = { hp: Math.round((st.maxHp * KING_T.hp + 5) * (1 + KING_T.hpPer * Math.max(0, rivals - 1))), atk: st.atk + 1, def: st.def + 1, spd: Math.max(6, (PIECES[u.piece].spd || 10) + u.pts.spd - 3) };
   u.piece = 'king'; u.cd = { sig: 0, eq: 0 }; u.mark = null;
   u.hp += stats(u).maxHp - before;
   ev.push({ e: 'crowned', id: u.id });
+  if (!s.siege) { const mx = stats(u).maxHp, r = u.hp / mx; s.kingBoss = { id: u.id, name: u.name, hp: u.hp, hpMax: mx, phase: r <= 0.33 ? 2 : r <= 0.66 ? 1 : 0, aura: KING_T.aura }; }
   s.log.push(`${u.name} claimed the Crown`);
 }
 function moveUnit(s, u, x, y, ev, how = 'step') {
   const from = pt(u.x, u.y);
   u.x = x; u.y = y;
   ev.push({ e: 'move', id: u.id, from, to: pt(x, y), how });
+  if (how === 'jump' && s.active === u.id && u.piece === 'knight' && ascended(u)) addStatus(s, u, 'shield', ev, { n: stats(u).maxHp * 0.12, t: 1 }); // Ascended Knight: Cavalry
   const tl = tileAt(s, x, y);
   if (tl && tl.t === 'ice' && how !== 'ice' && how !== 'portal' && how !== 'swap') {
     const dx = sgn(x - from.x), dy = sgn(y - from.y);
@@ -863,8 +1095,14 @@ export function useAbility(s, u, slot, anchor, ev) {
   const opts = abilityOptions(s, u, slot);
   const o = opts.find((q) => q.anchor.x === anchor.x && q.anchor.y === anchor.y);
   if (!o) return false;
-  ev.push({ e: 'ability', id: u.id, ab: id, slot, anchor, from: { x: u.x, y: u.y }, tiles: o.tiles, n: o.hits.length });
+  ev.push({ e: 'ability', id: u.id, ab: id, slot, anchor, from: { x: u.x, y: u.y }, tiles: o.tiles, n: o.hits.length, ...(o.asc ? { asc: true } : {}) });
   const pieceAtCast = u.piece;
+  // 15.0 (C): on-hit statuses for this action (applied once per piece hit, see actProcs)
+  const S = (k, x) => (v, q) => addStatus(s, v, k, ev, { ...q, ...x });
+  const ST = { firebrand: S('burn'), dart: S('poison', { n: 2 }), scorch: S('burn'), concuss: S('stun'), plague: S('poison', { n: 2 }), hoarfrost: S('freeze'), warcry: S('stun'), valor: S('burn'), dominion: S('slow'),
+    hex: (v, q) => { addStatus(s, v, 'poison', ev, { ...q, n: 2 }); addStatus(s, v, 'slow', ev, q); },
+    frostNova: (v, q) => { addStatus(s, v, 'slow', ev, q); if (cheb(u, v) <= 1) addStatus(s, v, 'freeze', ev, q); } };
+  s._act = { src: u.id, id, slot, done: [], st: ST[id] || null };
   let cdOverride = null;
   switch (id) {
     case 'shove': {
@@ -930,7 +1168,7 @@ export function useAbility(s, u, slot, anchor, ev) {
       { const moved = s.items.filter((i) => i.x === o.anchor.x && i.y === o.anchor.y); s.items = s.items.filter((i) => !moved.includes(i)); for (const it of moved) dropNear(s, o.anchor.x, o.anchor.y, { k: it.k, n: it.n }); }
       break;
     case 'dominion':
-      aoe(s, u, o.tiles, 0.3, ev, (v) => { v.gauge -= 30; v.buffs.push({ k: 'spd', v: -3, t: 2 }); });
+      aoe(s, u, o.tiles, 0.3, ev, (v) => { v.gauge -= 30; }); // 15.0: the slow is now a real status (ST.dominion)
       break;
     case 'enPassant': case 'fork':
       moveUnit(s, u, o.data.x, o.data.y, ev, 'jump');
@@ -945,6 +1183,7 @@ export function useAbility(s, u, slot, anchor, ev) {
       ev.push({ e: 'move', id: u.id, from: a, to: b, how: 'swap' }, { e: 'move', id: v.id, from: b, to: a, how: 'swap' });
       land(s, u, ev); land(s, v, ev);
       u.buffs.push({ k: 'def', v: 1.5, t: 1 });
+      if (u.alive && ascended(u)) addStatus(s, u, 'shield', ev, { n: stats(u).maxHp * 0.25, t: 2 }); // Fortress Rook
       if (u.alive) aoe(s, u, around8(u.x, u.y), o.mult, ev);
       break;
     }
@@ -967,6 +1206,25 @@ export function useAbility(s, u, slot, anchor, ev) {
       break;
     }
     case 'wraithStep': moveUnit(s, u, o.anchor.x, o.anchor.y, ev, 'blink'); break;
+    // ---- 15.0 (C) ----
+    case 'skirmish': aoe(s, u, o.tiles, o.mult, ev); if (u.alive && !s.over) addStatus(s, u, 'haste', ev, { t: 2 }); break;
+    case 'warcry': aoe(s, u, o.tiles, o.mult, ev); if (u.alive && !s.over) addStatus(s, u, 'haste', ev, { t: 2 }); break;
+    case 'dart': case 'hex': {
+      ev.push({ e: 'aoe', id: u.id, tiles: o.tiles, kind: 'hit' });
+      const last = o.tiles[o.tiles.length - 1], v = unitAt(s, last.x, last.y);
+      if (v) dealDamage(s, u, v, o.mult, ev);
+      break;
+    }
+    case 'hoarfrost': case 'heroicLeap': case 'valor':
+      moveUnit(s, u, o.data.x, o.data.y, ev, 'jump');
+      if (u.alive && !s.over) aoe(s, u, o.tiles, o.mult, ev);
+      break;
+    case 'blessing': cleanse(s, u, ev); addStatus(s, u, 'shield', ev, { n: stats(u).maxHp * 0.25, t: 2 }); break;
+    case 'shieldWall':
+      addStatus(s, u, 'shield', ev, { n: stats(u).maxHp * 0.22, t: 2 });
+      ev.push({ e: 'aoe', id: u.id, tiles: o.tiles, kind: 'fx' });
+      for (const v of s.units.filter((w) => w.alive && w !== u && !ally(u, w) && cheb(u, w) === 1).sort((a, b) => a.id - b.id)) addStatus(s, v, 'slow', ev, { src: u.id });
+      break;
     case 'hexBolt': case 'soulLance': {
       ev.push({ e: 'aoe', id: u.id, tiles: o.tiles, kind: 'hit' });
       const last = o.tiles[o.tiles.length - 1], v = unitAt(s, last.x, last.y);
@@ -976,6 +1234,7 @@ export function useAbility(s, u, slot, anchor, ev) {
     default:
       aoe(s, u, o.tiles, o.mult, ev);
   }
+  delete s._act;
   if (slot === 'ult') { u.ult = 0; u.ults = (u.ults || 0) + 1; }
   else if (slot !== 'atk' && u.piece === pieceAtCast) u.cd[slot] = cdOverride ?? abilityCd(u, id);
   if (!ABILITIES[id].free) s.turn.acted = true;
@@ -986,7 +1245,7 @@ export function promoteOptions(u) {
   if (u.kind !== 'player' || u.piece === 'king') return [];
   // Fixed ladder: every later rung is listed, with the total cost of climbing to it in one go.
   const best = new Map();
-  const walk = (pc, acc, steps) => { for (const to of EVOLVE[pc]) { const c = acc + EVOLVE_COST[PIECES[to].tier]; if (!best.has(to) || best.get(to).cost > c) best.set(to, { cost: c, steps: steps + 1 }); walk(to, c, steps + 1); } };
+  const walk = (pc, acc, steps) => { for (const to of EVOLVE[pc] || []) { const c = acc + evolveCost(to); if (!best.has(to) || best.get(to).cost > c) best.set(to, { cost: c, steps: steps + 1 }); walk(to, c, steps + 1); } };
   walk(u.piece, 0, 0);
   const out = [...best.entries()].map(([to, v]) => ({ to, cost: v.cost, steps: v.steps, type: 'evolve' })).sort((a, b) => a.cost - b.cost || (a.to < b.to ? -1 : 1));
   const h = u.hone[u.piece] || 0;
@@ -1002,6 +1261,7 @@ function promote(s, u, to, ev) {
   else u.hone[u.piece] = (u.hone[u.piece] || 0) + 1;
   u.hp = Math.max(1, Math.min(stats(u).maxHp, u.hp + Math.max(0, stats(u).maxHp - before)));
   ev.push({ e: 'promote', id: u.id, piece: u.piece, hone: u.hone[u.piece] || 0, type: o.type });
+  if (o.type === 'hone' && ascended(u)) { ev.push({ e: 'ascend', id: u.id, piece: u.piece }); s.log.push(`${u.name} ascended: ${ASCEND[u.piece].name}`); } // 15.0 (C)
   s.log.push(o.type === 'evolve' ? `${u.name} evolved into a ${PIECES[to].name}` : `${u.name} honed their ${PIECES[u.piece].name}`);
   return true;
 }
@@ -1017,7 +1277,7 @@ export function applyAction(s, pid, a) {
     const m = legalMoves(s, u).find((q) => q.x === a.x && q.y === a.y);
     if (m) {
       if (s.turn.moved) s.turn.extraMoves--; else s.turn.moved = true;
-      moveUnit(s, u, m.x, m.y, ev, m.jump ? 'jump' : PIECES[u.piece] && u.piece !== 'pawn' && u.piece !== 'king' ? 'slide' : 'step');
+      moveUnit(s, u, m.x, m.y, ev, m.jump ? 'jump' : PIECES[u.piece] && u.piece !== 'pawn' && u.piece !== 'king' && !PIECES[u.piece].line ? 'slide' : 'step');
       ok = true;
     }
   } else if (a.type === 'ability' && canUse(s, u, a.slot)) {
@@ -1030,9 +1290,11 @@ export function applyAction(s, pid, a) {
     s.v++;
     const kos = ev.filter((q) => q.e === 'death' && q.by === u.id && (unitById(s, q.id) || {}).kind === 'player').length;
     if (kos >= 2) ev.push({ e: 'multi', id: u.id, n: kos });
-    const done = a.type === 'end' || !u.alive || (s.turn.acted && (!canMove(s, u) || legalMoves(s, u).length === 0));
+    if (!s.over) kingPhase(s, ev); // 15.0 (C): boss King phase shockwaves
+    const done = a.type === 'end' || !u.alive || s.over || (s.turn.acted && (!canMove(s, u) || legalMoves(s, u).length === 0));
     if (done && u.passive === 'bastion') { u.braced = u.alive && !s.turn.moved; if (u.braced) ev.push({ e: 'buff', id: u.id, k: 'braced' }); }
     if (done && !s.over) nextTurn(s, ev);
+    syncBoss(s);
   }
   s._guard = null;
   return { ok, ev };
@@ -1040,6 +1302,7 @@ export function applyAction(s, pid, a) {
 
 // ---------- turn flow ----------
 export function nextTurn(s, ev) {
+  if (s.active != null) statusTurnEnd(s, unitById(s, s.active), ev); // 15.0: freeze and stun end with the turn they spoiled
   for (let guard = 0; guard < 200 && !s.over; guard++) {
     const alive = s.units.filter((u) => u.alive);
     let best = null;
@@ -1058,6 +1321,7 @@ export function nextTurn(s, ev) {
     s.active = best.id;
     s.turn = { moved: false, acted: false, extraMoves: 0, rooted: false };
     startTurn(s, best, ev);
+    if (!s.over) kingPhase(s, ev);
     if (best.alive && !s.over) { ev.push({ e: 'turn', id: best.id }); return; }
   }
 }
@@ -1065,6 +1329,7 @@ export function nextTurn(s, ev) {
 function startTurn(s, u, ev) {
   u.buffs = u.buffs.filter((b) => --b.t > 0 || b.t === undefined);
   if (u.braced) u.braced = false;
+  statusTurn(s, u, ev); if (!u.alive || s.over) return; // 15.0 (C): burn/poison ticks, freeze/stun, Aegis, Grace, royal aura
   if (u.role === 'stalker') s.turn.extraMoves = 1;
   // 10.0: a hunting Hollow walled off from every player burrows through after two stuck turns, so no fight can stall
   if (u.kind === 'hollow' && u.hunt && !u.dummy) {
@@ -1085,10 +1350,11 @@ function startTurn(s, u, ev) {
   }
   for (const k of ['sig', 'eq']) if (u.cd[k] > 0) u.cd[k]--;
   if (u.passive === 'regen') heal(s, u, 1 + Math.floor((u.attune || 0) / 10), ev);
-  if (u.piece === 'king') heal(s, u, stats(u).maxHp * 0.02, ev);
+  if (u.piece === 'king') heal(s, u, stats(u).maxHp * KING_T.heal, ev);
   if (s.teams && u.kind === 'player' && s.units.some((w) => w.alive && ally(u, w) && cheb(u, w) <= 2)) u.buffs.push({ k: 'def', v: 1.15, t: 1, bond: true });
   const lt = tileAt(s, u.x, u.y);
   if (lt && lt.t === 'lava') { dealFixed(s, u, Math.max(4, stats(u).maxHp * 0.08), ev, 'lava'); if (!u.alive) return; }
+  if (lt && lt.t === 'poison') locPoisonPool(s, u, ev); // 15.0 (W)
   if (s.storm.ring >= STORM.maxRing && u.kind === 'player') {
     const d = Math.max(3, Math.round(stats(u).maxHp * 0.06));
     u.hp -= d; ev.push({ e: 'dmg', id: u.id, n: d, storm: true });
@@ -1129,12 +1395,15 @@ function worldEvents(s, ev) {
     s.meteors = [];
     if (s.over) return;
   }
+  locResolve(s, ev); if (s.over) return; // 15.0 (W): telegraphed location events strike, sandstorm clears
+  if (s.custom && s.custom.events === false) return; // 15.0 (W): Custom lobby with world events off
   const EV = (s.rules && s.rules.events) || 3;
   if (r < EV || r % EV !== 0) return;
   const nAlive = alivePlayers(s).length;
   const pool = (s.siege ? ['shardRain', 'supply', ...(s.siege.gauntlet ? ['manaSurge'] : [])] : r < CALM_ROUNDS ? ['shardRain', 'supply', 'earthquake', 'manaSurge', 'frenzy']
     : ['shardRain', 'meteor', 'bloodMoon', 'supply', 'earthquake', 'manaSurge', 'frenzy', 'eclipse', 'restless', ...(nAlive >= 3 ? ['bounty'] : [])]).filter((k) => k !== s.lastEvent);
-  const kind = pool[ri(s, pool.length)];
+  const kind = s.location ? locPickEvent(s, pool, r) : pool[ri(s, pool.length)]; // 15.0 (W): location-weighted pool
+  if (!kind) return;
   s.lastEvent = kind;
   if (kind === 'shardRain') {
     const f = freeTiles(s, 1); const tiles = [];
@@ -1179,7 +1448,192 @@ function worldEvents(s, ev) {
     }
     ev.push({ e: 'world', kind, tiles, ids });
   }
+  else if (Object.prototype.hasOwnProperty.call(LOC_EVENTS, kind)) locEvent(s, kind, ev); // 15.0 (W)
   s.event = { kind, round: r };
+}
+
+// ---------- 15.0 (W): locations ----------
+// Data and tuning live in js/locations.js. State: s.location (id), s.locWarn (a telegraphed event waiting to strike:
+// { kind, round, tiles, centers?, center?, area?, rings? }), s.sandstorm (1 for the round of a Sandstorm).
+// Events: {e:'location', id} (first state, see introEvents), {e:'world', kind, phase:'warn'|'strike', ...} for the
+// telegraphed ones and {e:'world', kind, ...} for the instant ones; statuses go through C's applyStatus.
+const wOwn = (o, k) => o != null && Object.prototype.hasOwnProperty.call(o, k);
+// Normalise createMatch opts: retired mode ids, Custom rules. Never throws on junk.
+function matchOpts(o) {
+  const src = o && typeof o === 'object' ? o : {};
+  const out = { ...src };
+  let extra = null;
+  if (typeof src.mode === 'string' && !wOwn(MODES, src.mode) && wOwn(MODE_ALIAS, src.mode)) { const a = MODE_ALIAS[src.mode]; out.mode = a.mode; extra = a.custom || null; }
+  else if (!(typeof src.mode === 'string' && wOwn(MODES, src.mode))) out.mode = 'royale';
+  out.custom = sanitizeCustom({ ...(src.custom && typeof src.custom === 'object' ? src.custom : {}), ...(extra || {}) });
+  if (!wOwn(MUTATORS, out.mutator)) delete out.mutator;
+  return out;
+}
+// The first state's events: the location reveal (the wheel lands on it). GameHost.start publishes these.
+export function introEvents(s) { return s && s.location ? [{ e: 'location', id: s.location }] : []; }
+function locSetup(s, opts) {
+  s.location = chooseLocation(s.seed, opts, opts.custom);
+  s.locWarn = null; s.sandstorm = 0;
+  if (opts.custom.storm !== 'normal') { const r = stormRules(s.rules.first, s.rules.every, opts.custom.storm); s.rules.first = r.first; s.rules.every = r.every; }
+  s.custom = opts.custom;
+}
+// A build every piece shares: opts.mirrorBuild, else in Daily the first human's build (the build of the day main.js
+// hands out), else null (createMatch rolls one from the seed). Anything malformed is ignored.
+function mirrorGiven(players, opts, modeId) {
+  const ok = (b) => {
+    if (!b || typeof b !== 'object' || !b.pts || typeof b.pts !== 'object' || !wOwn(PASSIVES, b.passive)) return null;
+    const pts = {}; let tot = 0;
+    for (const k of ['hp', 'atk', 'def', 'spd']) { const v = Math.floor(Number(b.pts[k]) || 0); if (v < 0 || v > 10) return null; pts[k] = v; tot += v; }
+    if (tot > 10) return null;
+    const equips = {};
+    for (const pc of Object.keys(PIECES)) { const E = PIECES[pc].equips || []; if (!E.length) continue; equips[pc] = b.equips && E.includes(b.equips[pc]) ? b.equips[pc] : E[0]; }
+    return { pts, passive: b.passive, equips };
+  };
+  if (opts.mirrorBuild) { const b = ok(opts.mirrorBuild); if (b) return b; }
+  if (modeId === 'daily') { const h = players.find((p) => p && !p.isBot); if (h) return ok(h.build); }
+  return null;
+}
+function locHazards(s, M, opts, arena) {
+  let mut;
+  if (wOwn(MUTATORS, opts.mutator)) mut = opts.mutator;
+  else if (arena || s.siege || opts.custom.hazards === false) mut = 'none';
+  else if (M.chaos) mut = 'chaos';
+  else { const pool = (LOCATIONS[s.location] || {}).hazards || ['none']; mut = pool[ri(s, pool.length)]; }
+  if (!wOwn(MUTATORS, mut)) mut = 'none';
+  s.mutator = mut;
+  if (mut === 'chaos') {
+    const pool = HAZARDS.slice(); s.mutators = [];
+    const own = opts.mutator ? [] : ((LOCATIONS[s.location] || {}).hazards || []).filter((h) => h !== 'brambles');
+    if (own.length) { const h = own[ri(s, own.length)]; s.mutators.push(h); if (pool.includes(h)) pool.splice(pool.indexOf(h), 1); }
+    while (s.mutators.length < 2 && pool.length) s.mutators.push(pool.splice(ri(s, pool.length), 1)[0]);
+  }
+  return mut;
+}
+function locPickEvent(s, pool, r) {
+  const calm = !s.siege && r < CALM_ROUNDS;
+  return weightedPick(eventWeights(s.location, pool, { calm, last: s.lastEvent }), rand(s));
+}
+// Statuses go through C's status system (addStatus / removeStatus in the 15.0 (C) section).
+function locStatus(s, u, k, ev, t, n, src) { if (u && u.alive && !s.over) addStatus(s, u, k, ev, { t, n, src }); }
+function locCleanse(s, u, ks, ev) { if (u && u.alive) for (const k of ks) removeStatus(s, u, k, ev); }
+function locPoisonPool(s, u, ev) {
+  if (!u.alive || s.over || isVoid(s, u.x, u.y)) return;
+  ev.push({ e: 'hazard', kind: 'poison', x: u.x, y: u.y, id: u.id });
+  locStatus(s, u, 'poison', ev, LOC_T.poisonPool.t, LOC_T.poisonPool.poison, 'poisonPool');
+}
+const SHELTER = { wall: 1, rubble: 1, crate: 1, chest: 1, shrine: 1 };
+const sheltered = (s, u) => DIRS8.some(([dx, dy]) => { const t = tileAt(s, u.x + dx, u.y + dy); return !!t && !!SHELTER[t.t]; });
+const liveTile = (s, x, y) => inB(x, y) && !isVoid(s, x, y) && tileAt(s, x, y).t !== 'out';
+const emptyFloor = (s, x, y) => liveTile(s, x, y) && tileAt(s, x, y).t === 'floor' && !unitAt(s, x, y) && !s.items.some((i) => i.x === x && i.y === y);
+function areaTiles(s, a) { const out = []; for (let y = a.y0; y <= a.y1; y++) for (let x = a.x0; x <= a.x1; x++) if (liveTile(s, x, y)) out.push(pt(x, y)); return out; }
+// Start a location event (warn for telegraphed ones, effect at once for the rest).
+function locEvent(s, kind, ev) {
+  const r = s.round, ps = alivePlayers(s);
+  if (kind === 'blizzard') {
+    const halves = [{ x0: 0, y0: 0, x1: 7, y1: 15 }, { x0: 8, y0: 0, x1: 15, y1: 15 }, { x0: 0, y0: 0, x1: 15, y1: 7 }, { x0: 0, y0: 8, x1: 15, y1: 15 }];
+    const area = halves[ri(s, 4)], tiles = areaTiles(s, area);
+    s.locWarn = { kind, round: r, area, tiles };
+    ev.push({ e: 'world', kind, phase: 'warn', area, tiles });
+  } else if (kind === 'eruption') {
+    const centers = [];
+    for (let i = 0; i < Math.min(4, ps.length + 1) && ps.length; i++) {
+      const p = ps[i % ps.length];
+      const x = Math.max(0, Math.min(SIZE - 1, p.x + ri(s, 3) - 1)), y = Math.max(0, Math.min(SIZE - 1, p.y + ri(s, 3) - 1));
+      if (liveTile(s, x, y) && !centers.some((c) => c.x === x && c.y === y)) centers.push(pt(x, y));
+    }
+    const tiles = []; for (const c of centers) for (const [dx, dy] of [[0, 0], ...ORTH]) { const x = c.x + dx, y = c.y + dy; if (liveTile(s, x, y) && !tiles.some((t) => t.x === x && t.y === y)) tiles.push(pt(x, y)); }
+    s.locWarn = { kind, round: r, centers, tiles };
+    ev.push({ e: 'world', kind, phase: 'warn', centers, tiles });
+  } else if (kind === 'flood') {
+    const lo = s.storm.ring, hi = Math.min(5, s.storm.ring + LOC_T.flood.band - 1);
+    const tiles = []; if (lo <= hi) for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) { const g = ringOf(x, y); if (g >= lo && g <= hi && liveTile(s, x, y)) tiles.push(pt(x, y)); }
+    s.locWarn = { kind, round: r, rings: [lo, hi], tiles };
+    ev.push({ e: 'world', kind, phase: 'warn', rings: [lo, hi], tiles });
+  } else if (kind === 'gravityWell') {
+    const f = freeTiles(s, Math.min(6, s.storm.ring + 2));
+    const near = f.filter((t) => ps.some((p) => cheb(p, t) <= LOC_T.gravityWell.radius && cheb(p, t) >= 2));
+    const pool = near.length ? near : f;
+    if (!pool.length) return;
+    const center = pool[ri(s, pool.length)];
+    const tiles = [center, ...around8(center.x, center.y).filter((t) => liveTile(s, t.x, t.y))];
+    s.locWarn = { kind, round: r, center, radius: LOC_T.gravityWell.radius, tiles };
+    ev.push({ e: 'world', kind, phase: 'warn', center, radius: LOC_T.gravityWell.radius, tiles });
+  } else if (kind === 'toxicFog') {
+    const p = ps.length ? ps[ri(s, ps.length)] : pt(7, 7);
+    const x0 = Math.max(0, Math.min(SIZE - 6, p.x - 2 - ri(s, 2))), y0 = Math.max(0, Math.min(SIZE - 6, p.y - 2 - ri(s, 2)));
+    const area = { x0, y0, x1: x0 + 5, y1: y0 + 5 }, tiles = areaTiles(s, area);
+    s.locWarn = { kind, round: r, area, tiles };
+    ev.push({ e: 'world', kind, phase: 'warn', area, tiles });
+  } else if (kind === 'bloom') {
+    const ids = [], made = [], sub = [];
+    for (const u of ps) { ids.push(u.id); locCleanse(s, u, ['burn', 'poison'], sub); heal(s, u, stats(u).maxHp * LOC_T.bloom.heal, sub); }
+    const f = freeTiles(s, s.storm.ring + 1).filter((t) => tileAt(s, t.x, t.y).t === 'floor' && ps.every((p) => cheb(p, t) >= 2));
+    for (let i = 0; i < LOC_T.bloom.brambles && f.length; i++) { const t = f.splice(ri(s, f.length), 1)[0]; s.tiles[t.y * SIZE + t.x] = { t: 'bramble' }; made.push({ x: t.x, y: t.y, t: 'bramble' }); }
+    ev.push({ e: 'world', kind, ids, made }, ...sub);
+  } else if (kind === 'sandstorm') {
+    s.sandstorm = 1; const ids = ps.map((u) => u.id), sub = [];
+    for (const u of ps) locStatus(s, u, 'slow', sub, LOC_T.sandstorm.slow, 1, 'sandstorm');
+    ev.push({ e: 'world', kind, ids }, ...sub);
+  } else if (kind === 'overcharge') {
+    const ids = [], stunned = [], sub = [];
+    for (const u of ps) { ids.push(u.id); if (u.cd && typeof u.cd === 'object') for (const k of Object.keys(u.cd)) u.cd[k] = 0; chargeUlt(u, LOC_T.overcharge.ult, sub); }
+    for (const u of s.units) if (u.alive) { const t = tileAt(s, u.x, u.y); if (t && t.t === 'conveyor' && !isVoid(s, u.x, u.y)) { stunned.push(u.id); locStatus(s, u, 'stun', sub, LOC_T.overcharge.stun, 1, 'overcharge'); } }
+    ev.push({ e: 'world', kind, ids, stunned }, ...sub);
+  }
+}
+// Called at the top of every round (from worldEvents): clear one-round flags and strike a pending telegraph.
+function locResolve(s, ev) {
+  s.sandstorm = 0;
+  const W = s.locWarn; if (!W) return;
+  s.locWarn = null;
+  const tiles = (W.tiles || []).filter((t) => liveTile(s, t.x, t.y));
+  const inSet = new Set(tiles.map((t) => t.y * SIZE + t.x));
+  const victims = () => s.units.filter((u) => u.alive && inSet.has(u.y * SIZE + u.x)).sort((a, b) => a.id - b.id);
+  const sub = [];
+  if (W.kind === 'blizzard') {
+    const ids = [];
+    for (const u of victims()) if (!sheltered(s, u)) { ids.push(u.id); locStatus(s, u, 'freeze', sub, LOC_T.blizzard.freeze, 1, 'blizzard'); }
+    const f = tiles.filter((t) => emptyFloor(s, t.x, t.y)), made = [];
+    for (let i = 0; i < LOC_T.blizzard.ice && f.length; i++) { const t = f.splice(ri(s, f.length), 1)[0]; s.tiles[t.y * SIZE + t.x] = { t: 'ice' }; made.push({ x: t.x, y: t.y, t: 'ice' }); }
+    ev.push({ e: 'world', kind: 'blizzard', phase: 'strike', area: W.area, tiles, ids, made }, ...sub);
+  } else if (W.kind === 'eruption') {
+    const ids = [], made = [];
+    ev.push({ e: 'world', kind: 'eruption', phase: 'strike', centers: W.centers, tiles, ids });
+    const strike = ev[ev.length - 1];
+    for (const u of victims()) {
+      ids.push(u.id);
+      dealFixed(s, u, Math.max(4, stats(u).maxHp * LOC_T.eruption.dmg), ev, 'eruption'); if (s.over) return;
+      if (u.alive) locStatus(s, u, 'burn', ev, LOC_T.eruption.burn, 1, 'eruption');
+    }
+    for (const c of W.centers || []) { if (made.length >= LOC_T.eruption.lava) break; if (emptyFloor(s, c.x, c.y)) { s.tiles[c.y * SIZE + c.x] = { t: 'lava' }; made.push({ x: c.x, y: c.y, t: 'lava' }); } }
+    strike.made = made;
+  } else if (W.kind === 'flood') {
+    const ids = [];
+    for (const u of victims()) { ids.push(u.id); locStatus(s, u, 'slow', sub, LOC_T.flood.slow, 1, 'flood'); }
+    ev.push({ e: 'world', kind: 'flood', phase: 'strike', rings: W.rings, tiles, ids }, ...sub);
+  } else if (W.kind === 'toxicFog') {
+    const ids = [];
+    for (const u of victims()) { ids.push(u.id); locStatus(s, u, 'poison', sub, LOC_T.toxicFog.t, LOC_T.toxicFog.poison, 'toxicFog'); }
+    ev.push({ e: 'world', kind: 'toxicFog', phase: 'strike', area: W.area, tiles, ids }, ...sub);
+  } else if (W.kind === 'gravityWell') {
+    const c = W.center, G = LOC_T.gravityWell, ids = [], hit = [];
+    ev.push({ e: 'world', kind: 'gravityWell', phase: 'strike', center: c, radius: G.radius, tiles, ids, hit });
+    const pulled = s.units.filter((u) => u.alive && cheb(u, c) <= G.radius && !isVoid(s, u.x, u.y)).sort((a, b) => cheb(a, c) - cheb(b, c) || a.id - b.id);
+    for (const u of pulled) {
+      if (!u.alive) continue;
+      let moved = false;
+      for (let k = 0; k < G.pull && u.alive && !s.over; k++) {
+        const d = cheb(u, c); if (d <= 1) break;
+        const opts = around8(u.x, u.y).filter((t) => canStand(s, t.x, t.y) && !isVoid(s, t.x, t.y) && cheb(t, c) < d);
+        if (!opts.length) break;
+        opts.sort((a, b) => (Math.abs(a.x - c.x) + Math.abs(a.y - c.y)) - (Math.abs(b.x - c.x) + Math.abs(b.y - c.y)) || a.y - b.y || a.x - b.x);
+        moveUnit(s, u, opts[0].x, opts[0].y, ev, 'pull'); moved = true;
+      }
+      if (s.over) return;
+      if (moved) ids.push(u.id);
+      if (u.alive && cheb(u, c) <= 1) { hit.push(u.id); dealFixed(s, u, Math.max(3, stats(u).maxHp * G.dmg), ev, 'gravityWell'); if (s.over) return; }
+    }
+  }
 }
 
 // ---------- 10.0: map hazards, once per round ----------
@@ -1281,14 +1735,24 @@ function onRound(s, ev) {
     }
     ev.push({ e: 'storm', phase: 'collapse', ring: s.storm.ring });
   }
-  if (!s.crownSpawned && r >= R.crown) {
+  // 15.0 (C): the Crown is telegraphed a round early (s.crownWarn, {e:'crownWarn'}) so claiming it is a race.
+  const crownSpot = () => { const ft = freeTiles(s, Math.max(3, s.storm.ring + (s.storm.crack ? 3 : 2))); return ft.length ? ft[ri(s, ft.length)] : pt(7, 7); };
+  if (!s.crownSpawned && !s.crownWarn && r >= R.crown - 1) {
+    const p = crownSpot(); s.crownWarn = { x: p.x, y: p.y, round: Math.max(r + 1, R.crown) };
+    ev.push({ e: 'crownWarn', x: p.x, y: p.y, round: s.crownWarn.round });
+    s.log.push('The Crown will appear next round');
+  }
+  if (!s.crownSpawned && s.crownWarn && r >= s.crownWarn.round) {
     s.crownSpawned = true;
-    const ft = freeTiles(s, Math.max(3, s.storm.ring + 2)); const spots = ft.length ? [ft[ri(s, ft.length)]] : [pt(7, 7)];
-    const spot = spots.find((p) => !isSolid(s, p.x, p.y) && !unitAt(s, p.x, p.y)) || pt(7, 7);
+    let spot = pt(s.crownWarn.x, s.crownWarn.y); s.crownWarn = null;
+    const on = unitAt(s, spot.x, spot.y);
+    if (isVoid(s, spot.x, spot.y) || (on && on.kind !== 'player')) spot = nearestStand(s, spot.x, spot.y) || pt(7, 7);
     if (isSolid(s, spot.x, spot.y)) s.tiles[spot.y * SIZE + spot.x] = { t: 'floor' };
-    s.items.push({ x: spot.x, y: spot.y, k: 'crown', n: 1 });
     ev.push({ e: 'crownSpawn', x: spot.x, y: spot.y });
     s.log.push('The Crown has appeared');
+    const winner = unitAt(s, spot.x, spot.y);
+    if (winner && winner.kind === 'player') crown(s, winner, ev); // whoever got there first wins the race
+    else s.items.push({ x: spot.x, y: spot.y, k: 'crown', n: 1 });
   }
 }
 
@@ -1305,13 +1769,10 @@ export function predictOrder(s, n = 8) {
 }
 
 // Damage range preview for the UI: [min, max] before crits.
-export function previewDamage(src, tgt, mult) {
+export function previewDamage(src, tgt, mult, s = null) {
   if (mult <= 0) return [0, 0];
   const a = stats(src), d = stats(tgt);
-  let m = mult;
-  if (src.passive === 'first' && tgt.hp >= d.maxHp * 0.6) m *= 1.5;
-  if (src.passive === 'predator' && tgt.hp < d.maxHp * 0.35) m *= 1.25;
-  if (tgt.braced) m *= 0.8;
+  const m = mult * dmgMods(src, tgt) * (s && s.bloodMoon ? 1.3 : 1); // 15.0: same modifiers as dealDamage (passives, Ascension, Exposed via defMul); pass s for Blood Moon
   const k = 30 / (30 + d.def * defMul(tgt));
   return [Math.max(1, Math.round(a.atk * m * 0.9 * k)), Math.max(1, Math.round(a.atk * m * 1.1 * k))];
 }
@@ -1346,7 +1807,7 @@ export function planHollow(s, u) {
   const adj = (x, y) => players.find((p) => Math.max(Math.abs(p.x - x), Math.abs(p.y - y)) === 1);
   if (target && (bd <= 4 || u.hunt)) {
     const ox = u.x, oy = u.y; let pos = pt(u.x, u.y);
-    for (let step = 0; step < (u.role === 'stalker' ? 2 : 1); step++) {
+    for (let step = 0; step < (s.turn && s.turn.rooted ? 0 : u.role === 'stalker' ? 2 : 1); step++) { // 15.0: frozen Hollows hold still
       if (adj(pos.x, pos.y)) break;
       u.x = pos.x; u.y = pos.y; const d0 = cheb(pos, target);
       let mv = legalMoves(s, u).filter((m) => !isVoid(s, m.x, m.y)).sort((a, b) => cheb(a, target) - cheb(b, target))[0];
@@ -1395,16 +1856,28 @@ function planRanged(s, u, players) {
 
 // The AI rolls its own dice so replaying an action log reproduces the match exactly.
 function aiRand(s) { s.aiSeed = ((s.aiSeed ?? (s.seed ^ 0x9e3779b9)) * 1664525 + 1013904223) >>> 0; return s.aiSeed / 4294967296; }
+// 15.0 (C): a bot's promotion pick for its road. queen: climb to the Queen and hone it. rook: stop at the Rook and
+// make it a Fortress. ascend: stay a Knight or Bishop (u.pref) and Ascend it. pawn: Veteran, Champion, then hone.
+function botPromo(u) {
+  const opts = promoteOptions(u).filter((o) => o.cost <= u.shards); if (!opts.length) return null;
+  const evo = opts.filter((o) => o.type === 'evolve'), hone = opts.find((o) => o.type === 'hone') || null;
+  const line = (pc) => !!PIECES[pc].line;
+  const climb = (maxTier) => {
+    const c = evo.filter((o) => !line(o.to) && PIECES[o.to].tier <= maxTier), top = c.reduce((m, o) => Math.max(m, PIECES[o.to].tier), 0);
+    return c.find((o) => PIECES[o.to].tier === top && (top !== 2 || o.to === u.pref)) || c.find((o) => PIECES[o.to].tier === top) || null;
+  };
+  switch (u.plan) {
+    case 'rook': return climb(3) || (u.piece === 'rook' ? hone : null);
+    case 'ascend': return u.piece === 'pawn' ? evo.find((o) => o.to === u.pref) || null : u.piece === u.pref ? hone : null;
+    case 'pawn': return evo.filter((o) => line(o.to)).sort((a, b) => b.cost - a.cost)[0] || (u.piece === 'champion' ? hone : null);
+    default: return climb(4) || (u.piece === 'queen' ? hone : null);
+  }
+}
 export function planBot(s, u) {
   const acts = [];
   // promotion first
-  for (let k = 0; k < 3; k++) {
-    const opts = promoteOptions(u).filter((o) => o.cost <= u.shards);
-    if (!opts.length) break;
-    const evo = opts.filter((o) => o.type === 'evolve');
-    const top = evo.reduce((m, o) => Math.max(m, PIECES[o.to].tier), 0);
-    let pick = evo.find((o) => PIECES[o.to].tier === top && (top !== 2 || o.to === u.pref)) || evo.find((o) => PIECES[o.to].tier === top);
-    if (!pick && u.piece === 'queen') pick = opts.find((o) => o.type === 'hone');
+  for (let k = 0; k < 4; k++) {
+    const pick = botPromo(u); // 15.0 (C): each bot follows its road (u.plan)
     if (!pick) break;
     acts.push({ type: 'promote', to: pick.to });
     // simulate locally on a shallow copy so movement planning uses new piece
@@ -1420,7 +1893,9 @@ export function planBot(s, u) {
   // tiles about to be hit by a geyser next round
   const hot = new Set();
   for (let i = 0; i < s.tiles.length; i++) { const t = s.tiles[i]; if (t.t === 'geyser' && t.ph === 2) { const gx = i % SIZE, gy = (i / SIZE) | 0; for (const [dx, dy] of [[0, 0], ...ORTH]) if (inB(gx + dx, gy + dy)) hot.add((gy + dy) * SIZE + gx + dx); } }
+  if (s.locWarn && Array.isArray(s.locWarn.tiles)) for (const t of s.locWarn.tiles) hot.add(t.y * SIZE + t.x); // 15.0 (W): telegraphed location events
   const bountyT = s.bounty ? unitById(s, s.bounty.id) : null;
+  const sick = harmed(real), kingE = s.kingBoss && s.kingBoss.id !== real.id ? unitById(s, s.kingBoss.id) : null; // 15.0 (C)
 
   const posScore = (x, y) => {
     let sc = 0;
@@ -1428,13 +1903,16 @@ export function planBot(s, u) {
     if (ringOf(x, y) < safeRing + 1 && s.round >= s.rules.first - 1) sc -= 4;
     for (const it of shardItems) {
       const d = Math.max(Math.abs(it.x - x), Math.abs(it.y - y));
-      const val = it.k === 'crown' ? 70 : it.k === 'shard' ? 14 * it.n : it.k === 'potion' ? (1 - hpR) * 30 : it.k === 'trap' ? 0 : it.k === 'soul' ? (it.team === real.team ? 90 : 20) : 6;
+      const val = it.k === 'crown' ? 70 : it.k === 'shard' ? 14 * it.n : it.k === 'potion' ? (1 - hpR) * 30 + (sick ? 10 : 0) :it.k === 'trap' ? 0 : it.k === 'soul' ? (it.team === real.team ? 90 : 20) : 6;
       if (d === 0) sc += val; else sc += val / (d + 1.5) * 0.6;
     }
     const t = tileAt(s, x, y);
-    if (t.t === 'shrine' && t.cd === 0) sc += (1 - hpR) * 40;
+    if (t.t === 'shrine' && t.cd === 0) sc += (1 - hpR) * 40 + (sick ? 14 : 0); // shrines also cleanse
     if (t.t === 'bramble') sc -= 4;
-    if (t.t === 'lava') sc -= 14;
+    if (t.t === 'lava') sc -= 20; // 15.0: lava also burns
+    if (s.crownWarn) { const d = Math.max(Math.abs(s.crownWarn.x - x), Math.abs(s.crownWarn.y - y)); sc += d === 0 ? 60 : 60 / (d + 1.5) * 0.6; } // race to the telegraphed Crown
+    if (kingE) { const d = Math.max(Math.abs(kingE.x - x), Math.abs(kingE.y - y)); if (hpR >= 0.45) sc -= d * KING_T.converge; else if (d <= KING_T.aura) sc -= 4; } // gang up on the boss King; the hurt keep out of its aura
+    if (t.t === 'poison') sc -= 12; // 15.0 (W)
     // 10.0 hazards and modes
     if (t.t === 'crumble') sc -= t.hp > 1 ? 2 : 28;
     else if (t.t === 'conveyor') sc -= 1;
@@ -1450,17 +1928,39 @@ export function planBot(s, u) {
     sc -= adj * (hpR < 0.35 ? 8 : 1.5);
     return sc;
   };
-  const actScore = (opts) => {
+  // 15.0 (C): what the statuses an action applies are worth on a target (0 when it would be wasted or resisted)
+  const stVal = (k, v, n) => {
+    const prime = v.kind === 'player' || (s.siege && v.wave), mx = stats(v).maxHp, w = prime ? 1 : 0.3;
+    if (k === 'burn') return w * (hasSt(v, 'burn') ? 1 : mx * 0.06 * 2 * 0.7);
+    if (k === 'poison') { const have = stN(v, 'poison'); return w * (Math.max(0, Math.min(3, have + n) - have) * mx * 0.03 * 3 * 0.6); }
+    if (v.passive === 'ward' || (ascended(v) && v.piece === 'queen' && k !== 'stun')) return 0;
+    if (k === 'freeze') return hasSt(v, 'freeze') || hasSt(v, 'stun') ? 0 : w * (hasSt(v, 'burn') ? 2 : 7);
+    if (k === 'stun') return hasSt(v, 'stun') || hasSt(v, 'freeze') ? 0 : w * 11;
+    if (k === 'slow') return hasSt(v, 'slow') ? 0 : w * 4;
+    return 0;
+  };
+  const procsFor = (slot) => {
+    const id = slotAbility(u, slot); if (!id) return [];
+    const L = [...(ABILITIES[id].st || [])];
+    if (u.passive === 'kindle' && slot === 'atk') L.push('burn');
+    if (u.passive === 'venom') L.push('poison');
+    if (u.passive === 'rime') L.push('slow');
+    if (ascended(u)) { if (u.piece === 'bishop' && id === 'ray') L.push('poison'); else if (u.piece === 'rook' && id === 'slam') L.push('slow'); else if (slot === 'ult') L.push({ knight: 'stun', bishop: 'burn', queen: 'freeze' }[u.piece] || 'slow'); }
+    return L.map((k) => [k, k === 'poison' && (id === 'dart' || id === 'hex' || id === 'plague') ? 2 : 1]);
+  };
+  const actScore = (opts, slot) => {
     let best = null, bs = 0;
+    const procs = procsFor(slot);
     for (const o of opts) {
       let sc = o.util || 0;
       for (const hid of o.hits) {
         const v = unitById(s, hid); if (!v) continue;
-        const d = estDmg(u, v, o.mult);
+        const d = estDmg(u, v, o.mult), sh = stN(v, 'shield') + (v.shield || 0), dh = Math.max(0, d - sh); // shields soak first
         const prime = v.kind === 'player' || (s.siege && v.wave); // in Siege the Hollows are the enemy
-        sc += Math.min(d, v.hp) * (prime ? 1.2 : 0.8);
-        if (d >= v.hp) sc += prime ? 45 + (v.boss ? 60 : 0) : 18 + v.shards * 6;
-        if (v.piece === 'king') sc += 10;
+        sc += Math.min(dh, v.hp) * (prime ? 1.2 : 0.8) + Math.min(d, sh) * 0.4;
+        if (dh >= v.hp) sc += prime ? 45 + (v.boss ? 60 : 0) : 18 + v.shards * 6;
+        else for (const [k, n] of procs) sc += stVal(k, v, n);
+        if (v.piece === 'king') sc += KING_T.focus + stN(v, 'exposed') * 4; // gang up on an Exposed King
         if (bountyT && v === bountyT) sc += d >= v.hp ? 30 : 8;
       }
       if (o.kind === 'charge' || o.kind === 'dash' || o.kind === 'leap') sc += posScore(o.anchor.x, o.anchor.y) * 0.3;
@@ -1482,7 +1982,7 @@ export function planBot(s, u) {
       for (const slot of ['atk', 'sig', 'eq', 'ult']) {
         if (slot === 'ult' ? (real.ult || 0) < 100 : slot !== 'atk' && u.cd[slot] > 0) continue;
         const sid = slotAbility(u, slot); if (sid && ABILITIES[sid].free) continue;
-        const { best, bs } = actScore(abilityOptionsFor(s, u, real, slot));
+        const { best, bs } = actScore(abilityOptionsFor(s, u, real, slot), slot);
         if (best && bs > as) { as = bs; bestAct = { slot, o: best }; }
       }
     }

@@ -10,7 +10,8 @@
 // Host -> sender when throttled:  { t: 'chat', a: 'slow' }
 import { EMOTES, EMOTE_PACKS } from './data.js';
 
-export const MAX_CUSTOM = 12, CUSTOM_LEN = 40, FAV_SLOTS = 8, RECENT_MAX = 10, LOG_MAX = 300, STRIP_ROWS = 3;
+export const MAX_CUSTOM = 12, CUSTOM_LEN = 40, FAV_SLOTS = 8, FAV_MIN = 6, FAV_MAX = 10, RECENT_MAX = 10, LOG_MAX = 300, STRIP_ROWS = 3;
+export const DEFAULT_FAV = ['g.glhf', 't.storm', 't.help', 't.omw', 'r.nice', 'x.slow', 'k.gg', 'k.wp'];
 
 // ---------------------------------------------------------------- phrases
 export const CATS = [
@@ -147,8 +148,13 @@ export function ensureChat(p) {
   const okRef = (r) => typeof r === 'string' && (isPreset(r) || /^c:\d{1,2}$/.test(r));
   c.custom = (Array.isArray(c.custom) ? c.custom : []).slice(0, MAX_CUSTOM).map((x) => (typeof x === 'string' ? sanitize(x) : ''));
   while (c.custom.length && !c.custom[c.custom.length - 1]) c.custom.pop();
-  c.fav = Array.isArray(c.fav) ? c.fav.slice(0, FAV_SLOTS).map((r) => (okRef(r) ? r : null)) : ['g.glhf', 't.storm', 't.help', 't.omw', 'r.nice', 'x.slow', 'k.gg', 'k.wp'];
-  while (c.fav.length < FAV_SLOTS) c.fav.push(null);
+  // 15.0: 6-10 favourite slots (default 8). setup = the player has picked them (asked on the first open of the picker);
+  // older profiles that already changed their favourites count as set up.
+  const had = Array.isArray(c.fav);
+  c.favN = Math.max(FAV_MIN, Math.min(FAV_MAX, Math.floor(+c.favN) || (had ? Math.max(FAV_SLOTS, c.fav.length) : FAV_SLOTS)));
+  c.fav = had ? c.fav.slice(0, c.favN).map((r) => (okRef(r) ? r : null)) : DEFAULT_FAV.slice();
+  while (c.fav.length < c.favN) c.fav.push(null);
+  if (typeof c.setup !== 'boolean') c.setup = had && c.fav.some((r, i) => r !== (DEFAULT_FAV[i] || null));
   c.recent = (Array.isArray(c.recent) ? c.recent : []).filter(okRef).slice(0, RECENT_MAX);
   p.chat = c; return c;
 }
@@ -156,10 +162,12 @@ export function ensureChat(p) {
 // ---------------------------------------------------------------- UI
 const $ = (s, r = document) => r.querySelector(s);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
-const TABS = [['fav', 'Faves'], ['recent', 'Recent'], ...CATS.map((c) => [c.id, c.name]), ['packs', 'Packs'], ['mine', 'Mine'], ['log', 'Log'], ['players', 'Players']];
+// 15.0: the picker opens on Favourites; every phrase lives in one organised All Phrases view (category chips filter it)
+const TABS = [['fav', 'Favourites'], ['all', 'All Phrases'], ['recent', 'Recent'], ['log', 'Log'], ['players', 'Players']];
+const ALL_CATS = [...CATS.map((c) => [c.id, c.name]), ['packs', 'Packs'], ['mine', 'Mine']];
 
 export class ChatUI {
-  constructor() { this.tab = 'fav'; this.log = []; this.muted = new Set(); this.teamOnly = false; this.mounted = false; this.rl = {}; this.sessKey = null; this.unread = 0; this.lastAt = 0; }
+  constructor() { this.cat = null; this.pick = null; this.tab = 'fav'; this.log = []; this.muted = new Set(); this.teamOnly = false; this.mounted = false; this.rl = {}; this.sessKey = null; this.unread = 0; this.lastAt = 0; }
   // deps: { profile(), save(), settings, saveSettings(), activeEmotes(profile), game, session(), toast(msg), sfx, director, voice }
   mount(deps) {
     if (this.mounted) return; this.mounted = true; this.d = deps;
@@ -200,19 +208,54 @@ export class ChatUI {
 
   // ---- picker
   // While the picker is open the Director pauses its lanes (messages queue, nothing draws over the picker)
-  open() { this.render(); this.menu.classList.remove('hidden'); this.logEl.classList.add('yield'); this.wrapOpen(true); this.holdDir(); }
-  close() { this.menu.classList.add('hidden'); this.wrapOpen(false); }
+  open() { if (!this.c.setup) this.startPick(); this.render(); this.menu.classList.remove('hidden'); this.logEl.classList.add('yield'); this.wrapOpen(true); this.holdDir(); }
+  close() { if (this.pick && this.pick.first) this.finishPick(true); this.pick = null; this.menu.classList.add('hidden'); this.wrapOpen(false); }
+  // ---- favourites chooser (first open, or Edit in the Favourites view): tap phrases in the order you want them
+  startPick() { const c = this.c; this.pick = { first: !c.setup, sel: c.fav.filter((r) => this.owned(r)) }; }
+  finishPick(suggested) {
+    const c = this.c, P = this.pick; if (!P) return;
+    const sel = suggested ? DEFAULT_FAV.filter((r) => this.owned(r)) : P.sel.slice(0, FAV_MAX);
+    c.favN = Math.max(FAV_MIN, Math.min(FAV_MAX, sel.length)); c.fav = sel.slice(0, c.favN); while (c.fav.length < c.favN) c.fav.push(null);
+    c.setup = true; this.pick = null; this.tab = 'fav'; this.d.save();
+  }
+  renderPick(m) {
+    const P = this.pick, n = P.sel.length;
+    const head = el('div', 'qc-pick-h');
+    head.append(el('b', '', P.first ? 'Pick your favourites' : 'Edit favourites'), el('small', '', `Tap ${FAV_MIN} to ${FAV_MAX} phrases in the order you want them. Quick chat opens on these.`));
+    const cnt = el('span', 'qc-pick-n' + (n >= FAV_MIN ? ' ok' : ''), `${n} / ${FAV_MAX}`); cnt.setAttribute('aria-live', 'polite'); head.appendChild(cnt);
+    const body = el('div', 'qc-body qc-all'); body.dataset.tab = 'pick';
+    for (const [id, name] of ALL_CATS) {
+      if (id === 'packs' || (id === 'team' && !this.teamsHere())) continue;
+      const list = this.listFor(id); if (!list.length) continue;
+      body.appendChild(el('div', 'qc-h', name));
+      for (const r of list) {
+        const i = P.sel.indexOf(r), b = el('button', 'qc-p qc-tog' + (i >= 0 ? ' on' : ''), this.refText(r));
+        b.dataset.tog = r; b.setAttribute('aria-pressed', i >= 0 ? 'true' : 'false'); if (i >= 0) b.dataset.n = i + 1;
+        body.appendChild(b);
+      }
+    }
+    const foot = el('div', 'qc-foot');
+    const sug = el('button', 'qc-edit', 'Use Suggested'); sug.dataset.qc = 'pick-default'; foot.appendChild(sug);
+    if (!P.first) { const x = el('button', '', 'Cancel'); x.dataset.qc = 'pick-cancel'; foot.appendChild(x); }
+    const done = el('button', 'qc-done', n >= FAV_MIN ? `Done (${n})` : `Pick ${FAV_MIN - n} more`); done.dataset.qc = 'pick-done'; done.disabled = n < FAV_MIN; foot.appendChild(done);
+    m.append(head, body, foot);
+  }
+  teamsHere() { const g = this.d.game; return !(g && g.s && !g.s.teams && !g.s.siege); }
   wrapOpen(on) { const w = this.menu.closest('.emote-wrap'); if (w) w.classList.toggle('qc-open', on); }
   holdDir() { const D = this.d.director; if (D && D.hold && !this.menu.classList.contains('hidden')) D.hold(400); }
   toggle() { if (this.menu.classList.contains('hidden')) this.open(); else this.close(); }
   render() {
     if (!this.menu) return;
     const c = this.c, m = this.menu; m.textContent = '';
-    if (this.tab === 'fav' && !this.listFor('fav').length) this.tab = 'tactic';
+    m.classList.toggle('qc-picking', !!this.pick);
+    if (this.pick) { this.renderPick(m); return; }
+    if (ALL_CATS.some(([id]) => id === this.tab)) { this.cat = this.tab; this.tab = 'all'; } // old category tabs live in All Phrases now
+    if (this.tab === 'fav' && !this.listFor('fav').length) this.tab = 'all';
     if (this.tab === 'recent' && !c.recent.length) this.tab = 'fav';
     if (this.tab === 'log') this.tab = 'fav'; // the Log tab opens the history sheet
     const body = el('div', 'qc-body'); body.dataset.tab = this.tab;
     if (this.tab === 'players') this.renderPlayers(body);
+    else if (this.tab === 'all') this.renderAll(body);
     else {
       const list = this.listFor(this.tab);
       if (!list.length) body.appendChild(el('p', 'qc-empty', this.tab === 'mine' ? 'No phrases yet. Tap Customise to write up to 12 of your own.' : 'Nothing here yet.'));
@@ -220,16 +263,30 @@ export class ChatUI {
     }
     const tabs = el('div', 'qc-tabs'); tabs.setAttribute('role', 'tablist');
     for (const [id, name] of TABS) {
-      if (id === 'team' && this.d.game && this.d.game.s && !this.d.game.s.teams && !this.d.game.s.siege) continue; // squad callouts only where there are teammates
-      if (id === 'packs' && !this.listFor('packs').length) continue;
+      if (id === 'recent' && !c.recent.length) continue;
       const b = el('button', 'qc-tab' + (id === this.tab ? ' on' : ''), id === 'log' && this.unread ? `${name} (${this.unread > 9 ? '9+' : this.unread})` : name); b.dataset.tab = id; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', id === this.tab ? 'true' : 'false'); tabs.appendChild(b);
     }
     const foot = el('div', 'qc-foot');
+    if (this.tab === 'fav') { const ef = el('button', 'qc-edit', 'Edit Favourites'); ef.dataset.qc = 'favs'; foot.appendChild(ef); }
     if (this.teams()) { const t = el('button', 'qc-team' + (this.teamOnly ? ' on' : ''), this.teamOnly ? 'Team only: On' : 'Team only: Off'); t.dataset.qc = 'team'; t.setAttribute('aria-pressed', this.teamOnly ? 'true' : 'false'); foot.appendChild(t); }
     const cu = el('button', 'qc-edit', 'Customise'); cu.dataset.qc = 'custom'; foot.appendChild(cu);
     const cl = el('button', 'qc-close', 'Close'); cl.dataset.qc = 'close'; cl.setAttribute('aria-label', 'Close quick chat'); foot.appendChild(cl);
     m.append(body, tabs, foot);
     const on = tabs.querySelector('.on'); if (on) requestAnimationFrame(() => { try { on.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch {} });
+  }
+  // All Phrases: category chips (All, Hello, Tactics, ...) over one list with a header per category
+  renderAll(body) {
+    const cats = ALL_CATS.filter(([id]) => !(id === 'team' && !this.teamsHere()) && this.listFor(id).length);
+    if (this.cat && !cats.some(([id]) => id === this.cat)) this.cat = null;
+    const chips = el('div', 'qc-cats'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', 'Categories');
+    for (const [id, name] of [[null, 'All'], ...cats]) { const b = el('button', 'qc-cat' + ((id || null) === this.cat ? ' on' : ''), name); b.dataset.tab = id || 'all'; b.setAttribute('aria-pressed', (id || null) === this.cat ? 'true' : 'false'); chips.appendChild(b); }
+    body.appendChild(chips);
+    const fav = new Set(this.c.fav);
+    for (const [id, name] of cats) {
+      if (this.cat && this.cat !== id) continue;
+      body.appendChild(el('div', 'qc-h', name));
+      for (const r of this.listFor(id)) { const b = el('button', 'qc-p' + (fav.has(r) ? ' fav' : ''), this.refText(r)); b.dataset.say = r; if (CATS.find((x) => x.id === PHRASE_CAT[r] && x.team) && this.teams()) b.classList.add('team'); body.appendChild(b); }
+    }
   }
   renderPlayers(body) {
     const g = this.d.game, s = g && g.s, sess = this.d.session(), V = this.d.voice;
@@ -249,11 +306,16 @@ export class ChatUI {
     const t = e.target.closest('button'); if (!t || !this.menu.contains(t)) return;
     const sfx = this.d.sfx;
     if (t.dataset.tab === 'log') { this.close(); this.openSheet(); sfx && sfx.tap(); return; }
-    if (t.dataset.tab) { this.tab = t.dataset.tab; this.render(); sfx && sfx.tap(); return; }
+    if (t.dataset.tog && this.pick) { const P = this.pick, i = P.sel.indexOf(t.dataset.tog); if (i >= 0) P.sel.splice(i, 1); else if (P.sel.length >= FAV_MAX) { this.d.toast(`Up to ${FAV_MAX} favourites`); return; } else P.sel.push(t.dataset.tog); this.render(); sfx && sfx.tap(); return; }
+    if (t.dataset.tab) { const id = t.dataset.tab; if (t.classList.contains('qc-cat') || ALL_CATS.some(([k]) => k === id)) { this.tab = 'all'; this.cat = id === 'all' ? null : id; } else { this.tab = id; if (id === 'all') this.cat = null; } this.render(); sfx && sfx.tap(); return; }
     if (t.dataset.say) { this.say(t.dataset.say); this.close(); return; }
     if (t.dataset.mute) { const pid = t.dataset.mute; if (this.muted.has(pid)) this.muted.delete(pid); else this.muted.add(pid); this.render(); this.renderStrip(); if (this.sheetOpen()) this.renderSheet(); sfx && sfx.tap(); return; }
     if (t.dataset.vc && this.d.voice) { this.d.voice.onControl(t.dataset.vc, t.dataset.pid); setTimeout(() => this.tab === 'players' && !this.menu.classList.contains('hidden') && this.render(), 50); return; }
     const q = t.dataset.qc;
+    if (q === 'favs') { this.startPick(); this.render(); sfx && sfx.tap(); return; }
+    if (q === 'pick-done') { if (this.pick && this.pick.sel.length >= FAV_MIN) { this.finishPick(false); this.render(); sfx && sfx.select && sfx.select(); } return; }
+    if (q === 'pick-default') { this.finishPick(true); this.render(); sfx && sfx.select && sfx.select(); return; }
+    if (q === 'pick-cancel') { this.pick = null; this.render(); sfx && sfx.tap(); return; }
     if (q === 'team') { this.teamOnly = !this.teamOnly; this.render(); sfx && sfx.tap(); }
     else if (q === 'custom') { this.close(); this.openModal(); }
     else if (q === 'close') { this.close(); sfx && sfx.tap(); }
@@ -442,7 +504,7 @@ export class ChatUI {
   buildModal() {
     const m = el('div', 'modal hidden global'); m.id = 'm-chat'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-label', 'Quick chat');
     m.innerHTML = `<div class="modal-box qc-box"><h3>Quick Chat</h3>
-      <div class="set-sec">Favourites <small>Tap a slot, then a phrase</small></div><div class="qcm-favs" id="qcm-favs"></div>
+      <div class="set-sec">Favourites <small>Tap a slot, then a phrase</small></div><div class="qcm-favn" role="group" aria-label="Number of favourites"><span>Slots</span><button class="btn small" data-favn="-1" aria-label="Fewer favourites">-</button><b id="qcm-favn">8</b><button class="btn small" data-favn="1" aria-label="More favourites">+</button></div><div class="qcm-favs" id="qcm-favs"></div>
       <div class="qcm-tabs" id="qcm-tabs" role="tablist"></div><div class="qcm-lib" id="qcm-lib"></div>
       <div class="set-sec">My Phrases <small>Up to ${MAX_CUSTOM}, ${CUSTOM_LEN} characters each</small></div><div class="qcm-custom" id="qcm-custom"></div>
       <div class="set-sec">Safety</div>
@@ -454,10 +516,11 @@ export class ChatUI {
     m.addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) { if (e.target === m) this.closeModal(); return; }
       if (b.id === 'qcm-done') return this.closeModal();
+      if (b.dataset.favn) { const c = this.c, n = Math.max(FAV_MIN, Math.min(FAV_MAX, c.favN + +b.dataset.favn)); if (n !== c.favN) { c.favN = n; c.fav = c.fav.slice(0, n); while (c.fav.length < n) c.fav.push(null); c.setup = true; this.slot = Math.min(this.slot, n - 1); this.d.save(); this.d.sfx && this.d.sfx.tap(); } this.renderModal(); return; }
       if (b.dataset.slot != null) { this.slot = +b.dataset.slot; this.renderModal(); this.d.sfx && this.d.sfx.tap(); return; }
       if (b.dataset.clear != null) { this.c.fav[+b.dataset.clear] = null; this.d.save(); this.renderModal(); return; }
       if (b.dataset.lt) { this.libTab = b.dataset.lt; this.renderModal(); return; }
-      if (b.dataset.pick) { const c = this.c; const i = c.fav.indexOf(b.dataset.pick); if (i >= 0 && i !== this.slot) c.fav[i] = c.fav[this.slot]; c.fav[this.slot] = b.dataset.pick; this.slot = (this.slot + 1) % FAV_SLOTS; this.d.save(); this.renderModal(); this.d.sfx && this.d.sfx.select && this.d.sfx.select(); }
+      if (b.dataset.pick) { const c = this.c; const i = c.fav.indexOf(b.dataset.pick); if (i >= 0 && i !== this.slot) c.fav[i] = c.fav[this.slot]; c.fav[this.slot] = b.dataset.pick; c.setup = true; this.slot = (this.slot + 1) % c.favN; this.d.save(); this.renderModal(); this.d.sfx && this.d.sfx.select && this.d.sfx.select(); }
     });
     m.addEventListener('change', (e) => {
       const inp = e.target.closest('[data-ci]'); if (!inp) return;
@@ -474,7 +537,8 @@ export class ChatUI {
   closeModal() { this.modal.classList.add('hidden'); this.d.sfx && this.d.sfx.tap(); if (this.menu && !this.menu.classList.contains('hidden')) this.render(); }
   renderModal(keepCustom) {
     const c = this.c, m = this.modal;
-    const favs = $('#qcm-favs', m); favs.textContent = '';
+    const favs = $('#qcm-favs', m); favs.textContent = ''; $('#qcm-favn', m).textContent = c.favN;
+    for (const b of m.querySelectorAll('[data-favn]')) b.disabled = +b.dataset.favn < 0 ? c.favN <= FAV_MIN : c.favN >= FAV_MAX;
     c.fav.forEach((r, i) => {
       const w = el('div', 'qcm-slot' + (i === this.slot ? ' on' : ''));
       const b = el('button', 'qcm-sb', this.owned(r) ? this.refText(r) : 'Empty'); b.dataset.slot = i; b.setAttribute('aria-label', `Favourite slot ${i + 1}: ${this.owned(r) ? this.refText(r) : 'empty'}`);
@@ -483,7 +547,7 @@ export class ChatUI {
       favs.appendChild(w);
     });
     const tabs = $('#qcm-tabs', m); tabs.textContent = '';
-    for (const [id, name] of [...CATS.map((x) => [x.id, x.name]), ['packs', 'Packs'], ['mine', 'Mine']]) { if (id === 'packs' && !this.listFor('packs').length) continue; const b = el('button', 'qc-tab' + (id === this.libTab ? ' on' : ''), name); b.dataset.lt = id; tabs.appendChild(b); }
+    for (const [id, name] of ALL_CATS) { if (id === 'packs' && !this.listFor('packs').length) continue; const b = el('button', 'qc-tab' + (id === this.libTab ? ' on' : ''), name); b.dataset.lt = id; tabs.appendChild(b); }
     const lib = $('#qcm-lib', m); lib.textContent = '';
     const list = this.listFor(this.libTab);
     if (!list.length) lib.appendChild(el('p', 'qc-empty', this.libTab === 'mine' ? 'Write a phrase below first.' : 'Nothing here yet.'));

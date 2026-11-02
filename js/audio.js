@@ -97,6 +97,55 @@ function* genReverb(spec, inGain, outGain, key) {
 export const reverbState = () => ({ ...rvState, pending: jobs.length });
 function shaperCurve(k) { const n = 1024, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); } return c; }
 
+// ---- 15.0 voice mode. While voice chat holds the microphone, iOS runs the audio session as 'play-and-record':
+// the hardware rate can drop (48 kHz -> 24/16 kHz), the IO buffer shrinks and echo cancellation runs on the same
+// thread. A context built before the switch keeps its old rate and resamples (crackle), and 'interactive' latency
+// underruns. So when the mic starts or stops we rebuild the ONE game context at the current hardware rate with
+// 'playback' latency and a light graph (no convolvers), and voice.js uses this same context for its meters and
+// for the remote voices (no second AudioContext). Music and voice re-wire themselves through onCtxSwap().
+let lite = false, wantLite = false, liteTimer = 0, liteArm = null, swaps = 0, holdN = 0;
+const swapL = new Set();
+let voiceOutG = null; // remote voices: straight into the limiter, past the glue compressor and the reverbs
+export const isLite = () => lite;
+export function onCtxSwap(f) { swapL.add(f); return () => swapL.delete(f); }
+// voice.js: true once the mic is live (session already 'play-and-record'), false after it let go of the mic.
+export function setVoiceMode(on) {
+  on = !!on; if (on === wantLite) return; wantLite = on; dbg('voice mode', on ? 'on' : 'off');
+  clearTimeout(liteTimer); disarm();
+  if (on) applyLite();
+  else { // let the OS settle the session first; rebuild inside the next tap if one comes soon (so the new context may start)
+    liteArm = () => applyLite(); for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, liteArm, { capture: true, once: true });
+    liteTimer = setTimeout(applyLite, 1500);
+  }
+}
+function disarm() { if (liteArm) for (const ev of ['pointerdown', 'keydown']) removeEventListener(ev, liteArm, { capture: true }); liteArm = null; }
+function applyLite() { clearTimeout(liteTimer); disarm(); if (lite === wantLite) return; lite = wantLite; if (ac) reinit(lite ? 'voice-on' : 'voice-off'); }
+// Something else needs the context to keep running while the page is hidden (voice chat): count holders.
+export function holdContext(on) { holdN = Math.max(0, holdN + (on ? 1 : -1)); }
+export const voiceOut = () => { getCtx(true); return voiceOutG; };
+// Close the context and build a fresh one at the current hardware rate. Everything that holds nodes re-wires itself.
+export function reinit(why = 'manual') {
+  if (!ac) return false;
+  const old = ac, oldSr = old.sampleRate;
+  ac = null; master = sfxBus = musicBus = verb = glue = limiter = musicDuck = dangerLP = roomIn = crunchIn = voiceOutG = null;
+  for (const k of Object.keys(B)) delete B[k];
+  jobs.length = 0; rvState = { room: false, hall: false, noise: false }; NB.white = NB.pink = NB.brown = null;
+  live = 0; gateT.clear(); burst.clear(); for (const k of ['kill', 'hit', 'crit']) { chain[k] = 0; chain[k + 'T'] = -9; }
+  try { old.onstatechange = null; old.close().catch(() => {}); } catch {}
+  getCtx(true); swaps++;
+  if (ac && ac.state !== 'running') { ac.resume().catch(() => {}); armResume(); }
+  dbg('reinit', why, oldSr + ' Hz -> ' + (ac && ac.sampleRate) + ' Hz', 'latency ' + (lite ? 'playback' : 'interactive'), ac && ac.state);
+  for (const f of swapL) try { f(ac, old) } catch (e) { dbg('swap listener failed', e && e.message); }
+  return true;
+}
+// a context made outside a tap can start suspended (iOS): resume on the next tap
+let resumeArm = null;
+function armResume() {
+  if (resumeArm) return;
+  resumeArm = () => { for (const ev of ['pointerdown', 'touchend', 'keydown']) removeEventListener(ev, resumeArm, true); resumeArm = null; if (ac && ac.state !== 'running') ac.resume().catch(() => {}); };
+  for (const ev of ['pointerdown', 'touchend', 'keydown']) addEventListener(ev, resumeArm, true);
+}
+
 export function getCtx(quiet) {
   if (!ac) {
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -104,11 +153,15 @@ export function getCtx(quiet) {
     // 'playback' lets sound play through the iPhone silent switch, but it also blocks the microphone, so never
     // override 'play-and-record' while voice chat holds the mic (voice.js switches it back when it lets go).
     try { if (navigator.audioSession && navigator.audioSession.type !== 'play-and-record') navigator.audioSession.type = 'playback'; } catch {}
-    try { ac = new AC({ latencyHint: 'interactive' }); } catch { ac = new AC(); }
+    // no sampleRate option on purpose: the context opens at the hardware's current rate (no resampling)
+    try { ac = new AC({ latencyHint: lite ? 'playback' : 'interactive' }); } catch { ac = new AC(); }
+    ac.onstatechange = () => { dbg('state', ac && ac.state); if (ac && ac.state === 'interrupted') armResume(); };
     limiter = ac.createDynamicsCompressor(); limiter.threshold.value = -2.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.09;
-    glue = ac.createDynamicsCompressor(); glue.threshold.value = -16; glue.knee.value = 8; glue.ratio.value = 3; glue.attack.value = 0.005; glue.release.value = 0.2;
+    if (lite) glue = ac.createGain(); // voice mode: one compressor (the limiter) instead of two
+    else { glue = ac.createDynamicsCompressor(); glue.threshold.value = -16; glue.knee.value = 8; glue.ratio.value = 3; glue.attack.value = 0.005; glue.release.value = 0.2; }
     const trim = ac.createGain(); trim.gain.value = 0.95;
     glue.connect(trim); trim.connect(limiter); limiter.connect(ac.destination);
+    voiceOutG = ac.createGain(); voiceOutG.connect(limiter);
     master = glue;
     sfxBus = ac.createGain(); sfxBus.connect(glue);
     musicBus = ac.createGain(); musicDuck = ac.createGain(); musicBus.connect(musicDuck); musicDuck.connect(glue);
@@ -116,12 +169,12 @@ export function getCtx(quiet) {
     for (const k of ['ui', 'combat', 'world', 'voice']) { B[k] = ac.createGain(); B[k].connect(k === 'combat' || k === 'world' ? dangerLP : sfxBus); }
     seedNoise(ac);
     // reverb sends exist immediately (silent until their convolver is built in the background):
-    // room first (short, cheap), then full noise buffers, then the big hall.
+    // room first (short, cheap), then full noise buffers, then the big hall. Voice mode: sends only, no convolvers.
     const low = settings.quality === 'low';
     roomIn = ac.createGain(); roomIn.gain.value = 0.5;
-    bg(genReverb([0.5, 3.2, 0.5, 0.004, 10], roomIn, sfxBus, 'room'));
+    if (!lite) bg(genReverb([0.5, 3.2, 0.5, 0.004, 10], roomIn, sfxBus, 'room'));
     bg(genNoise(ac));
-    if (low) verb = roomIn;
+    if (low || lite) verb = roomIn;
     else {
       const hg = ac.createGain(); hg.gain.value = 0.42; hg.connect(sfxBus);
       verb = ac.createGain(); // public send (music may use it)
@@ -132,10 +185,48 @@ export function getCtx(quiet) {
     const sl = ac.createBiquadFilter(); sl.type = 'lowpass'; sl.frequency.value = 5200; const sg = ac.createGain(); sg.gain.value = 0.35;
     crunchIn.connect(sh); sh.connect(sl); sl.connect(sg); sg.connect(B.combat);
     applyVolumes();
+    if (DEBUG) debugStart();
   }
   if (!quiet && ac.state !== 'running') ac.resume().catch(() => {});
   return ac;
 }
+
+// ---- ?audiodebug: overlay + console log of the context (rate, state, latency, swaps, stalls, live voices)
+const DEBUG = typeof location !== 'undefined' && /[?&]audiodebug\b/.test(location.search);
+const LOG = [];
+function dbg(...a) { if (!DEBUG && !window.__ccAudioDebug) return; const line = a.join(' '); LOG.push({ t: +(performance.now() / 1000).toFixed(2), m: line }); if (LOG.length > 200) LOG.shift(); console.log('[audio]', line); }
+const CTXS = [];
+if (DEBUG && typeof window !== 'undefined') {
+  window.__ccAudioDebug = true;
+  // count every AudioContext the page opens (two live contexts on iOS is a crackle risk)
+  for (const k of ['AudioContext', 'webkitAudioContext']) {
+    const O = window[k]; if (!O) continue;
+    window[k] = class extends O { constructor(o) { super(o); CTXS.push(this); dbg('new AudioContext', this.sampleRate + ' Hz', o && o.latencyHint ? 'hint ' + o.latencyHint : 'default hint', 'live ' + CTXS.filter((c) => c.state !== 'closed').length); } };
+  }
+}
+const DS = { stalls: 0, lostMs: 0, lastA: 0, lastW: 0, el: null, iv: 0 };
+function debugStart() {
+  if (DS.iv) return;
+  DS.iv = setInterval(() => {
+    if (!ac) return;
+    const w = performance.now() / 1000, a = ac.currentTime;
+    // the audio clock should advance with the wall clock while running; a shortfall means the device dropped buffers
+    if (ac.state === 'running' && DS.lastW && DS.lastA <= a) { const dw = w - DS.lastW, da = a - DS.lastA; if (dw > 0.2 && da < dw - 0.03 && !document.hidden) { DS.stalls++; DS.lostMs += Math.round((dw - da) * 1000); dbg('clock stall', Math.round((dw - da) * 1000) + ' ms'); } }
+    DS.lastW = w; DS.lastA = a;
+    const ps = ac.playbackStats || ac.playoutStats;
+    const st = debugInfo(ps);
+    window.__ccAudioInfo = st;
+    if (!DS.el && document.body) { DS.el = document.createElement('pre'); DS.el.id = 'audio-debug'; DS.el.style.cssText = 'position:fixed;left:4px;bottom:4px;z-index:99999;margin:0;padding:4px 6px;font:10px/1.25 monospace;color:#bff;background:rgba(0,0,0,.72);pointer-events:none;border-radius:4px;white-space:pre'; document.body.appendChild(DS.el); }
+    if (DS.el) DS.el.textContent = Object.entries(st).map(([k, v]) => k + ' ' + v).join('\n');
+  }, 500);
+}
+function debugInfo(ps) {
+  const sess = navigator.audioSession ? navigator.audioSession.type : 'n/a';
+  const o = { rate: ac.sampleRate, state: ac.state, mode: lite ? 'voice (lite)' : 'normal', hint: lite ? 'playback' : 'interactive', base: ac.baseLatency != null ? Math.round(ac.baseLatency * 1000) + ' ms' : '?', out: ac.outputLatency != null ? Math.round(ac.outputLatency * 1000) + ' ms' : '?', session: sess, contexts: CTXS.length ? CTXS.filter((c) => c.state !== 'closed').length : '?', swaps, stalls: DS.stalls + ' (' + DS.lostMs + ' ms)', voices: live, reverb: (rvState.room ? 'room ' : '') + (rvState.hall ? 'hall' : '') || 'none' };
+  if (ps) { try { o.underruns = (ps.underrunEvents ?? ps.fallbackFramesEvents ?? '?') + ' / ' + Math.round(((ps.underrunDuration ?? ps.fallbackDuration) || 0) * 1000) + ' ms'; } catch {} }
+  return o;
+}
+export const audioDebug = () => ({ ...(ac ? debugInfo(ac.playbackStats || ac.playoutStats) : { state: 'none' }), log: LOG.slice(-40) });
 // Opening the audio device (new AudioContext) costs 50-300 ms on phones. Do it, suspended, in idle time after load,
 // so the first tap only has to resume(). If the player taps first, getCtx() still builds everything on the spot.
 function precreate() { if (!ac && !(settings.sfx === 0 && settings.music === 0)) try { getCtx(true); } catch {} }
@@ -143,7 +234,7 @@ if (typeof window !== 'undefined') {
   const go = () => setTimeout(() => later(precreate), 400);
   if (document.readyState === 'complete') go(); else addEventListener('load', go, { once: true });
 }
-export const buses = () => ({ ac, sfxBus, musicBus, verb, master, ui: B.ui, combat: B.combat, world: B.world, voice: B.voice });
+export const buses = () => ({ ac, sfxBus, musicBus, verb, master, ui: B.ui, combat: B.combat, world: B.world, voice: B.voice, voiceOut: voiceOutG, lite });
 function applyVolumes() {
   if (!ac) return;
   sfxBus.gain.value = settings.sfx * 0.7; musicBus.gain.value = settings.music * 0.35;
@@ -167,7 +258,7 @@ function danger() {
 
 // ---------------------------------------------------------------- synthesis toolkit
 let live = 0; // currently sounding sources (voice limiting)
-const maxVoices = () => (settings.quality === 'low' ? 36 : 72);
+const maxVoices = () => (settings.quality === 'low' || lite ? 36 : 72);
 let CUR = { t0: 0, pm: 1, vm: 1, bus: 'combat' };
 const R = Math.random, rr = (a, b) => a + R() * (b - a), clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const st = (n) => Math.pow(2, n / 12);
@@ -183,7 +274,7 @@ function out(src, head, o, t, end, offset) {
   if (o.room) { const s = ac.createGain(); s.gain.value = o.room; n.connect(s); s.connect(roomIn); }
   if (o.hall) { const s = ac.createGain(); s.gain.value = o.hall; n.connect(s); s.connect(verb); }
   if (o.crunch) { const s = ac.createGain(); s.gain.value = o.crunch; n.connect(s); s.connect(crunchIn); }
-  live++; src.onended = () => { live--; };
+  live++; src.onended = () => { live = Math.max(0, live - 1); };
   const stopAt = t + (o.a == null ? 0.003 : o.a) + (o.h || 0) + end + 0.05;
   if (offset != null) src.start(t, offset); else src.start(t);
   src.stop(stopAt); return stopAt;
@@ -295,7 +386,7 @@ function voice(syl, o = {}) {
   const end = t + 0.2;
   live += oscs.length + 1;
   oscs.forEach(({ s }) => { s.start(t0); s.stop(end); }); ns.start(t0, rr(0, Math.max(0, NB.white.duration - 0.05))); ns.stop(end);
-  oscs[0].s.onended = () => { live -= oscs.length + 1; };
+  oscs[0].s.onended = () => { live = Math.max(0, live - oscs.length - 1); };
   duck(0.45, total + 0.3);
 }
 // stinger under every callout: whoosh in, hit, shimmer; level 1..5 escalates
@@ -357,8 +448,9 @@ function bump(k, win) { const t = now(); chain[k] = t - chain[k + 'T'] < win ? c
 
 // ---------------------------------------------------------------- sound table
 const UI = new Set(['tap', 'hover', 'select', 'back', 'tick', 'error', 'buy', 'purchase', 'levelup', 'quest', 'emote', 'coin', 'toggle', 'toggle:on', 'toggle:off', 'tab', 'open', 'close', 'confirm', 'deny', 'equip', 'unlock', 'notify', 'swipe', 'count', 'countgo', 'slider', 'win', 'lose', 'turn', 'xp', 'rankup', 'claim']);
-const WORLD = new Set(['storm', 'storm:crack', 'storm:collapse', 'storm:warn', 'meteorfall', 'meteor', 'firework', 'shrine', 'ice', 'ice:skid', 'portal', 'sizzle', 'lava', 'hollowrise', 'waveclear', 'crownspawn', 'chest', 'chest:open', 'supply', 'shardrain', 'bloodmoon', 'bramble', 'wind', 'eclipse', 'warn', 'geyser:warn', 'geyser:erupt', 'crumble:crack', 'crumble:collapse', 'rift', 'conveyor', 'earthquake', 'manasurge', 'bounty', 'frenzy', 'restless', 'hill:score', 'hill:contested']);
-const catOf = (n) => (n.startsWith('announce:') || n === 'stinger' || n.startsWith('voice:') ? 'voice' : UI.has(n) || n.startsWith('reveal:') || n.startsWith('ui:') ? 'ui' : WORLD.has(n) || n.startsWith('world:') || n.startsWith('hazard:') ? 'world' : 'combat');
+const WORLD = new Set(['storm', 'storm:crack', 'storm:collapse', 'storm:warn', 'meteorfall', 'meteor', 'firework', 'shrine', 'ice', 'ice:skid', 'portal', 'sizzle', 'lava', 'hollowrise', 'waveclear', 'crownspawn', 'chest', 'chest:open', 'supply', 'shardrain', 'bloodmoon', 'bramble', 'wind', 'eclipse', 'warn', 'geyser:warn', 'geyser:erupt', 'crumble:crack', 'crumble:collapse', 'rift', 'conveyor', 'earthquake', 'manasurge', 'bounty', 'frenzy', 'restless', 'hill:score', 'hill:contested',
+  'crown:warn', 'blizzard', 'eruption', 'flood', 'bloom', 'royalbounty', 'sandstorm', 'wardrums', 'overcharge', 'gravitywell', 'toxicfog', 'pool', 'pool:hurt', 'blizzard:warn', 'eruption:warn', 'flood:warn', 'gravitywell:warn', 'toxicfog:warn', 'locwarn']);
+const catOf = (n) => (n.startsWith('announce:') || n === 'stinger' || n.startsWith('voice:') ? 'voice' : UI.has(n) || /^(reveal|ui|party|wheel|loc):/.test(n) ? 'ui' : WORLD.has(n) || n.startsWith('world:') || n.startsWith('hazard:') ? 'world' : 'combat');
 const VARI = { ui: 0.25, combat: 0.7, world: 0.5, voice: 0 };
 
 const S = {
@@ -514,6 +606,134 @@ const promoteTier = (tier) => {
 for (let n = 1; n <= 5; n++) S['promote:' + n] = () => promoteTier(n);
 S.crown = () => promoteTier(5);
 
+// ---------------------------------------------------------------- 15.0 sounds
+// Status effects: 'st:<k>' when applied, 'st:<k>:off' when it ends, 'dot:<k>' for each damage tick (render.js).
+const ST = {
+  burn: { on: () => { lib.whoosh(0.22, { f: 300, to: 2200, v: 0.14 }); lib.fire(0.45, { v: 0.2, crackle: 5, at: 0.05 }); T(220, 0.3, { type: 'sawtooth', v: 0.03, to: 440, lp: { f: 1500 }, at: 0.04 }); },
+    tick: () => { lib.fire(0.22, { v: 0.16, crackle: 3 }); N(0.12, { c: 'white', ft: 'highpass', f: 4200, to: 2400, v: 0.08, a: 0.01 }); },
+    off: () => N(0.3, { c: 'white', ft: 'highpass', f: 3000, to: 6000, v: 0.05, a: 0.05 }) },
+  poison: { on: () => { for (let i = 0; i < 4; i++) T(rr(180, 260), 0.07, { v: 0.07, to: rr(380, 520), glide: 0.06, at: i * rr(0.04, 0.07), lp: { f: 1200 } }); N(0.35, { c: 'pink', ft: 'bandpass', f: 700, q: 3, v: 0.1, a: 0.08 }); T(98, 0.45, { type: 'sawtooth', v: 0.03, lp: { f: 500 }, vib: [6, 0.04], at: 0.05 }); },
+    tick: (n = 1) => { for (let i = 0; i < 1 + clamp(n, 1, 3); i++) T(rr(260, 340) * st(clamp(n, 1, 3) * 2), 0.05, { v: 0.06, to: rr(500, 700), glide: 0.04, at: i * 0.06, lp: { f: 1600 } }); N(0.15, { c: 'pink', ft: 'bandpass', f: 600, q: 4, v: 0.06 }); },
+    off: () => T(400, 0.25, { v: 0.03, to: 800, lp: { f: 2000 } }) },
+  freeze: { on: () => { lib.frost(); lib.glass(0.5, { at: 0.05 }); K(160, 60, 0.12, { v: 0.15 }); },
+    tick: () => FM(rr(2600, 3200), 0.2, { ratio: 2.71, idx: 0.8, v: 0.03, hall: 0.3 }),
+    off: () => { for (let i = 0; i < 4; i++) lib.click({ v: rr(0.06, 0.12), f: rr(2500, 5000), at: i * rr(0.02, 0.05) }); T(1800, 0.12, { v: 0.03, to: 2600, at: 0.12 }); N(0.2, { c: 'white', ft: 'bandpass', f: 5000, q: 2, v: 0.06, at: 0.08 }); } },
+  stun: { on: () => { K(130, 50, 0.14, { v: 0.3 }); for (let i = 0; i < 5; i++) T(1568 * st([0, 4, 7, 4, 0][i]), 0.09, { type: 'triangle', v: 0.035, at: 0.06 + i * 0.07, pan: Math.sin(i * 1.3) * 0.7, vib: [9, 0.02] }); },
+    tick: () => { for (let i = 0; i < 3; i++) T(1760 * st([0, 3, 7][i]), 0.07, { type: 'triangle', v: 0.025, at: i * 0.07, pan: Math.cos(i * 2) * 0.6 }); },
+    off: () => T(880, 0.12, { type: 'triangle', v: 0.03, to: 1320, glide: 0.08 }) },
+  slow: { on: () => { T(520, 0.45, { type: 'sawtooth', v: 0.05, to: 90, lp: { f: 2400, to: 400 } }); N(0.4, { c: 'pink', ft: 'bandpass', f: 1600, to: 300, q: 2, v: 0.08 }); },
+    tick: () => T(300, 0.2, { type: 'triangle', v: 0.03, to: 180 }),
+    off: () => T(200, 0.2, { type: 'triangle', v: 0.03, to: 420 }) },
+  haste: { on: () => { T(300, 0.25, { type: 'sawtooth', v: 0.045, to: 1600, lp: { f: 800, to: 5000, g: 0.2 } }); lib.whoosh(0.18, { f: 800, to: 4500, v: 0.09, at: 0.05 }); [0, 0.07, 0.14].forEach((a) => lib.click({ v: 0.08, f: 3500, at: 0.18 + a })); },
+    tick: () => lib.click({ v: 0.06, f: 3200 }),
+    off: () => T(1200, 0.2, { type: 'triangle', v: 0.03, to: 500 }) },
+  shield: { on: () => { FM(330, 0.6, { ratio: 2, idx: 1.5, v: 0.06, to: 660, glide: 0.25, room: 0.4 }); lib.bell(1319, 0.6, { v: 0.04, at: 0.15 }); N(0.4, { c: 'white', ft: 'bandpass', f: 3000, to: 6000, q: 3, v: 0.05, a: 0.15 }); },
+    tick: () => FM(660, 0.2, { ratio: 2, idx: 1, v: 0.025 }),
+    off: () => { FM(660, 0.3, { ratio: 1.41, idx: 2, v: 0.04, to: 330 }); N(0.2, { c: 'white', ft: 'highpass', f: 5000, v: 0.05 }); } },
+};
+for (const [k, d] of Object.entries(ST)) { S['st:' + k] = d.on; S['st:' + k + ':off'] = d.off; S['dot:' + k] = d.tick; }
+Object.assign(S, {
+  // ---- Ascension (hone level 3) and the pawn line
+  ascend: () => { lib.riser(0.7, { f: 147, mult: 4, v: 0.06 }); lib.impact(1, { at: 0.7, sub: 110, bright: 1.2 }); lib.choir([294, 370, 440, 587], 1.8, { at: 0.6, v: 0.07, vowel: 'a', a: 0.3 }); lib.chime([1175, 1480, 1760, 2349, 2960], { at: 0.75, v: 0.05, roll: 0.08, d: 1.2 }); lib.sub(49, 1.4, { at: 0.7, v: 0.35 }); lib.sparkle(10, { at: 0.8, gap: 0.05 }); duck(0.55, 1.6); },
+  veteran: () => { for (let i = 0; i < 6; i++) N(0.05, { c: 'pink', ft: 'bandpass', f: 1900, q: 1, v: 0.08 + i * 0.03, at: i * 0.045 }); lib.impact(0.6, { at: 0.28, sub: 140 }); chord([392, 587], 0.6, { type: 'sawtooth', v: 0.04, at: 0.3, lp: { f: 2200, to: 900 }, hall: 0.4, det: 8 }); T(196, 0.6, { type: 'sawtooth', v: 0.04, at: 0.3, lp: { f: 1000 } }); lib.sparkle(4, { at: 0.35 }); },
+  champion: () => { lib.riser(0.45, { f: 196, mult: 4, v: 0.05 }); lib.impact(1.1, { at: 0.45, sub: 100 }); chord([392, 494, 587, 784], 0.9, { type: 'sawtooth', v: 0.04, at: 0.45, roll: 0.04, lp: { f: 3200, to: 1000 }, hall: 0.5, det: 10 }); lib.choir([196, 247, 294], 1.4, { at: 0.5, v: 0.06, vowel: 'o' }); N(1.4, { c: 'pink', ft: 'bandpass', f: 1200, q: 0.6, v: 0.1, a: 0.5, at: 0.45, hall: 0.4 }); lib.sparkle(8, { at: 0.55 }); duck(0.5, 1.4); },
+  // ---- boss King
+  'crown:warn': () => { lib.bell(196, 2.2, { v: 0.09, ratio: 2.76, idx: 2.2, bus: 'world' }); lib.bell(196, 2.2, { v: 0.07, ratio: 2.76, idx: 2.2, at: 0.9, bus: 'world' }); T(98, 2, { type: 'sawtooth', v: 0.04, lp: { f: 300, to: 900 }, a: 1.2, hall: 0.5, bus: 'world' }); lib.sub(49, 1.8, { v: 0.2, a: 0.6, bus: 'world' }); },
+  'king:phase': () => { lib.whoosh(0.3, { f: 200, to: 1200, v: 0.18, peak: 0.95 }); lib.impact(1.5, { at: 0.3, sub: 70, bright: 0.6 }); N(1.4, { c: 'brown', f: 900, to: 90, v: 0.55, at: 0.3, hall: 0.5 }); lib.sub(33, 1.4, { at: 0.3, v: 0.5, to: 26 }); lib.dark({ f: 49, d: 1.4, at: 0.35 }); lib.choir([98, 104, 147], 1.2, { at: 0.4, v: 0.06, vowel: 'o', a: 0.1 }); duck(0.7, 1.6); },
+  'king:enrage': () => { [0, 0.18, 0.36].forEach((a, i) => T(440 * st(i), 0.16, { type: 'square', v: 0.04, at: a, lp: { f: 2600 } })); lib.dark({ f: 55, d: 0.9, at: 0.1 }); },
+  exposed: (n = 1) => { const k = clamp(n, 1, 6); FM(420 * st(k), 0.3, { ratio: 1.41, idx: 3.5, v: 0.06, room: 0.3 }); lib.click({ v: 0.2, f: 2200 }); T(900 * st(k), 0.18, { type: 'square', v: 0.025, to: 500, lp: { f: 3000 } }); },
+  // ---- 15.0 location events (W) and hazards
+  blizzard: () => { N(2.2, { c: 'pink', ft: 'bandpass', f: 500, to: 1600, q: 2.5, v: 0.22, a: 0.8, hall: 0.3 }); N(2, { c: 'white', ft: 'highpass', f: 5000, v: 0.08, a: 0.9 }); lib.frost({ at: 0.6 }); T(880, 1.8, { v: 0.02, to: 660, vib: [4, 0.05], hall: 0.5, a: 0.8 }); },
+  eruption: () => { N(0.8, { c: 'brown', f: 200, v: 0.4, a: 0.5 }); lib.impact(1.4, { at: 0.6, sub: 70, bright: 0.6 }); N(1.4, { c: 'brown', f: 1200, to: 120, v: 0.5, at: 0.6, hall: 0.5 }); lib.fire(1, { v: 0.3, crackle: 10, at: 0.7 }); lib.sub(36, 1.4, { at: 0.6, v: 0.45, to: 26 }); duck(0.6, 1.6); },
+  flood: () => { N(1.8, { c: 'pink', ft: 'lowpass', f: 300, to: 1800, v: 0.35, a: 0.6, hall: 0.3 }); N(1.6, { c: 'white', ft: 'bandpass', f: 1200, to: 3000, q: 0.7, v: 0.12, a: 0.7 }); for (let i = 0; i < 6; i++) T(rr(200, 420), 0.06, { v: 0.05, to: rr(500, 900), at: 0.5 + i * rr(0.08, 0.16), lo: true }); },
+  bloom: () => { lib.whoosh(0.7, { f: 600, to: 2800, v: 0.1 }); lib.chime([784, 988, 1175, 1568, 1976], { v: 0.045, roll: 0.09, d: 0.9, at: 0.2 }); chord([392, 494, 587], 1, { v: 0.05, a: 0.3, hall: 0.5, at: 0.2 }); },
+  royalbounty: () => S.bounty(),
+  sandstorm: () => { N(2.4, { c: 'white', ft: 'highpass', f: 2500, to: 4500, v: 0.14, a: 0.9 }); N(2.4, { c: 'pink', ft: 'bandpass', f: 700, to: 1300, q: 1.5, v: 0.2, a: 0.9, hall: 0.3 }); },
+  wardrums: () => { [0, 0.32, 0.64, 0.8, 0.96, 1.28].forEach((a, i) => { K(i % 3 === 2 ? 95 : 70, 38, 0.35, { v: 0.5, at: a }); N(0.1, { c: 'pink', f: 700, v: 0.18, at: a, room: 0.4 }); }); T(147, 1.4, { type: 'sawtooth', v: 0.04, lp: { f: 800 }, at: 0.3, hall: 0.4 }); },
+  overcharge: () => { T(60, 1, { type: 'sawtooth', v: 0.07, to: 240, lp: { f: 400, to: 3000 }, vib: [30, 0.05] }); lib.elec(0.8, { at: 0.2 }); lib.zap({ f: 3000, at: 1 }); },
+  gravitywell: () => AB.gravity(),
+  toxicfog: () => { N(2, { c: 'pink', ft: 'bandpass', f: 400, to: 900, q: 3, v: 0.16, a: 0.9, hall: 0.4 }); T(73, 2, { type: 'sawtooth', v: 0.05, lp: { f: 400 }, vib: [3, 0.05], a: 0.8 }); for (let i = 0; i < 5; i++) T(rr(200, 300), 0.06, { v: 0.04, to: rr(400, 600), at: 0.5 + i * 0.2, lo: true }); },
+  // telegraphs (W: warn this round, strike next round): a tell, never the hit itself
+  'blizzard:warn': () => { N(1.6, { c: 'pink', ft: 'bandpass', f: 400, to: 900, q: 3, v: 0.12, a: 1.1 }); FM(2800, 0.6, { ratio: 2.71, idx: 0.7, v: 0.02, at: 0.9, hall: 0.5 }); },
+  'eruption:warn': () => { N(1.4, { c: 'brown', f: 160, v: 0.3, a: 0.8 }); for (let i = 0; i < 4; i++) K(rr(60, 90), 35, 0.2, { v: 0.15, at: 0.2 + i * rr(0.2, 0.3), lo: true }); },
+  'flood:warn': () => { N(1.6, { c: 'brown', f: 300, to: 600, v: 0.22, a: 1 }); N(1.2, { c: 'pink', ft: 'bandpass', f: 900, q: 1.5, v: 0.05, a: 0.8, at: 0.3 }); },
+  'gravitywell:warn': () => { T(55, 1.4, { v: 0.2, a: 0.4, vib: [3, 0.08] }); FM(110, 1.4, { ratio: 1.07, idx: 2, v: 0.03, a: 0.5 }); },
+  'toxicfog:warn': () => { N(1.6, { c: 'white', ft: 'bandpass', f: 1200, to: 600, q: 2, v: 0.07, a: 1 }); T(98, 1.4, { type: 'triangle', v: 0.03, vib: [2, 0.05], a: 0.6 }); },
+  locwarn: () => { T(220, 0.5, { type: 'triangle', v: 0.05, to: 196, lp: { f: 1500 }, hall: 0.4 }); T(220, 0.5, { type: 'triangle', v: 0.04, at: 0.35, to: 196, lp: { f: 1500 }, hall: 0.4 }); N(1, { c: 'brown', f: 300, v: 0.12, a: 0.5 }); },
+  enrage: () => S['king:enrage'](),
+  pool: () => { for (let i = 0; i < 5; i++) T(rr(140, 220), 0.08, { v: 0.07, to: rr(300, 480), glide: 0.07, at: i * rr(0.06, 0.12), lp: { f: 1000 } }); N(0.5, { c: 'brown', f: 400, v: 0.15, a: 0.1 }); },
+  'pool:hurt': () => { ST.poison.tick(1); N(0.2, { c: 'pink', ft: 'bandpass', f: 500, q: 3, v: 0.1 }); },
+  // ---- location wheel (E2 / F): tick per segment, landing thunk, then the location's reveal stinger
+  'wheel:spin': () => { lib.whoosh(0.5, { f: 300, to: 2400, v: 0.12, bus: 'ui' }); T(220, 0.5, { type: 'triangle', v: 0.04, to: 660, glide: 0.4, bus: 'ui' }); },
+  'wheel:tick': (sp = 1) => { const k = clamp(sp, 0, 1); lib.click({ v: 0.08 + 0.08 * k, f: 2400 + 2200 * k, bus: 'ui' }); T(700 + 700 * k, 0.03, { type: 'triangle', v: 0.03, fix: true, bus: 'ui' }); },
+  'wheel:stop': () => { lib.click({ v: 0.25, f: 1800, bus: 'ui' }); K(180, 60, 0.18, { v: 0.3, bus: 'ui' }); FM(880, 0.4, { ratio: 2.01, idx: 1.5, v: 0.05, room: 0.4, bus: 'ui' }); },
+  // ---- party lobby (N)
+  'party:ready': () => { chord([659, 988], 0.18, { type: 'triangle', v: 0.08, roll: 0.05 }); lib.click({ v: 0.08 }); },
+  'party:unready': () => { T(988, 0.07, { type: 'triangle', v: 0.06 }); T(740, 0.1, { type: 'triangle', v: 0.05, at: 0.05 }); },
+  'party:join': () => { T(587, 0.1, { type: 'triangle', v: 0.06 }); T(880, 0.18, { type: 'triangle', v: 0.06, at: 0.07, hall: 0.3 }); },
+  'party:leave': () => { T(880, 0.1, { type: 'triangle', v: 0.05 }); T(587, 0.18, { type: 'triangle', v: 0.05, at: 0.07 }); },
+  'party:allready': () => { chord([523, 659, 784, 1047], 0.4, { type: 'triangle', v: 0.07, roll: 0.05, hall: 0.4 }); lib.sparkle(4, { at: 0.2, bus: 'ui' }); },
+  'party:start': () => { lib.riser(0.5, { f: 196, mult: 4, v: 0.05, bus: 'ui' }); chord([392, 587, 784], 0.6, { type: 'sawtooth', v: 0.04, at: 0.5, roll: 0.03, lp: { f: 3000, to: 900 }, hall: 0.5 }); K(110, 40, 0.4, { v: 0.35, at: 0.5 }); lib.click({ v: 0.2, at: 0.5 }); },
+  'party:back': () => { lib.whoosh(0.3, { f: 2500, to: 500, v: 0.08, bus: 'ui' }); chord([523, 784], 0.4, { type: 'triangle', v: 0.06, roll: 0.07, at: 0.2, hall: 0.4 }); },
+  'party:leader': () => { lib.bell(1047, 0.6, { v: 0.05, bus: 'ui' }); lib.bell(1568, 0.7, { v: 0.04, at: 0.1, bus: 'ui' }); },
+});
+for (let n = 1; n <= 6; n++) S['exposed:' + n] = () => S.exposed(n);
+S['promote:veteran'] = () => S.veteran(); S['promote:champion'] = () => S.champion();
+// location reveal stingers: the wheel lands, then a short cue in the place's own colours
+const LOCS = {
+  citadel: () => { lib.frost(); lib.chime([587, 880, 1175, 1760], { v: 0.05, roll: 0.07, d: 1.2, at: 0.15 }); N(1.4, { c: 'pink', ft: 'bandpass', f: 600, to: 1400, q: 2, v: 0.12, a: 0.6 }); },
+  forge: () => { FM(262, 1.2, { ratio: 2.76, idx: 3, v: 0.08, hall: 0.4 }); lib.impact(0.9, { sub: 90 }); lib.fire(0.9, { v: 0.25, crackle: 8, at: 0.1 }); chord([131, 139, 196], 1.2, { type: 'sawtooth', v: 0.04, lp: { f: 900, to: 300 }, at: 0.1, hall: 0.4 }); },
+  temple: () => { FM(185, 2.4, { ratio: 1.41, idx: 1.2, v: 0.09, hall: 0.6 }); for (let i = 0; i < 4; i++) T(rr(900, 1600), 0.05, { v: 0.04, to: rr(2000, 3000), at: 0.3 + i * 0.22 }); N(1.6, { c: 'pink', ft: 'bandpass', f: 420, q: 2, v: 0.1, a: 0.6 }); },
+  gardens: () => { lib.chime([784, 988, 1175, 1568], { v: 0.05, roll: 0.08, d: 1 }); chord([392, 494, 587], 1.1, { type: 'triangle', v: 0.05, at: 0.1, hall: 0.5 }); T(2600, 0.04, { v: 0.02, to: 3800, at: 0.5 }); T(2900, 0.04, { v: 0.02, to: 4200, at: 0.58 }); },
+  ruins: () => { [0, 0.18, 0.27, 0.45].forEach((a, i) => (i % 2 ? lib.click({ v: 0.15, f: 2600, at: a }) : K(140, 80, 0.12, { v: 0.3, at: a }))); T(330, 1.2, { type: 'sawtooth', v: 0.035, at: 0.5, vib: [5, 0.03], lp: { f: 1800 }, hall: 0.4 }); T(349, 0.3, { type: 'sawtooth', v: 0.03, at: 0.5, lp: { f: 1800 } }); N(1.6, { c: 'white', ft: 'highpass', f: 3000, v: 0.06, a: 0.7 }); },
+  works: () => { [0, 0.12, 0.24].forEach((a) => FM(349, 0.35, { ratio: 1.41, idx: 3.5, v: 0.06, at: a, room: 0.4 })); lib.impact(0.8, { at: 0.36, sub: 100, bright: 0.6 }); N(0.6, { c: 'white', ft: 'highpass', f: 2500, v: 0.12, at: 0.4, a: 0.02 }); },
+  rift: () => { T(311, 1.6, { v: 0.05, a: 0.6, hall: 0.6 }); T(466, 1.6, { v: 0.04, a: 0.7, hall: 0.6 }); T(698, 1.6, { v: 0.03, a: 0.8, hall: 0.6 }); lib.sparkle(10, { at: 0.4, gap: 0.06 }); lib.bell(1245, 1.4, { v: 0.05, at: 0.8 }); },
+  bog: () => { lib.choir([123, 131], 1.6, { v: 0.06, vowel: 'u', a: 0.5 }); for (let i = 0; i < 3; i++) T(110, 0.07, { type: 'square', v: 0.03, to: 70, at: 0.5 + i * 0.1, lp: { f: 800 } }); N(1.4, { c: 'pink', ft: 'bandpass', f: 300, q: 3, v: 0.12, a: 0.6, hall: 0.4 }); },
+};
+let lastReveal = -9;
+const locReveal = (id) => { lastReveal = now(); CUR.bus = 'ui'; lib.whoosh(0.25, { f: 400, to: 3500, v: 0.1, bus: 'ui' }); K(110, 40, 0.4, { v: 0.3, at: 0.2 }); CUR.t0 += 0.2; (LOCS[id] || LOCS.citadel)(); duck(0.5, 1.6); };
+for (const id of Object.keys(LOCS)) S['loc:' + id] = () => locReveal(id);
+
+// Location wheel: F fires 'cc:wheel-start' {id} when it opens and 'cc:wheel-landed' {id} when it stops. We spin a
+// decelerating ratchet in between, unless the wheel drives its own ticks (sfx['wheel:tick'](speed 0..1) per segment).
+const wheel = { startAt: -1, timers: [], driven: false, fallback: 0 };
+function wheelStop() { for (const t of wheel.timers) clearTimeout(t); wheel.timers = []; }
+if (typeof window !== 'undefined') {
+  addEventListener('cc:wheel-start', () => {
+    wheel.startAt = performance.now(); wheel.driven = false; wheelStop(); playNamed('wheel:spin');
+    let t = 120; for (let i = 0; i < 26 && t < 2500; i++) { const sp = 1 - t / 2600; wheel.timers.push(setTimeout(() => { if (!wheel.driven) play('wheel:tick', () => S['wheel:tick'](sp)); }, t)); t += 45 + 230 * Math.pow(1 - sp, 2.2); }
+  });
+  addEventListener('cc:wheel-landed', (ev) => { wheelStop(); clearTimeout(wheel.fallback); const id = ev && ev.detail && ev.detail.id; playNamed('wheel:stop'); if (id && S['loc:' + id]) setTimeout(() => playNamed('loc:' + id), 120); });
+}
+
+// Engine events handed over as objects (render.js onFx / dmg): only 15.0 names are handled here; everything older
+// keeps its existing string route. Listeners (music.js) see every event.
+const evL = new Set();
+export function onSfxEvent(f) { evL.add(f); return () => evL.delete(f); }
+function evSound(e) {
+  if (!e || typeof e.e !== 'string') return;
+  for (const f of evL) try { f(e); } catch {}
+  const k = e.e;
+  if (k === 'status') {
+    const s = String(e.k || '').toLowerCase(), on = !(e.on === false || e.on === 0);
+    if (s === 'exposed') return on ? playNamed('exposed:' + clamp(+e.n || 1, 1, 6)) : undefined;
+    if (s === 'enrage') return on ? playNamed('king:enrage') : undefined;
+    if (!on && e.why === 'break') return playNamed('shieldbreak'); // V's why: melt (fire removed freeze), snuff (freeze removed burn)
+    if (!on && (e.why === 'melt' || e.why === 'snuff')) return play('st:steam', () => { N(0.45, { c: 'white', ft: 'highpass', f: 3500, to: 1800, v: 0.14, a: 0.02 }); T(1600, 0.3, { v: 0.02, to: 900 }); });
+    if (!ST[s]) return; return playNamed(on ? 'st:' + s : 'st:' + s + ':off');
+  }
+  if (k === 'location') { // the wheel (cc:wheel-start / cc:wheel-landed) plays it when it lands; without a wheel, play it ourselves
+    const at = performance.now(); clearTimeout(wheel.fallback);
+    wheel.fallback = setTimeout(() => { if (wheel.startAt < at && now() - lastReveal > 4 && S['loc:' + e.id]) playNamed('loc:' + e.id); }, 3600); return;
+  }
+  if (k === 'crownWarn' || k === 'crownTelegraph' || k === 'crownSoon' || k === 'crownMark' || (k === 'crown' && e.phase === 'warn')) return playNamed('crown:warn');
+  if (k === 'kingPhase' || k === 'bossPhase' || (k === 'king' && e.phase)) return playNamed('king:phase');
+  if (k === 'kingEnrage') return playNamed('king:enrage');
+  if (k === 'exposed') return playNamed('exposed:' + clamp(+e.n || +e.stacks || 1, 1, 6));
+  if (k === 'ascend' || k === 'ascended') return playNamed('ascend');
+  if (k === 'veteran' || k === 'champion') return playNamed(k);
+}
+
 // ---- rarity-tiered reveal
 const RAR = { common: 1, uncommon: 1.5, rare: 2, epic: 3, legendary: 4, season: 4, mythic: 5 };
 const reveal = (r) => {
@@ -612,12 +832,34 @@ const AB = {
   gravity: () => { T(60, 0.6, { type: 'sawtooth', v: 0.08, to: 30, lp: { f: 1200, to: 150 }, hall: 0.4 }); N(0.6, { c: 'pink', ft: 'bandpass', f: 3000, to: 200, q: 3, v: 0.2, a: 0.45 }); FM(220, 0.6, { ratio: 1.07, idx: 3, to: 55, v: 0.05 }); lib.impact(1.1, { at: 0.6, sub: 80, bright: 0.5 }); lib.sub(32, 0.8, { at: 0.6, v: 0.45 }); },
   hexBolt: () => { FM(330, 0.35, { ratio: 1.5, idx: 6, to: 880, v: 0.06, hall: 0.4 }); T(165, 0.35, { type: 'sawtooth', v: 0.04, lp: { f: 900, to: 2400 }, vib: [11, 0.04] }); N(0.2, { c: 'pink', ft: 'bandpass', f: 900, to: 2600, q: 4, v: 0.1 }); },
   soulLance: () => { lib.choir([220, 233], 0.5, { v: 0.04, vowel: 'u', a: 0.05 }); N(0.2, { c: 'white', ft: 'bandpass', f: 1500, to: 5000, q: 2, v: 0.25, a: 0.08 }); lib.impact(0.6, { at: 0.15 }); T(880, 0.5, { v: 0.03, to: 220, at: 0.15, hall: 0.6 }); },
+  // 15.0 (C): status builders and the pawn line. Delivery first, then the status colour (ST) lands on the hit.
+  firebrand: () => { lib.swish({ f: 3000, to: 900, v: 0.18 }); lib.click({ v: 0.15, f: 2200, at: 0.06 }); CUR.t0 += 0.06; ST.burn.on(); },
+  dart: () => { N(0.1, { c: 'white', ft: 'bandpass', f: 5000, to: 2500, q: 3, v: 0.16, a: 0.03 }); T(2400, 0.12, { v: 0.03, to: 1400 }); lib.click({ v: 0.12, f: 4000, at: 0.12 }); CUR.t0 += 0.14; ST.poison.on(); },
+  hoarfrost: () => { lib.whoosh(0.2, { f: 500, to: 2500, v: 0.12 }); lib.impact(0.7, { at: 0.22, bright: 1.3 }); CUR.t0 += 0.22; lib.frost(); lib.glass(0.9, { at: 0.04 }); N(0.6, { c: 'white', ft: 'highpass', f: 5000, v: 0.1, a: 0.02, hall: 0.4 }); },
+  skirmish: () => { lib.swish({ f: 3800, to: 1000, v: 0.2, d: 0.1 }); K(200, 90, 0.07, { v: 0.15, at: 0.04 }); CUR.t0 += 0.1; ST.haste.on(); },
+  blessing: () => { lib.choir([392, 494, 587], 0.9, { v: 0.05, a: 0.1 }); CUR.t0 += 0.1; ST.shield.on(); lib.sparkle(6, { at: 0.2 }); N(0.5, { c: 'white', ft: 'highpass', f: 6000, to: 9000, v: 0.05, a: 0.2, hall: 0.4 }); },
+  hex: () => { FM(330, 0.35, { ratio: 1.5, idx: 6, to: 880, v: 0.05, hall: 0.4 }); T(165, 0.3, { type: 'sawtooth', v: 0.04, lp: { f: 900, to: 2400 }, vib: [11, 0.04] }); CUR.t0 += 0.18; ST.poison.on(); ST.slow.on(); },
+  scorch: () => { N(0.6, { c: 'pink', ft: 'bandpass', f: 400, to: 2400, q: 0.8, v: 0.3, a: 0.15, room: 0.3 }); lib.fire(0.7, { v: 0.3, crackle: 9, at: 0.1 }); lib.sub(70, 0.5, { v: 0.2, at: 0.1, to: 45 }); },
+  concuss: () => { lib.whoosh(0.14, { f: 300, to: 1100, v: 0.14, peak: 0.9 }); lib.impact(1, { at: 0.13, sub: 110, bright: 0.7 }); FM(260, 0.4, { ratio: 1.41, idx: 3, v: 0.07, at: 0.14, room: 0.4 }); CUR.t0 += 0.22; ST.stun.on(); },
+  frostNova: () => { lib.riser(0.25, { f: 440, mult: 3, v: 0.04 }); lib.impact(1.1, { at: 0.25, bright: 1.4 }); N(0.9, { c: 'white', ft: 'highpass', f: 4000, to: 8000, v: 0.16, at: 0.25, hall: 0.5 }); CUR.t0 += 0.28; lib.frost(); lib.glass(1.2, { at: 0.06 }); ST.slow.on(); },
+  plague: () => { N(1, { c: 'pink', ft: 'bandpass', f: 300, to: 1200, q: 2, v: 0.22, a: 0.4, hall: 0.4 }); lib.choir([117, 123], 1, { v: 0.05, vowel: 'u', a: 0.3 }); CUR.t0 += 0.3; ST.poison.on(); ST.poison.tick(3); },
+  halberd: () => { lib.whoosh(0.18, { f: 300, to: 1600, v: 0.16, peak: 0.85 }); lib.impact(0.85, { at: 0.17, sub: 130 }); FM(520, 0.3, { ratio: 1.41, idx: 2.5, v: 0.05, at: 0.17, room: 0.4 }); },
+  shieldWall: () => { [0.6, -0.6, 0].forEach((p, i) => { lib.click({ v: 0.16, f: 1800, at: i * 0.05, pan: p }); FM(300, 0.25, { ratio: 1.41, idx: 3, v: 0.04, at: i * 0.05, pan: p }); }); CUR.t0 += 0.15; ST.shield.on(); ST.slow.on(); },
+  warcry: () => { lib.choir([147, 196, 220], 0.9, { v: 0.08, vowel: 'a', a: 0.05 }); T(110, 0.8, { type: 'sawtooth', v: 0.07, lp: { f: 600, to: 2400, g: 0.3 }, det: 12, hall: 0.4 }); lib.impact(1.3, { at: 0.35, sub: 90 }); lib.stone(8, { at: 0.4 }); lib.sub(41, 0.9, { at: 0.35, v: 0.45 }); CUR.t0 += 0.45; ST.stun.on(); CUR.t0 += 0.3; ST.haste.on(); duck(0.6, 1.2); },
+  sweep: () => { lib.swish({ f: 2600, to: 700, v: 0.24, d: 0.2 }); [0.5, 0, -0.5].forEach((p, i) => lib.click({ v: 0.12, f: 2400, at: 0.06 + i * 0.04, pan: p })); K(170, 70, 0.1, { v: 0.2, at: 0.1 }); },
+  heroicLeap: () => { lib.whoosh(0.3, { f: 400, to: 2800, v: 0.18 }); T(220, 0.28, { type: 'triangle', v: 0.06, to: 660, glide: 0.24 }); lib.impact(1, { at: 0.32, sub: 110 }); for (let i = 0; i < 3; i++) lib.stone(2, { at: 0.36 + i * 0.05 }); },
+  valor: () => { lib.riser(0.4, { f: 196, mult: 4, v: 0.06 }); chord([392, 494, 587], 0.6, { type: 'sawtooth', v: 0.04, roll: 0.04, lp: { f: 3000, to: 900 }, hall: 0.4, det: 8 }); lib.impact(1.4, { at: 0.45, sub: 80, bright: 0.8 }); N(1, { c: 'brown', f: 1000, to: 140, v: 0.45, at: 0.45, hall: 0.5 }); lib.sub(36, 1, { at: 0.45, v: 0.45 }); CUR.t0 += 0.5; lib.fire(0.9, { v: 0.32, crackle: 10 }); duck(0.65, 1.4); },
   wraithStep: () => { N(0.35, { c: 'pink', ft: 'bandpass', f: 2500, to: 400, q: 3, v: 0.12, a: 0.1, hall: 0.5 }); T(1100, 0.35, { v: 0.03, to: 550, vib: [7, 0.03], hall: 0.6 }); },
 };
+// 15.0 Ascended ultimates: the usual ultimate plus a choir swell, a crown bell and a sub drop
+function ascLayer() { lib.choir([220, 277, 330, 440], 1.4, { v: 0.06, a: 0.2, vowel: 'a' }); lib.bell(1760, 1.4, { v: 0.05, at: 0.25 }); lib.sub(41, 1.2, { v: 0.35, at: 0.2, to: 30 }); lib.sparkle(8, { at: 0.3 }); duck(0.6, 1.4); }
 // Unknown / new abilities: pick an archetype from the description, then voice it with a pitch from the id hash.
 function archetype(id) {
   const a = (D.ABILITIES && D.ABILITIES[id]) || {}, d = ((a.desc || '') + ' ' + (a.name || '')).toLowerCase(), h = hashStr(id);
   const pm = st((h % 9) - 4); CUR.pm *= pm;
+  // 15.0: status-effect abilities get the status's own colour on top of a delivery sound
+  const stk = /poison|toxic|venom|plague/.test(d) ? 'poison' : /freez|frost|ice\b|chill/.test(d) ? 'freeze' : /stun|daze|concuss/.test(d) ? 'stun' : /burn|ignite|scorch|flame|fire/.test(d) ? 'burn' : /haste|quicken/.test(d) ? 'haste' : /slow|snare|root/.test(d) ? 'slow' : /shield|barrier|ward/.test(d) && !/break|pierc/.test(d) ? 'shield' : null;
+  if (stk) { const del = /beam|ray|line|bolt|lance|diagonal/.test(d) ? () => lib.beam(0.3, { f: 600 + (h % 600), v: 0.035 }) : /explo|blast|burst|nova|area|around|adjacent|aoe/.test(d) ? () => lib.impact(0.7, { bright: 0.9 }) : /leap|jump|dash|charge/.test(d) ? () => lib.whoosh(0.25, { f: 400, to: 2600, v: 0.18 }) : () => lib.swish({ v: 0.18 }); del(); CUR.t0 += 0.08; ST[stk].on(); if (a.ult) { lib.sub(49, 0.8, { v: 0.3 }); duck(0.4, 0.8); } return; }
   if (/heal|restore|regen|bless/.test(d)) return AB.sanctuary();
   if (/trap|mine|snare/.test(d)) return S.trapset();
   if (/teleport|swap|warp|blink/.test(d)) return AB.transpose();
@@ -679,7 +921,8 @@ function killSound(id) {
 
 // ---------------------------------------------------------------- router
 const gateT = new Map(), burst = new Map();
-const MIN_GAP = { tick: 0.02, hover: 0.04, coin: 0.025, firework: 0.06, xp: 0.02, heartbeat: 0.5, kill: 0, hit: 0.02 };
+const MIN_GAP = { tick: 0.02, hover: 0.04, coin: 0.025, firework: 0.06, xp: 0.02, heartbeat: 0.5, kill: 0, hit: 0.02, 'wheel:tick': 0.025 };
+for (const k of Object.keys(ST)) { MIN_GAP['st:' + k] = 0.08; MIN_GAP['dot:' + k] = 0.06; } // a storm of statuses in an 8-player round stays readable
 function play(name, fn) {
   if (settings.sfx === 0) return;
   const a = getCtx(); if (!a || !NB.white) return;
@@ -698,6 +941,7 @@ function play(name, fn) {
 }
 export const sfx = {};
 for (const k of Object.keys(S)) sfx[k] = (...args) => play(k, () => S[k](...args));
+sfx['wheel:tick'] = (sp = 1) => { wheel.driven = true; wheelStop(); play('wheel:tick', () => S['wheel:tick'](sp)); }; // the wheel drives its own ticks
 sfx.ab = (id) => playNamed('ab:' + id);
 sfx.kill = (id) => playNamed('kill:' + id);
 sfx.reveal = (rarity = 'common') => playNamed('reveal:' + rarity);   // store / Crown Path reveal, common..mythic
@@ -705,16 +949,23 @@ sfx.promoteTo = (piece) => playNamed('promote:' + piece);             // per-tie
 sfx.announce = (name) => playNamed('announce:' + name);
 sfx.finisherPreview = (id) => playNamed('fin:' + id);
 export function playNamed(n) {
+  if (n && typeof n === 'object') return evSound(n); // 15.0: engine event objects (status, location, boss King...)
   if (typeof n !== 'string' || !n) return;
-  if (n.startsWith('ab:')) { const id = n.slice(3); return play(n, () => (AB[id] ? AB[id]() : archetype(id))); }
+  if (n.startsWith('dot:')) { const [, k, c] = n.split(':'); return S['dot:' + k] ? play('dot:' + k, () => S['dot:' + k](+c || 1)) : play('hit', () => S.hit()); }
+  if (n.startsWith('wheel:tick')) { wheel.driven = true; wheelStop(); return play('wheel:tick', () => S['wheel:tick'](+n.slice(11) || 0)); } // the wheel drives its own ticks
+  { const m = /^promote:([a-z]+):h(\d)$/.exec(n); if (m) { const h = +m[2]; if (h >= 3) return play('ascend', () => S.ascend()); return play('hone', () => { S.hone(); if (h === 2) lib.sparkle(5, { at: 0.15 }); }); } } // hone 1-2: honing; 3: Ascension
+  if (n.startsWith('ab:')) { const asc = n.endsWith(':asc'), id = n.slice(3, asc ? -4 : undefined); return play(n, () => { const t0 = CUR.t0; AB[id] ? AB[id]() : archetype(id); if (asc) { CUR.t0 = t0; ascLayer(); } }); }
   if (n.startsWith('kill:')) { const id = n.slice(5); return play('kill', () => killSound(id)); }
   if (n.startsWith('fin:')) { const id = n.slice(4); return play('fin', () => finisher(id)); } // finisher alone (store previews)
   if (n.startsWith('promote:')) { const k = n.slice(8); if (S[n]) return sfx[n](); return play(n, () => promoteTier(TIER_OF(k))); }
   if (n.startsWith('reveal:')) { if (S[n]) return sfx[n](); return play(n, () => reveal('common')); }
   if (n.startsWith('announce:')) { if (S[n]) return sfx[n](); return play(n, () => announce(n.slice(9))); }
   if (n.startsWith('world:') || n.startsWith('hazard:')) { // world:<kind> / hazard:<kind>:<phase>, e.g. straight from engine events
-    const k = n.slice(n.indexOf(':') + 1), lk = k.toLowerCase(), alias = { shardrain: 'shardrain', bloodmoon: 'bloodmoon', meteor: 'meteorfall', lava: 'sizzle', ice: 'ice:skid', portals: 'portal', portal: 'portal' }[lk];
-    const hit = S[k] ? k : S[lk] ? lk : alias || (S[lk.split(':')[0]] ? lk.split(':')[0] : null);
+    const k = n.slice(n.indexOf(':') + 1), lk = k.toLowerCase(), base = lk.split(':')[0], ph = lk.split(':')[1] || '';
+    const AL = { shardrain: 'shardrain', bloodmoon: 'bloodmoon', meteor: 'meteorfall', lava: 'sizzle', ice: 'ice:skid', portals: 'portal', portal: 'portal', gravity: 'gravitywell', bounty: 'bounty', drums: 'wardrums', fog: 'toxicfog', toxic: 'toxicfog', storm: 'sandstorm' };
+    const POOL = /^(poison|poisonpool|pool|pools|toxicpool|bog)$/.test(base) ? (/hurt|dmg|tick|hit/.test(ph) ? 'pool:hurt' : 'pool') : null; // W's poison pools
+    const alias = POOL || AL[lk] || (n.startsWith('world:') ? AL[base] : null);
+    const hit = S[k] ? k : S[lk] ? lk : ph === 'warn' && !POOL ? 'locwarn' : alias || (S[base] ? base : null);
     return hit ? sfx[hit]() : play(n, () => S.wind());
   }
   if (n.startsWith('multikill:')) return play(n, () => S.multikill(parseInt(n.slice(10), 10) || 2));
@@ -730,4 +981,5 @@ export function soundNames() {
   return out;
 }
 
-document.addEventListener('visibilitychange', () => { if (!ac) return; if (document.hidden) ac.suspend().catch(() => {}); else ac.resume().catch(() => {}); });
+// hidden page: suspend (saves battery), unless voice chat holds the context (remote voices keep playing)
+document.addEventListener('visibilitychange', () => { if (!ac) return; if (document.hidden) { if (!holdN) ac.suspend().catch(() => {}); } else ac.resume().catch(() => {}); });

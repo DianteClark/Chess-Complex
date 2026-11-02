@@ -169,10 +169,11 @@ export function initScene({ canvas, bg, getProfile, getScreen, settings }) {
     const rc = slot.getBoundingClientRect();
     if (rc.width < 90 || rc.height < 100) return hideHero();
     const p = getProfile();
-    if (heroSkin !== p.skin) { heroSkin = p.skin; heroSwap = 1; }
+    const hp = (p.avatar && p.avatar.piece) || 'king', hs = (p.avatar && p.avatar.skin) || p.skin; // 15.0 (F): the pedestal shows your profile avatar
+    if (heroSkin !== hp + hs) { heroSkin = hp + hs; heroSwap = 1; }
     heroSwap = Math.max(0, heroSwap - dt * 2.2);
     const sz = Math.min(rc.height * 0.82, rc.width * 0.9, 240), cx0 = rc.left + rc.width / 2, by = rc.bottom - Math.max(14, sz * 0.12);
-    const sk = skinOf(p.skin);
+    const sk = skinOf(hs);
     // soft light (spotlight cone + glow) stays in the 1x scene canvas
     x.save();
     const cone = x.createLinearGradient(0, by - sz * 1.4, 0, by); cone.addColorStop(0, 'rgba(255,230,180,0)'); cone.addColorStop(1, 'rgba(255,230,180,0.12)');
@@ -204,7 +205,7 @@ export function initScene({ canvas, bg, getProfile, getScreen, settings }) {
     x.translate(cx0, by - 4 + bob);
     x.save(); x.scale(1, 0.25); x.fillStyle = 'rgba(0,0,0,0.45)'; x.beginPath(); x.arc(0, 16 - bob * 2, sz * 0.24, 0, Math.PI * 2); x.fill(); x.restore();
     x.scale(sz * 0.8 * (1 - Math.abs(turn) * 0.5) * pop, sz * 0.8 * pop);
-    drawPiece(x, 'king', p.skin, { t: T, flash: heroSwap * 0.8 });
+    drawPiece(x, hp, hs, { t: T, flash: heroSwap * 0.8 });
     x.restore();
     // trail / glow motes rising off the piece
     const tr = TRAILS[p.trail];
@@ -300,17 +301,21 @@ function hexA(hex, a) {
   const n = parseInt(h.slice(0, 6), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
-// ---------- 10.0 sequel reveal ----------
-// A full-screen, skippable title card the first time a returning player opens 10.0.
-export function sequelReveal(done, { reduced = false, sfx = null } = {}) {
+// ---------- sequel reveal (10.0, upgraded for 15.0) ----------
+// A full-screen, skippable title card the first time a returning player opens a new major version.
+// 15.0 (F): the digits slam in one at a time over a world-tour globe ring, then four headline features cascade in.
+export function sequelReveal(done, { reduced = false, sfx = null, ver = '15', kicker = 'The sequel returns', sub = 'The World Tour', features = ['Eight locations', 'Ascension', 'Parties', 'The Boss King'] } = {}) {
   const el = document.createElement('div');
-  el.className = 'sequel' + (reduced ? ' calm' : '');
-  el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Chess Complex 10');
-  el.innerHTML = `<div class="sq-rays"></div><div class="sq-flare"></div><div class="sq-ring"></div>
-    <div class="sq-stack"><div class="sq-kicker">The sequel</div>
+  el.className = 'sequel v15' + (reduced ? ' calm' : '');
+  el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Chess Complex ' + ver);
+  const digits = String(ver).split('').map((d, i) => `<span class="sq-d" style="--i:${i}">${d}</span>`).join('');
+  el.innerHTML = `<div class="sq-rays"></div><div class="sq-flare"></div><div class="sq-ring"></div><div class="sq-ring r2"></div>
+    <div class="sq-orbit" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="sq-stack"><div class="sq-kicker">${kicker}</div>
     <div class="sq-logo"><span class="a">CHESS</span><span class="b">COMPLEX</span></div>
-    <div class="sq-ten"><span>10</span></div>
-    <div class="sq-sub">A new board. A new war.</div></div>
+    <div class="sq-ten sq-num">${digits}</div>
+    <div class="sq-sub">${sub}</div>
+    <div class="sq-feats">${features.map((f, i) => `<span style="--i:${i}">${f}</span>`).join('')}</div></div>
     <div class="sq-skip">Tap to continue</div>`;
   document.body.appendChild(el);
   let closed = false;
@@ -322,8 +327,11 @@ export function sequelReveal(done, { reduced = false, sfx = null } = {}) {
   const t0 = performance.now();
   el.addEventListener('pointerdown', () => { if (performance.now() - t0 > 500) close(); });
   addEventListener('keydown', function k(e) { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { removeEventListener('keydown', k); close(); } });
-  if (sfx && !reduced) { setTimeout(() => { try { sfx.whoosh && sfx.whoosh(); } catch {} }, 300); setTimeout(() => { try { sfx.levelup && sfx.levelup(); } catch {} }, 1350); }
-  setTimeout(close, reduced ? 2600 : 4600);
+  if (sfx && !reduced) {
+    const s = (n, ms) => setTimeout(() => { try { sfx[n] && sfx[n](); } catch {} }, ms);
+    s('whoosh', 300); s('boom', 1300); s('boom', 1600); s('rankup', 1750); s('tick', 2500); s('tick', 2650); s('tick', 2800); s('tick', 2950);
+  }
+  setTimeout(close, reduced ? 2800 : 5600);
 }
 
 // ---------- loadout showroom ----------

@@ -62,7 +62,7 @@ export const LESSONS = [
           c.clear(); c.reset('knight', 7, 10); c.fresh();
           c.dummy(7, 9, 60); c.dummy(8, 8, 60);
         }, mark: (c) => c.dummies().map((d) => ({ x: d.x, y: d.y })), check: (c, ev) => ev.filter((e) => e.e === 'dmg' && e.src === c.me.id).length >= 2 },
-      { say: 'Later you can evolve into a Rook, then a Queen. Or Hone your current piece instead: +15% stats and an upgraded Signature, up to three times. Love the Knight? Stay a Knight.', next: true },
+      { say: 'Later you can evolve into a Rook, then a Queen. Or Hone your current piece instead: +15% stats and an upgraded Signature, up to three times, and the third Hone Ascends it with a new passive and an empowered ultimate. Love the Knight? Stay a Knight. Love the Pawn? The Veteran and the Champion keep you a Pawn to the very end.', next: true },
     ],
   },
   {
@@ -89,7 +89,7 @@ export const LESSONS = [
       { say: 'Walls block movement and shots. Rubble and crates break when hit. Brambles stop slides and cost you initiative. Shrines heal 40% once, then recharge.', setup: (c) => { c.s.storm = { ring: 0, crack: false }; c.tile(9, 7, 'wall'); c.tile(9, 8, 'wall'); c.tile(5, 6, 'rubble', { hp: 2 }); c.tile(10, 10, 'crate', { hp: 1 }); c.tile(5, 10, 'bramble'); c.tile(9, 10, 'shrine', { cd: 0 }); }, mark: () => [{ x: 9, y: 7, label: 'Wall' }, { x: 5, y: 6, label: 'Rubble' }, { x: 10, y: 10, label: 'Crate' }, { x: 5, y: 10, label: 'Bramble' }, { x: 9, y: 10, label: 'Shrine' }], next: true },
       { say: 'Every third round a world event hits, such as Shard Rain, a Meteor Storm, a Blood Moon or a Supply Drop. A supply cache just landed. Break it open with T-Strike. This one takes two hits, so end your turn between them.', obj: 'Break open the cache', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'),
         setup: (c) => { c.clear(); c.reset('knight', 7, 9); c.tile(7, 8, 'chest', { hp: 2 }); c.fresh(); }, mark: () => [{ x: 7, y: 8 }], check: (c, ev) => c.ev(ev, (e) => e.e === 'chest' && e.broke) },
-      { say: 'On round 7 the Crown appears somewhere safe on the board. Claim it to become the King: tougher and self-healing, but slow, and everyone will hunt you. If the King falls, the Crown shatters into 4 shards. Go on, take it.', obj: 'Claim the Crown',
+      { say: 'A round before the Crown appears, a gold marker shows where it will land, and whoever stands there first wins it. The King is a raid boss: a huge HP pool, a royal aura that slows rivals, and a shockwave each time it drops a third of its health. But every different attacker that hits it strips its armour, so rivals will team up against you. If the King falls, the Crown shatters into 4 shards. Go on, take it.', obj: 'Claim the Crown',
         setup: (c) => { c.clear(); c.reset('knight', 6, 9); c.item(7, 7, 'crown'); c.fresh(); }, mark: () => [{ x: 7, y: 7 }], check: (c) => c.me.piece === 'king' },
       { say: 'That is the core of it. One more lesson covers hazard themes, the Throne and Siege, or you can jump straight into the Graduation match.', next: true },
     ],
@@ -110,6 +110,10 @@ export const LESSONS = [
       { say: 'In Siege and the Gauntlet, Hollows come in waves and hunt you: fast Stalkers, Hexers that shoot from range, Splitters that burst into Mites, and Brutes behind a shield. A shield soaks damage until it breaks. Break this one.', obj: 'Break the shield', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=atk]'),
         setup: (c) => { c.clear(); c.reset('knight', 7, 10); const d = c.dummy(7, 9, 60); d.shield = 10; d.shieldMax = 10; d.role = 'brute'; d.name = 'Brute'; c.fresh(); },
         mark: (c) => c.dummies().map((d) => ({ x: d.x, y: d.y })), check: (c, ev) => c.ev(ev, (e) => e.e === 'shieldBreak') },
+      { say: 'Status effects. For this lesson your Pawn carries Firebrand, an equippable ability. Set the dummy on fire.', obj: 'Burn the dummy', glow: (c) => (c.s.turn && c.s.turn.acted ? '[data-slot=end]' : '[data-slot=eq]'),
+        setup: (c) => { c.clear(); c.reset('pawn', 6, 9); c.me.equips = { ...c.me.equips, pawn: 'firebrand' }; c.me.cd.eq = 0; c.dummy(7, 8, 80); c.fresh(); },
+        mark: (c) => c.dummies().map((d) => ({ x: d.x, y: d.y })), check: (c, ev) => c.ev(ev, (e) => e.e === 'status' && e.k === 'burn' && e.on) },
+      { say: 'Burning pieces lose health at the start of each turn. Poison stacks and halves healing, Freeze stops a piece moving, Stun stops it acting, and Slow and Haste change its speed. Shields soak damage first. Fire and frost cancel each other out, and shrines and potions wash off the harmful ones. Watch the icons over every piece.', next: true },
       { say: 'Watch the banners for the other world events: an Eclipse hides distant pieces, an Earthquake reshapes the walls, a Mana Surge charges every ultimate, a Royal Bounty marks the leader, War Drums speed everyone up, and the Restless Dead rise to hunt. The Codex has the details. Now prove yourself in the Graduation match.', next: true },
     ],
   },

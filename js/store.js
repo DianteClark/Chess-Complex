@@ -1,5 +1,5 @@
 // Store catalog, daily featured shop, collections, wishlist, item previews, the showcase stage and the unlock reveal.
-import { SKINS, BOARDS, FINISHERS, TRAILS, EMOTE_PACKS, BUNDLES, RARITY, RARITY_ORDER } from './data.js';
+import { SKINS, BOARDS, FINISHERS, TRAILS, EMOTE_PACKS, BANNERS, DEFAULT_BANNERS, BUNDLES, RARITY, RARITY_ORDER, PIECES } from './data.js';
 import { drawPiece } from './pieces.js';
 import { FX, hiSprite } from './fx.js';
 import { rarityOfAny, collectionDone } from './progression.js';
@@ -10,6 +10,7 @@ export const KINDS = {
   finisher: { label: 'Finisher',  table: FINISHERS,   owned: 'ownedFinishers', equip: 'finisher', tab: 'finishers' },
   trail:    { label: 'Trail',     table: TRAILS,      owned: 'ownedTrails',    equip: 'trail',    tab: 'trails' },
   emote:    { label: 'Emote Pack', table: EMOTE_PACKS, owned: 'ownedEmotes',   equip: null,       tab: 'emotes' },
+  banner:   { label: 'Banner',    table: BANNERS,     owned: 'ownedBanners',   equip: 'banner',   tab: null }, // 15.0: profile banners (picked in the profile editor; never sold)
 };
 const valid = (s) => { if (typeof s !== 'string') return false; const [k, id] = s.split(':'); return !!(KINDS[k] && Object.prototype.hasOwnProperty.call(KINDS[k].table, id)); };
 
@@ -24,12 +25,37 @@ export function ensureStore(p) {
   p.wishlist = Array.isArray(p.wishlist) ? [...new Set(p.wishlist.filter(valid))].slice(0, 60) : [];
   p.showcase = Array.isArray(p.showcase) ? [...new Set(p.showcase.filter(valid))].slice(0, 4) : [];
   if (!Array.isArray(p.seenItems)) p.seenItems = [];
+  // 15.0 profile card: banners (free colours always owned), banner + avatar defaults. F's editor writes these; we only validate.
+  p.ownedBanners = Array.isArray(p.ownedBanners) ? p.ownedBanners.filter((k) => typeof k === 'string' && BANNERS[k]) : [];
+  for (const k of DEFAULT_BANNERS) if (!p.ownedBanners.includes(k)) p.ownedBanners.push(k);
+  if (!bannerOwned(p, p.banner)) p.banner = 'gold';
+  if (!p.avatar || typeof p.avatar !== 'object') p.avatar = { piece: 'knight', skin: null };
+  if (!avatarOk(p, p.avatar.piece, p.avatar.skin)) p.avatar = { piece: PIECES[p.avatar.piece] ? p.avatar.piece : 'knight', skin: null };
   return p;
+}
+// ---------- 15.0 profile card helpers (F builds the editor UI on these) ----------
+export const bannerOwned = (p, id) => typeof id === 'string' && Object.prototype.hasOwnProperty.call(BANNERS, id) && (BANNERS[id].price === 0 || (p.ownedBanners || []).includes(id));
+export const avatarOk = (p, piece, skin) => typeof piece === 'string' && Object.prototype.hasOwnProperty.call(PIECES, piece) && (skin == null || (typeof skin === 'string' && SKINS[skin] && (p.owned || []).includes(skin)));
+export function bannerList(p) {
+  return Object.entries(BANNERS).map(([id, b]) => ({ id, name: b.name, colors: b.colors, accent: b.accent || null, pattern: b.pattern || null, royal: !!b.royal, owned: bannerOwned(p, id), how: b.price === 0 ? 'Free' : b.royal ? `Royal Pass, Season ${b.season}` : b.season ? `Crown Path, Season ${b.season}` : 'Earned' }));
+}
+// A CSS background for a banner id (patterns are layered gradients, so no images to load).
+export function bannerCss(id) {
+  const b = BANNERS[id] || BANNERS.gold; const [c0, c1] = b.colors; const a = b.accent || c0;
+  const base = `linear-gradient(115deg, ${c0} 0%, ${c1} 100%)`;
+  const pat = {
+    stripes: `repeating-linear-gradient(115deg, transparent 0 18px, ${a}33 18px 26px)`,
+    damask: `radial-gradient(circle at 20% 30%, ${a}40 0 6%, transparent 7%), radial-gradient(circle at 70% 70%, ${a}30 0 5%, transparent 6%), radial-gradient(circle at 85% 20%, ${a}26 0 4%, transparent 5%)`,
+    aurora: `radial-gradient(ellipse 80% 40% at 30% 30%, ${a}55, transparent 70%), radial-gradient(ellipse 70% 35% at 75% 60%, #c99bff44, transparent 70%)`,
+    cracks: `repeating-linear-gradient(62deg, transparent 0 22px, ${a}55 22px 24px), radial-gradient(ellipse at 50% 120%, ${a}66, transparent 60%)`,
+    stars: `radial-gradient(circle at 12% 30%, ${a} 0 1px, transparent 2px), radial-gradient(circle at 38% 70%, ${a} 0 1px, transparent 2px), radial-gradient(circle at 64% 22%, ${a} 0 1.5px, transparent 2.5px), radial-gradient(circle at 86% 62%, ${a} 0 1px, transparent 2px), radial-gradient(circle at 52% 48%, ${a}88 0 1px, transparent 2px)`,
+  }[b.pattern];
+  return pat ? `${pat}, ${base}` : base;
 }
 export const rarityOf = (kind, id) => rarityOfAny(kind, id);
 export const rarityColor = (kind, id) => (RARITY[rarityOf(kind, id)] || RARITY.common).color;
 export const rarityRank = (r) => Math.max(0, RARITY_ORDER.indexOf(r));
-export const isOwned = (p, kind, id) => (p[KINDS[kind].owned] || []).includes(id);
+export const isOwned = (p, kind, id) => (kind === 'banner' ? bannerOwned(p, id) : (p[KINDS[kind].owned] || []).includes(id));
 export const isEquipped = (p, kind, id) => (KINDS[kind].equip ? p[KINDS[kind].equip] === id : isOwned(p, kind, id));
 export const isWished = (p, kind, id) => (p.wishlist || []).includes(`${kind}:${id}`);
 export function toggleWish(p, kind, id) {
@@ -50,10 +76,14 @@ const DESC = {
   finisher: (t) => t.desc || '',
   trail: () => 'Follows your piece whenever it moves.',
   emote: (t) => Object.values(t.emotes).map((e) => `"${e}"`).join('  '),
+  banner: (t) => `Profile banner${t.pattern ? `, ${t.pattern} pattern` : ''}. Shows behind your name card.`,
 };
+const LOC_NAMES = { citadel: 'Frost Citadel', forge: 'Volcanic Forge', temple: 'Sunken Temple', gardens: 'Royal Gardens', ruins: 'Desert Ruins', works: 'Iron Works', rift: 'Astral Rift', bog: 'Witchwood Bog' };
+export const locName = (id) => LOC_NAMES[id] || '';
 export function item(p, kind, id) {
   const t = KINDS[kind].table[id];
-  return { kind, id, name: t.name, price: t.price, rarity: rarityOf(kind, id), owned: isOwned(p, kind, id), equipped: isEquipped(p, kind, id), season: t.price == null, seasonNo: t.season || 0, wished: isWished(p, kind, id), desc: DESC[kind](t), def: t.price === 0 };
+  let desc = DESC[kind](t); if (t.loc && LOC_NAMES[t.loc]) desc += ` Made for the ${LOC_NAMES[t.loc]}.`;
+  return { kind, id, name: t.name, price: t.price, rarity: rarityOf(kind, id), owned: isOwned(p, kind, id), equipped: isEquipped(p, kind, id), season: t.price == null, seasonNo: t.season || 0, royal: !!t.royal, loc: t.loc || null, wished: isWished(p, kind, id), desc, def: t.price === 0 };
 }
 export function listKind(p, kind) {
   return Object.keys(KINDS[kind].table).map((id) => item(p, kind, id)).sort((a, b) => rarityRank(a.rarity) - rarityRank(b.rarity) || (a.price || 0) - (b.price || 0) || a.name.localeCompare(b.name));
@@ -97,7 +127,7 @@ export function bundleInfo(p, key, extraOff = 0) {
   const off = Math.min(0.5, B.off + extraOff);
   return { key, name: B.name, blurb: B.blurb || '', color: B.color || '#d6b05c', theme: B.theme || '', reward: B.reward || null, claimed: (p.collections || []).includes(key), items, missing, buyable, full, price: Math.round(full * (1 - off)), off, owned: missing.length === 0, done: collectionDone(p, key), have: items.length - missing.length };
 }
-export function grant(p, kind, id) { const k = KINDS[kind].owned; if (!p[k].includes(id)) p[k].push(id); }
+export function grant(p, kind, id) { const k = KINDS[kind].owned; if (!Array.isArray(p[k])) p[k] = []; if (!p[k].includes(id)) p[k].push(id); }
 export function equip(p, kind, id) { const e = KINDS[kind].equip; if (e) p[e] = id; }
 export function activeEmotes(p) { const out = {}; for (const id of p.ownedEmotes) Object.assign(out, EMOTE_PACKS[id] ? EMOTE_PACKS[id].emotes : {}); return out; }
 
@@ -236,6 +266,10 @@ function drawItem(ctx, W, H, p, dt) {
     p.fx.drawAbove(ctx);
     ctx.translate(x, by); ctx.scale(0.92, 0.92); drawPiece(ctx, 'knight', p.skin, { t: p.t });
     ctx.restore();
+  } else if (k === 'banner') {
+    drawBanner(ctx, p.id, 0, 0, W, H, p.t);
+    const ts = H / 1.7; ctx.save(); ctx.translate(W * 0.24, H * 0.9 + Math.sin(p.t * 2) * 2); ctx.scale(ts, ts); drawPiece(ctx, 'knight', p.skin, { t: p.t }); ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(W * 0.46, H * 0.4, W * 0.4, Math.max(4, H * 0.07)); ctx.globalAlpha = 0.55; ctx.fillRect(W * 0.46, H * 0.55, W * 0.28, Math.max(3, H * 0.05)); ctx.globalAlpha = 1;
   } else if (k === 'emote') {
     const em = Object.values(EMOTE_PACKS[p.id].emotes);
     const i = Math.floor(p.t / 1.2) % em.length, kk = (p.t % 1.2) / 1.2;
@@ -249,9 +283,27 @@ function drawItem(ctx, W, H, p, dt) {
   }
 }
 
+// Canvas version of bannerCss for previews and the reveal.
+export function drawBanner(ctx, id, x, y, W, H, t = 0) {
+  const b = BANNERS[id] || BANNERS.gold; const a = b.accent || b.colors[0];
+  const g = ctx.createLinearGradient(x, y, x + W, y + H); g.addColorStop(0, b.colors[0]); g.addColorStop(1, b.colors[1]); ctx.fillStyle = g; ctx.fillRect(x, y, W, H);
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, W, H); ctx.clip(); ctx.strokeStyle = a; ctx.fillStyle = a;
+  if (b.pattern === 'stripes') { ctx.globalAlpha = 0.22; ctx.lineWidth = 8; for (let i = -H; i < W + H; i += 26) { ctx.beginPath(); ctx.moveTo(x + i, y + H); ctx.lineTo(x + i + H * 0.47, y); ctx.stroke(); } }
+  else if (b.pattern === 'damask') { ctx.globalAlpha = 0.25; for (let i = 0; i < 9; i++) { const px = x + ((i * 0.37) % 1) * W, py = y + ((i * 0.61) % 1) * H; ctx.beginPath(); ctx.arc(px, py, H * (0.05 + (i % 3) * 0.02), 0, Math.PI * 2); ctx.fill(); } }
+  else if (b.pattern === 'aurora') { for (let i = 0; i < 2; i++) { ctx.globalAlpha = 0.35; ctx.strokeStyle = i ? '#c99bff' : a; ctx.lineWidth = H * 0.12; ctx.beginPath(); for (let k = 0; k <= 24; k++) { const px = x + (k / 24) * W, py = y + H * (0.35 + i * 0.25) + Math.sin(k * 0.5 + t * 0.8 + i) * H * 0.1; k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } ctx.stroke(); } }
+  else if (b.pattern === 'cracks') { ctx.globalAlpha = 0.5 + 0.2 * Math.sin(t * 2); ctx.lineWidth = 1.5; for (let i = 0; i < 6; i++) { let px = x + (i + 0.5) * W / 6, py = y + H; ctx.beginPath(); ctx.moveTo(px, py); for (let k = 0; k < 4; k++) { px += Math.sin(i * 7 + k * 3) * W * 0.04; py -= H * 0.22; ctx.lineTo(px, py); } ctx.stroke(); } }
+  else if (b.pattern === 'stars') { for (let i = 0; i < 26; i++) { const s1 = Math.sin(i * 12.9898) * 43758.5453, r1 = s1 - Math.floor(s1), s2 = Math.sin(i * 78.233) * 12543.21, r2 = s2 - Math.floor(s2); ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(t * 1.5 + i)); ctx.fillRect(x + r1 * W, y + r2 * H, 1.6, 1.6); } }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+
 // ---------- showcase stage: your loadout with one slot swapped (try on) ----------
 // look = { skin, board, trail, finisher }. The piece hops across a small board leaving its trail; playFinisher() fires the finisher on a dummy.
-const STAGE_PIECES = ['pawn', 'knight', 'bishop', 'rook', 'queen', 'king'];
+// 15.0: the try-on cycles the whole roster, including the pawn line (Veteran, Champion), Ascended pieces ('+') and the boss King ('!').
+const STAGE_PIECES = ['pawn', 'veteran', 'champion', 'knight', 'knight+', 'bishop', 'bishop+', 'rook', 'rook+', 'queen', 'queen+', 'king', 'king!'].filter((k) => PIECES[k.replace(/[+!]$/, '')]);
+const ASC_NAME = { knight: 'Ascended Knight', bishop: 'Archbishop', rook: 'Fortress Rook', queen: 'Empress Queen' };
+export function stagePieceLabel(k) { const b = k.replace(/[+!]$/, ''); return k.endsWith('+') ? ASC_NAME[b] || `Ascended ${PIECES[b].name}` : k.endsWith('!') ? 'Boss King' : PIECES[b].name; }
+const stageOpts = (k, t) => ({ t, ascended: k.endsWith('+'), boss: k.endsWith('!') });
+const stageBase = (k) => k.replace(/[+!]$/, '');
 export function makeStage(cv, look, opts = {}) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const st = { cv, ctx: cv.getContext('2d'), dpr, look: { ...look }, t: 0, fx: new FX(), piece: opts.piece || 'queen', hop: 0, from: 1, to: 2, fin: -1, kill: null, emote: opts.emote || null, reduced: !!opts.reduced, lowQ: !!opts.lowQ, cols: opts.cols || 0, reserve: opts.reserve || 0, solo: !!opts.solo };
@@ -260,6 +312,9 @@ export function makeStage(cv, look, opts = {}) {
 }
 export function resizeStage(st) { const r = st.cv.getBoundingClientRect(); st.cv.width = Math.max(10, (r.width || 340) * st.dpr); st.cv.height = Math.max(10, (r.height || 240) * st.dpr); }
 export function cyclePiece(st) { st.piece = STAGE_PIECES[(STAGE_PIECES.indexOf(st.piece) + 1) % STAGE_PIECES.length]; return st.piece; }
+export const STAGE_ROSTER = STAGE_PIECES;
+export const rosterIcon = (k) => k.replace(/\+$/, '.asc').replace(/!$/, '.boss');
+export function setStagePiece(st, k) { if (STAGE_PIECES.includes(k)) st.piece = k; return st.piece; }
 export function playFinisher(st) { st.fin = 0; st.kill = null; }
 const SQ = 0.58; // board plane foreshortening
 export function drawStage(st, dt) {
@@ -309,7 +364,7 @@ export function drawStage(st, dt) {
     const gy = p.gy || p.y;
     ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.beginPath(); ctx.ellipse(p.x, gy + 0.02, 0.32 - (p.hero ? lift * 0.25 : 0), 0.09, 0, 0, Math.PI * 2); ctx.fill();
     if (p.hero) { const pg = ctx.createRadialGradient(p.x, gy, 0.05, p.x, gy, 0.6); pg.addColorStop(0, (SKINS[p.skin] || SKINS.ivory).glow + '55'); pg.addColorStop(1, '#00000000'); ctx.fillStyle = pg; ctx.beginPath(); ctx.ellipse(p.x, gy, 0.6, 0.2, 0, 0, Math.PI * 2); ctx.fill(); }
-    ctx.save(); ctx.globalAlpha = p.a; ctx.translate(p.x, p.y + (p.hero ? Math.sin(st.t * 2) * 0.015 : 0)); ctx.scale(p.sc, p.sc); drawPiece(ctx, p.pc, p.skin, { t: st.t }); ctx.restore();
+    ctx.save(); ctx.globalAlpha = p.a; ctx.translate(p.x, p.y + (p.hero ? Math.sin(st.t * 2) * 0.015 : 0)); ctx.scale(p.sc, p.sc); drawPiece(ctx, stageBase(p.pc), p.skin, stageOpts(p.pc, st.t)); ctx.restore();
   }
   st.fx.drawAbove(ctx);
   ctx.translate(0, -head);
@@ -330,7 +385,7 @@ export function drawStage(st, dt) {
 }
 
 // ---------- unlock reveal: charge -> burst -> item ----------
-const CHARGE = { common: 0.55, rare: 0.8, epic: 1.1, legendary: 1.45, mythic: 1.9, season: 1.1 };
+const CHARGE = { common: 0.55, rare: 0.8, epic: 1.1, legendary: 1.45, mythic: 1.9, season: 1.1, royal: 1.6 };
 export function makeReveal(cv, kind, id, opts = {}) {
   const pv = makePreview(cv, kind, id, { skin: opts.skin, big: true, rays: true });
   const rar = rarityOf(kind, id);

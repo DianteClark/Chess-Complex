@@ -4,24 +4,49 @@ export const MAX_PLAYERS = 8;
 export const TURN_MS = 30000;
 
 export const PIECES = {
-  pawn:   { ult: 'enPassant', name: 'Pawn',   tier: 1, hp: 60,  atk: 10, def: 5,  spd: 10, attack: 'pawnStrike', sig: 'shove',     equips: ['sprint', 'digin', 'pickpocket', 'tripwire', 'phalanx'],
+  pawn:   { ult: 'enPassant', name: 'Pawn',   tier: 1, hp: 60,  atk: 10, def: 5,  spd: 10, attack: 'pawnStrike', sig: 'shove',     equips: ['sprint', 'digin', 'pickpocket', 'tripwire', 'phalanx', 'firebrand', 'dart'],
             moveDesc: 'Steps 1 tile in any direction.' },
-  knight: { ult: 'fork', name: 'Knight', tier: 2, hp: 90,  atk: 16, def: 8,  spd: 12, attack: 'tstrike',    sig: 'vault',     equips: ['trample', 'stagger', 'rally', 'lance', 'outflank'],
+  knight: { ult: 'fork', name: 'Knight', tier: 2, hp: 90,  atk: 16, def: 8,  spd: 12, attack: 'tstrike',    sig: 'vault',     equips: ['trample', 'stagger', 'rally', 'lance', 'outflank', 'hoarfrost', 'skirmish'],
             moveDesc: 'L-shaped jump. Ignores anything in the way.' },
-  bishop: { ult: 'excommunicate', name: 'Bishop', tier: 2, hp: 80,  atk: 14, def: 6,  spd: 11, attack: 'ray',        sig: 'transpose', equips: ['sanctuary', 'cross', 'blink', 'penance', 'consecrate'],
+  bishop: { ult: 'excommunicate', name: 'Bishop', tier: 2, hp: 80,  atk: 14, def: 6,  spd: 11, attack: 'ray',        sig: 'transpose', equips: ['sanctuary', 'cross', 'blink', 'penance', 'consecrate', 'blessing', 'hex'],
             moveDesc: 'Slides diagonally up to 4 tiles.' },
-  rook:   { ult: 'castling', name: 'Rook',   tier: 3, hp: 140, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege', 'quake', 'repel', 'bombard'],
+  rook:   { ult: 'castling', name: 'Rook',   tier: 3, hp: 140, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege', 'quake', 'repel', 'bombard', 'scorch', 'concuss'],
             moveDesc: 'Slides straight up to 4 tiles.' },
-  queen:  { ult: 'nova', name: 'Queen',  tier: 4, hp: 150, atk: 22, def: 10, spd: 10, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate', 'gambit', 'gravity'],
+  queen:  { ult: 'nova', name: 'Queen',  tier: 4, hp: 150, atk: 22, def: 10, spd: 10, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate', 'gambit', 'gravity', 'frostNova', 'plague'],
             moveDesc: 'Slides any direction up to 5 tiles.' },
   king:   { ult: 'divineRight', name: 'King',   tier: 5, hp: 0,   atk: 0,  def: 0,  spd: 0,  attack: 'royalStrike', sig: 'royalGuard', equips: [],
             moveDesc: 'Steps 1 tile. Wears the Crown.' },
+  // 15.0 pawn line (C): pawn-shaped, single steps, keep the Pawn's equipped ability (equipFrom). cost overrides EVOLVE_COST.
+  veteran:  { ult: 'warcry', name: 'Veteran',  tier: 2, cost: 3, hp: 100, atk: 15, def: 9, spd: 10, attack: 'halberd', sig: 'shieldWall', equips: [], equipFrom: 'pawn', line: 'pawn',
+            moveDesc: 'Steps 1 tile in any direction. A Pawn that refused to change.' },
+  champion: { ult: 'valor',  name: 'Champion', tier: 3, cost: 5, hp: 114, atk: 18, def: 11, spd: 10, attack: 'sweep',   sig: 'heroicLeap', equips: [], equipFrom: 'pawn', line: 'pawn',
+            moveDesc: 'Steps 1 tile in any direction. Heroic Leap covers the distance.' },
 };
 
-export const EVOLVE = { pawn: ['knight', 'bishop'], knight: ['rook'], bishop: ['rook'], rook: ['queen'], queen: [], king: [] };
-export const EVOLVE_COST = { 2: 2, 3: 4, 4: 7 }; // Pawn→Rook 6, Pawn→Queen 13
+export const EVOLVE = { pawn: ['knight', 'bishop', 'veteran'], knight: ['rook'], bishop: ['rook'], rook: ['queen'], queen: [], king: [], veteran: ['champion'], champion: [] };
+export const EVOLVE_COST = { 2: 2, 3: 4, 4: 5 }; // Pawn→Rook 6, Pawn→Queen 11. Pawn line: Veteran 3, Champion 5 more (PIECES[x].cost)
+export const evolveCost = (pc) => PIECES[pc].cost ?? EVOLVE_COST[PIECES[pc].tier];
+// 15.0 Ascension (C): honing one of these pieces to MAX_HONE adds a piece passive and an empowered ultimate.
+export const ASCEND = {
+  knight: { name: 'Ascended Knight', passive: 'Cavalry',   desc: '+20% damage, and every jump raises a shield of 12% max HP until your next turn.', ult: 'Fork hits 30% harder and stuns everything it hits.' },
+  bishop: { name: 'Archbishop',      passive: 'Grace',     desc: '+15% damage, heal 5% max HP at the start of each turn, and Piercing Ray poisons everything it hits.', ult: 'Excommunicate hits 30% harder and sets everything it hits on fire.' },
+  rook:   { name: 'Fortress Rook',   passive: 'Fortress',  desc: 'Take 15% less damage. Slam slows everything it hits.', ult: 'Castling hits 30% harder and raises a shield of 25% max HP.' },
+  queen:  { name: 'Empress Queen',   passive: 'Sovereign', desc: '+10% damage. Immune to slow and freeze.', ult: 'Checkmate Nova hits 30% harder and freezes the survivors.' },
+};
+// 15.0 status effects (C). t = default turns (counts down at the affected piece's turn start). bad = harmful (cleansed by shrines, potions, Blessing).
+export const STATUS = {
+  burn:    { name: 'Burn',    t: 2, bad: true,  desc: 'Loses 6% max HP at the start of each turn. Freezing it puts the fire out.' },
+  poison:  { name: 'Poison',  t: 3, bad: true,  desc: 'Loses 3% max HP per stack at the start of each turn, up to 3 stacks. Healing is halved.' },
+  freeze:  { name: 'Freeze',  t: 1, bad: true,  desc: 'Cannot move next turn, but can still act. Fire thaws it.' },
+  stun:    { name: 'Stun',    t: 1, bad: true,  desc: 'Cannot act next turn, but can still move.' },
+  slow:    { name: 'Slow',    t: 2, bad: true,  desc: '-3 SPD.' },
+  shield:  { name: 'Shield',  t: 2, bad: false, desc: 'Absorbs damage before HP.' },
+  haste:   { name: 'Haste',   t: 2, bad: false, desc: '+3 SPD.' },
+  exposed: { name: 'Exposed', t: 1, bad: true,  desc: 'The King only: -20% DEF for each different attacker since its last turn, up to 4.' },
+  enrage:  { name: 'Enrage',  t: 2, bad: false, desc: 'The King only: +25% ATK after a phase shockwave.' },
+};
 export const MAX_HONE = 3;
-export const honeCost = (h, tier = 1) => [1, 3, 4, 6][tier - 1] + h * [1, 1, 2, 2][tier - 1]; // T1 1/2/3, T2 3/4/5, T3 4/6/8, T4 6/8/10
+export const honeCost = (h, tier = 1) => tier + h; // 15.0 (C): T1 1/2/3, T2 2/3/4, T3 3/4/5, T4 4/5/6. Ascended Knight/Bishop = 11 shards from a Pawn, same as a Queen
 export const STEADFAST_ROUND = 6;    // before this round a full-HP player cannot be one-shot
 export const CALM_ROUNDS = 6;        // no Blood Moon or Meteor Storm before this round
 
@@ -83,7 +108,7 @@ export const ABILITIES = {
   consecrate: { name: 'Consecrate',   cd: 3, desc: 'Call down a 3x3 holy burst centred 2 or 3 tiles away on a clear diagonal.' },
   repel:      { name: 'Repel',        cd: 3, desc: 'A shockwave on every adjacent tile that knocks everything back a tile. Collisions hurt.' },
   bombard:    { name: 'Bombard',      cd: 3, desc: 'Lob a shell exactly 3 tiles in a straight line, over walls. It bursts in a plus shape.' },
-  gravity:    { name: 'Gravity Well', cd: 4, desc: 'Pull every enemy within 3 tiles one step toward you, then crush every tile around you.' },
+  gravity:    { name: 'Singularity', cd: 4, desc: 'Pull every enemy within 3 tiles one step toward you, then crush every tile around you.' },
   // 10.0 Siege enemies
   hexBolt:    { name: 'Hex Bolt',     cd: 0, desc: '' },
   soulLance:  { name: 'Soul Lance',   cd: 0, desc: '' },
@@ -96,11 +121,49 @@ export const PASSIVES = {
   momentum:  { name: 'Momentum',    desc: '+2 SPD for every elimination (max 4 stacks).' },
   thorns:    { name: 'Thorns',      desc: 'Reflect 30% of damage taken from adjacent attackers.' },
   first:     { name: 'First Strike', desc: '+50% damage against targets above 60% HP.' },
-  lifesteal: { name: 'Lifesteal',   desc: 'Heal 10% of all damage you deal.' },
+  lifesteal: { name: 'Lifesteal',   desc: 'Heal 14% of all damage you deal.' },
   laststand: { name: 'Last Stand',  desc: '+30% ATK while below 30% HP.' },
   bastion:   { name: 'Bastion',     desc: 'End your turn without moving and take 20% less damage until your next turn.' },
   predator:  { name: 'Predator',    desc: '+25% damage against targets below 35% HP.' },
+  // 15.0 (C): status passives
+  kindle:      { name: 'Kindle',      desc: 'Your basic attack sets its targets on fire (Burn).' },
+  venom:       { name: 'Venom',       desc: 'Every ability that damages a piece adds a Poison stack.' },
+  rime:        { name: 'Rime',        desc: 'Your hits Slow their targets. Damage against frozen targets +25%.' },
+  aegis:       { name: 'Aegis',       desc: 'Every third turn, start with a Shield of 10% max HP.' },
+  adrenaline:  { name: 'Adrenaline',  desc: 'Drop below 50% HP and gain Haste and a Shield of 16% max HP. Recharges after 3 rounds.' },
+  ward:        { name: 'Ward',        desc: 'Immune to Freeze, Stun and Slow. Burn and Poison on you last 1 turn less.' },
+  opportunist: { name: 'Opportunist', desc: '+25% damage against targets with a harmful status.' },
 };
+// 15.0 (C) equips, pawn line and ascended ultimates. st: statuses each hit applies (for bots, codex and the UI).
+Object.assign(ABILITIES, {
+  firebrand:  { name: 'Firebrand',     cd: 3, desc: 'Strike any adjacent tile with a burning brand and set the target on fire.', st: ['burn'] },
+  dart:       { name: 'Venom Dart',    cd: 3, desc: 'Throw a dart at the first piece within 4 tiles in any straight or diagonal line. Two Poison stacks.', st: ['poison'] },
+  hoarfrost:  { name: 'Hoarfrost',     cd: 4, desc: 'Leap in an L and land in a frost shockwave. Everything around the landing is frozen.', st: ['freeze'] },
+  skirmish:   { name: 'Skirmish',      cd: 3, desc: 'Strike any adjacent tile, then gain Haste for 2 turns.', self: ['haste'] },
+  blessing:   { name: 'Blessing',      cd: 4, desc: 'Gain a Shield of 25% max HP and shake off every harmful status.', self: ['shield'] },
+  hex:        { name: 'Hex',           cd: 3, desc: 'A cursed bolt hits the first piece on a diagonal within 5 tiles: two Poison stacks and Slow.', st: ['poison', 'slow'] },
+  scorch:     { name: 'Scorch',        cd: 3, desc: 'Sweep the 3-wide row in front with flame. Everything hit burns.', st: ['burn'] },
+  concuss:    { name: 'Concussion',    cd: 4, desc: 'A crushing blow to one straight neighbour. The target is stunned.', st: ['stun'] },
+  frostNova:  { name: 'Glacial Nova',  cd: 4, desc: 'Frost bursts 2 tiles around the Queen. Everything hit is slowed, and adjacent pieces freeze.', st: ['slow', 'freeze'] },
+  plague:     { name: 'Plague',        cd: 4, desc: 'A sickly cloud 2 tiles around the Queen. Two Poison stacks on everything in it.', st: ['poison'] },
+  // pawn line
+  halberd:    { name: 'Halberd',       cd: 0, desc: 'A heavy strike on any adjacent tile.' },
+  shieldWall: { name: 'Shield Wall',   cd: 3, desc: 'Gain a Shield of 22% max HP. Adjacent enemies are slowed.', self: ['shield'], st: ['slow'] },
+  warcry:     { name: 'War Cry',       cd: 0, ult: true, desc: 'Smash every adjacent tile and stun the survivors, then gain Haste.', st: ['stun'], self: ['haste'] },
+  sweep:      { name: 'Sweep',         cd: 0, desc: 'A wide arc: the adjacent tile you pick and the two beside it.' },
+  heroicLeap: { name: 'Heroic Leap',   cd: 3, desc: 'Leap 2 or 3 tiles in any straight or diagonal line, over anything, and strike around the landing.', honed: 'Cooldown 2.' },
+  valor:      { name: 'Valor',         cd: 0, ult: true, desc: 'Leap up to 3 tiles and bring the banner down: hits everything within 2 tiles of the landing and sets it on fire.', st: ['burn'] },
+});
+Object.assign(ABILITIES.dominion, { desc: 'Nearby enemies are slowed and pushed back in the turn order.', st: ['slow'] });
+// 15.0 (C) unlock prices in Marks (missing = free). Free kit: 5 base abilities and the first 2 equips of each piece.
+// Unlocks live in profile.unlocked as 'passive:<id>' / 'ability:<id>' (S owns the store side).
+// Bands agreed with S: base abilities 600 / 900 (status builders) / 1200 (top picks); equips 400 (3rd), 600 (4th), 800 (5th+), 1000-1500 (15.0).
+for (const [k, v] of Object.entries({ lifesteal: 600, laststand: 600, bastion: 600, predator: 600, kindle: 900, venom: 900, rime: 900, ward: 900, adrenaline: 900, aegis: 1200, opportunist: 1200 })) PASSIVES[k].unlock = v;
+for (const [k, v] of Object.entries({ pickpocket: 400, tripwire: 600, phalanx: 800, firebrand: 1000, dart: 1000,
+  rally: 400, lance: 600, outflank: 800, hoarfrost: 1500, skirmish: 1000,
+  blink: 400, penance: 600, consecrate: 800, blessing: 1200, hex: 1200,
+  siege: 400, quake: 600, repel: 800, bombard: 800, scorch: 1000, concuss: 1400,
+  checkmate: 400, gambit: 600, gravity: 800, frostNova: 1500, plague: 1200 })) ABILITIES[k].unlock = v;
 
 export const STAT_POINTS = 10;
 export const STAT_GAIN = { hp: 7, atk: 2, def: 1.5, spd: 1 };
@@ -122,6 +185,9 @@ export const MUTATORS = {
   crumble:  { name: 'Crumbling Keep', desc: 'Cracked floor gives way the second time it is stepped on, leaving a pit.' },
   rift:     { name: 'Rift Storm', desc: 'Every third round the rift swaps two random pieces across the board.' },
   chaos:    { name: 'Chaos Stack', desc: 'Two hazards at once. Check the board.' },
+  // 15.0 (W): location hazards
+  brambles: { name: 'Overgrowth', desc: 'Thorny hedges everywhere. Landing in brambles costs turn speed.' },
+  poison:   { name: 'Poison Pools', desc: 'Bubbling bog pools. Land on one or start a turn in it and you are poisoned.' },
 };
 export const PLAYER_COLORS = ['#ff4d6d', '#4dabff', '#ffd24d', '#5cff9d', '#c77dff', '#ff8f3d', '#3dfff0', '#ff6ad5'];
 
@@ -177,6 +243,13 @@ Object.assign(FINISHERS, {
   supernova: { name: 'Supernova',    price: 1000, rarity: 'legendary', desc: 'They swell into a star, collapse, and detonate.' },
   checkmate: { name: 'Checkmate',    price: null, season: 3, rarity: 'season', desc: 'A colossal king topples onto them and the board cracks in a shockwave.' },
 });
+// 15.0 World Tour finishers (V): one per signature location, Royal Pass premium lane (S); loc = js/locations.js id; sound id is 'kill:<id>'
+Object.assign(FINISHERS, {
+  glacial:   { name: 'Glacial Tomb', price: null, season: 4, royal: true, rarity: 'royal', loc: 'citadel', desc: 'A snow vortex closes in, ice entombs them and an icicle splits the tomb.' },
+  magma:     { name: 'Magma Core',   price: null, season: 4, royal: true, rarity: 'royal', loc: 'forge',   desc: 'The floor splits, they glow red-hot and sink, then the core erupts.' },
+  abyssal:   { name: 'Abyssal Maw',  price: null, season: 4, royal: true, rarity: 'royal', loc: 'temple',  desc: 'Black water opens and tentacles drag them under.' },
+  witchfire: { name: 'Witch-fire',   price: null, season: 4, royal: true, rarity: 'royal', loc: 'bog',     desc: 'A hex circle ignites, they melt into ooze and a skull wisp cackles away.' },
+});
 export const DEFAULT_FINISHERS = ['shatter'];
 
 export const EMOTES = { gg: 'GG', check: 'Check!', nice: 'Nice one', oops: 'Oops', come: 'Come at me', mercy: 'Mercy!' };
@@ -197,6 +270,15 @@ export const WORLD_EVENTS = {
   bounty:    { name: 'Royal Bounty', desc: 'A price is placed on the leader. Whoever eliminates them gains 3 shards and ultimate charge' },
   frenzy:    { name: 'War Drums',    desc: 'Every piece gains +3 SPD for a round' },
   restless:  { name: 'Restless Dead', desc: 'Hollows claw their way out of the ground and hunt the nearest piece' },
+  // 15.0 (W): location signature events (see js/locations.js LOC_EVENTS). warn = the telegraph line, desc = the strike.
+  blizzard:   { name: 'Blizzard',     tone: 'cyan',   warn: 'A blizzard is coming. Shelter next to a wall or freeze', desc: 'The blizzard hits. Pieces in the open are frozen and ice spreads' },
+  eruption:   { name: 'Eruption',     tone: 'red',    warn: 'The volcano rumbles. Get off the marked tiles', desc: 'Molten rock rains down and sets pieces on fire' },
+  flood:      { name: 'Flood',        tone: 'cyan',   warn: 'The tide is rising. Head for the high ground in the centre', desc: 'The water rises over the low ground and slows everyone caught in it' },
+  bloom:      { name: 'Bloom',        tone: 'gold',   desc: 'The gardens bloom. Every piece heals and shakes off burns and poison' },
+  sandstorm:  { name: 'Sandstorm',    tone: 'gold',   desc: 'Sand fills the air. Distant pieces vanish from sight and everyone is slowed' },
+  overcharge: { name: 'Overcharge',   tone: 'violet', desc: 'The machines surge. Cooldowns refresh, ultimates charge, and anyone on a belt is stunned' },
+  gravityWell:{ name: 'Gravity Well', tone: 'violet', warn: 'Space is bending. Stay clear of the marked rift', desc: 'The well collapses and drags nearby pieces toward its heart' },
+  toxicFog:   { name: 'Toxic Fog',    tone: 'red',    warn: 'A green fog creeps in. Leave the marked area', desc: 'The fog chokes everyone inside it with poison' },
 };
 
 export const QUESTS = {
@@ -248,35 +330,72 @@ export const MODES = {
   duel:   { name: 'Duel', short: 'Duel', desc: 'One on one in a tight 10x10 arena. Pure skill.', players: [2, 2], storm: { first: 6, every: 3 }, crown: 6, turnMs: 30000, startShards: 1, events: 4, arena: { x0: 3, y0: 3, x1: 12, y1: 12 } },
   squads: { name: 'Squads', short: 'Squads', desc: 'Teams of two. No friendly fire. Stand close for Bond, and step on a fallen ally\'s soul to bring them back.', players: [4, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3, teams: 2 },
   siege:  { name: 'Siege', short: 'Siege', desc: 'Co-op. Hold the board against eight waves of hunting Hollows, with a Colossus on wave 4 and the Elder Colossus on wave 8.', players: [1, 4], storm: { first: 999, every: 3 }, crown: 999, turnMs: 30000, startShards: 1, events: 3, siege: { waves: 8 } },
-  daily:  { name: 'Daily Challenge', short: 'Daily', desc: 'Same map, same loadout for everyone today. Seven Hard bots. Chase your best score.', players: [8, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3 },
+  daily:  { name: 'Daily Challenge', short: 'Daily', desc: 'The location of the day, and the same build of the day for every piece on the board. Seven Hard bots. Chase your best score.', players: [8, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3, mirror: true },
   // 10.0 modes. icon: [piece, skin] for the mode card; bots: solo bot slider config.
   hill:     { name: 'King of the Hill', short: 'Hill', desc: 'Hold the golden Throne at the centre. Start your turn on it for 2 points, or 1 if an enemy is on it too. First to 10, or last piece standing.', players: [2, 8], storm: { first: 6, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3, hill: { goal: 10, alone: 2, contested: 1 }, icon: ['king', 'crimson'] },
   chaos:    { name: 'Chaos', short: 'Chaos', desc: 'Two hazards stacked on one board and a world event every single round. Anything goes.', players: [2, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 1, chaos: true, icon: ['queen', 'neon'] },
   gauntlet: { name: 'Gauntlet', short: 'Gauntlet', desc: 'Co-op boss rush. The Colossus, the Wraith Regent, the Elder Colossus, then the Regent Ascendant and a Colossus at once.', players: [1, 4], storm: { first: 999, every: 3 }, crown: 999, turnMs: 30000, startShards: 4, events: 3, siege: { waves: 4, gauntlet: true }, icon: ['rook', 'voidborn'], bots: { min: 0, max: 3, def: 3, label: 'Bot Allies' } },
-  mirror:   { name: 'Mirror Match', short: 'Mirror', desc: 'Everyone gets the same random build: stats, base ability and equips. Only skill decides.', players: [2, 8], storm: { first: 5, every: 3 }, crown: 7, turnMs: 30000, startShards: 1, events: 3, mirror: true, icon: ['bishop', 'glacier'] },
 };
 MODES.siege.bots = { min: 0, max: 3, def: 3, label: 'Bot Allies' };
+// 15.0 (W): modes regrouped. Mirror Match is no longer its own mode: Daily gives everyone the build of the day, and a
+// Custom lobby can turn on mirror builds. Old ids still load: MODE_ALIAS maps them (createMatch and saves use it).
+const MODE_GROUP_OF = { royale: 'competitive', blitz: 'competitive', duel: 'competitive', squads: 'competitive', siege: 'coop', gauntlet: 'coop', hill: 'party', chaos: 'party', daily: 'challenge' };
+for (const [k, g] of Object.entries(MODE_GROUP_OF)) if (MODES[k]) MODES[k].group = g;
+export const MODE_GROUPS = [
+  { id: 'competitive', name: 'Competitive', desc: 'Every piece for itself, or for your squad.', modes: ['royale', 'blitz', 'duel', 'squads'] },
+  { id: 'coop', name: 'Co-op', desc: 'Team up against the Hollows.', modes: ['siege', 'gauntlet'] },
+  { id: 'party', name: 'Party', desc: 'Wild rules for a good time.', modes: ['hill', 'chaos'] },
+  { id: 'challenge', name: 'Challenge', desc: 'One location, one build, one score to beat. New every day.', modes: ['daily'] },
+  { id: 'custom', name: 'Custom', desc: 'Your lobby, your rules: mode, location, mirror builds, hazards, storm speed and bots.', modes: [], custom: true },
+];
+// Modes a Custom lobby may host (Daily stays solo, one per day).
+export const CUSTOM_MODES = ['royale', 'blitz', 'duel', 'squads', 'siege', 'gauntlet', 'hill', 'chaos'];
+// Retired mode ids -> { mode, custom } (custom = rules to merge into opts.custom).
+export const MODE_ALIAS = { mirror: { mode: 'royale', custom: { mirror: true } } };
 
 // ---------- 2.0: season ----------
-// 10.0 (A7): Season 3. Older seasons are listed for the profile history; their rewards stay owned forever.
-export const SEASON = { id: 3, name: 'Season 3: The Endgame', short: 'The Endgame', tierXp: 250, tiers: 40, ends: '2027-03-01' };
-export const PAST_SEASONS = { 1: 'Season 1: The Opening', 2: 'Season 2: The Middlegame' };
+// 15.0 (S): Season 4, the World Tour. Older seasons are listed for the profile history; their rewards stay owned forever.
+// Pace: ~160 season XP per Royale match, so 40 tiers x 700 XP = 28,000 XP is about 175 matches (12 weeks at 15 matches a week).
+export const SEASON = { id: 4, name: 'Season 4: World Tour', short: 'World Tour', tierXp: 700, tiers: 40, ends: '2027-03-01' };
+export const PAST_SEASONS = { 1: 'Season 1: The Opening', 2: 'Season 2: The Middlegame', 3: 'Season 3: The Endgame' };
+// Free lane (everyone).
 export const SEASON_REWARDS = (() => {
   const r = {};
   for (let t = 1; t <= 40; t++) r[t] = { marks: t % 5 === 0 ? 150 : t % 2 ? 50 : 70 };
-  r[3] = { title: 'Endgamer' };
-  r[7] = { emote: 'endgame' };
-  r[10] = { skin: 'regent' };
-  r[14] = { title: 'Mate in One' };
-  r[18] = { trail: 'comet' };
+  r[3] = { title: 'Wanderer' };
+  r[7] = { emote: 'postcards' };
+  r[10] = { skin: 'voyager' };
+  r[14] = { title: 'Passport Stamped' };
+  r[18] = { trail: 'compass' };
   r[20] = { marks: 400 };
-  r[25] = { board: 'zenith' };
-  r[29] = { title: 'Last Piece Standing' };
-  r[32] = { skin: 'endgame' };
-  r[36] = { title: 'Season Three Legend' };
-  r[40] = { finisher: 'checkmate', fallback: { marks: 1000 } };
+  r[25] = { board: 'atlas' };
+  r[29] = { title: 'Seen It All' };
+  r[32] = { banner: 'tourflag' };
+  r[36] = { title: 'Season Four Legend' };
+  r[40] = { skin: 'worldwalker' };
   return r;
 })();
+// Royal Pass: the premium lane, bought once per season with Marks (never real money). Tier 0 is granted on purchase.
+// Every tier has a reward; 1,500 of the 3,000 Marks come back as rebates along the way.
+export const ROYAL_PASS = { price: 3000, name: 'Royal Pass', blurb: 'A second reward lane on the Crown Path: 4 piece sets, 3 boards, 3 trails, 4 location finishers, 5 banners, titles and 1,500 Marks back.' };
+export const ROYAL_REWARDS = (() => {
+  const r = {};
+  const fin = (id) => ({ finisher: id, fallback: { marks: 300 } });
+  Object.assign(r, {
+    0: { skin: 'cartographer' }, 1: { title: 'Royal Patron' }, 2: { marks: 100 }, 3: { banner: 'royalviolet' }, 4: { emote: 'grandtour' },
+    5: { marks: 100 }, 6: { trail: 'jetstream' }, 7: { marks: 100 }, 8: fin('glacial'), 9: { title: 'Frequent Flyer' },
+    10: { board: 'skyharbor' }, 11: { marks: 100 }, 12: { banner: 'northern' }, 13: { skin: 'stormchaser' }, 14: { marks: 100 },
+    15: { title: 'Jet Set' }, 16: { trail: 'lanterns' }, 17: { marks: 100 }, 18: fin('magma'), 19: { banner: 'volcanic' },
+    20: { marks: 200 }, 21: { title: 'Grand Tourist' }, 22: { board: 'mirage' }, 23: { marks: 100 }, 24: { skin: 'goldleaf' },
+    25: { marks: 100 }, 26: { trail: 'ribbon' }, 27: { title: 'Cartographer' }, 28: fin('abyssal'), 29: { marks: 100 },
+    30: { banner: 'starchart' }, 31: { marks: 100 }, 32: { board: 'worldtree' }, 33: { title: 'Royal Voyager' }, 34: { marks: 100 },
+    35: { banner: 'royalgold' }, 36: { marks: 100 }, 37: { title: 'Crowned Traveller' }, 38: fin('witchfire'), 39: { marks: 100 },
+    40: { skin: 'worldcrown' },
+  });
+  return r;
+})();
+// V's location finishers (ids agreed in V10_NOTES; a missing one pays its fallback until it ships).
+export const LOCATION_FINISHERS = { citadel: 'avalanche', forge: 'eruption', temple: 'maelstrom', gardens: 'overgrowth' };
 SKINS.arcane = { name: 'Arcane', price: null, season: 1, body: ['#7ff7e8', '#3a1060'], rim: '#e8fffb', glow: '#ff5af0', line: '#12052a', fx: 'spark' };
 SKINS.sovereign = { name: 'Sovereign', price: null, season: 1, body: ['#3a3a44', '#050507'], rim: '#ffd76a', glow: '#ffcf4a', line: '#ffd76a', fx: 'glint' };
 BOARDS.throne = { weather: 'embers', name: 'Throne Room', price: null, season: 1, light: '#4a1820', dark: '#33101a', vein: 'rgba(255,210,120,0.08)', frame: '#ffd76a', grid: 'rgba(255,210,120,0.14)', wallTop: ['#6a2a30', '#4a1a22'], wallFront: '#2a0c12', bg: ['#3a0c14', '#060203'], mote: '#ffd76a' };
@@ -466,6 +585,98 @@ Object.assign(BUNDLES, {
   cosmos:    { name: 'Cosmic Mythos', theme: 'mythic', color: '#ff4d8d', blurb: 'The rarest light in the sky. Mythic only.', items: [['skin', 'eclipse'], ['skin', 'nebula'], ['board', 'eventhorizon'], ['trail', 'supernova'], ['trail', 'voidwake'], ['finisher', 'supernova']], off: 0.15, reward: { marks: 500, title: 'Mythbearer' } },
 });
 for (const [k, v] of Object.entries({ inferno: ['fire', '#ff8a3d', 'The original flame.', 150, 'Kindled'], winter: ['frost', '#7fe0ff', 'The first frost of the board.', 150, 'Wintering'], bloom: ['wild', '#ffb7d0', 'Petals on the wind.', 120, 'In Bloom'], regal: ['holy', '#ffcf4a', 'Gold for a king.', 200, 'Treasurer'] })) Object.assign(BUNDLES[k], { theme: v[0], color: v[1], blurb: v[2], reward: { marks: v[3], title: v[4] } });
+// ---------- 15.0 cosmetics (S): World Tour ----------
+RARITY.royal = { name: 'Royal', color: '#ffd98a' };
+RARITY_ORDER.push('royal');
+Object.assign(SKINS, {
+  // location collections (buyable)
+  witchwood:    { name: 'Witchwood',    price: 560,  body: ['#7a8a5a', '#1a2410'], rim: '#e0ffc8', glow: '#a6ff4d', line: '#0a1004', fx: 'leaf', mat: 'wood', accent: '#c77dff', emissive: 0.35, pattern: 'runes' },
+  ironclad:     { name: 'Ironclad',     price: 480,  body: ['#9aa0aa', '#2a2e36'], rim: '#ffe0a0', glow: '#ff8a3d', line: '#0a0c10', fx: 'spark', mat: 'metal', accent: '#ffb347', emissive: 0.3, pattern: 'circuit' },
+  // Season 4 free lane
+  voyager:      { name: 'Voyager',      price: null, season: 4, body: ['#e8d8b0', '#5a4a2e'], rim: '#fff6e0', glow: '#3dc8ff', line: '#2a2010', fx: 'dust', mat: 'metal', accent: '#3dc8ff', emissive: 0.25, pattern: 'filigree' },
+  worldwalker:  { name: 'Worldwalker',  price: null, season: 4, body: ['#bfe8ff', '#1a3a5a'], rim: '#ffffff', glow: '#7affc8', line: '#081a2a', fx: 'aurora', mat: 'ethereal', accent: '#ffd76a', emissive: 0.6, pattern: 'stars' },
+  // Season 4 Royal Pass
+  cartographer: { name: 'Cartographer', price: null, season: 4, royal: true, body: ['#f4e6c4', '#8a6a3a'], rim: '#fffaf0', glow: '#ff4d6d', line: '#3a2410', fx: 'glint', mat: 'porcelain', accent: '#c8343a', emissive: 0.2, pattern: 'runes' },
+  stormchaser:  { name: 'Stormchaser',  price: null, season: 4, royal: true, body: ['#a8b8d8', '#1a2238'], rim: '#ffffff', glow: '#9dc8ff', line: '#060a18', fx: 'spark', mat: 'metal', accent: '#ffe04d', emissive: 0.55, pattern: 'cracks' },
+  goldleaf:     { name: 'Gold Leaf',    price: null, season: 4, royal: true, body: ['#fff0c0', '#a8781a'], rim: '#ffffff', glow: '#ffd76a', line: '#4a3006', fx: 'glint', mat: 'metal', accent: '#5cff9d', emissive: 0.45, pattern: 'veins' },
+  worldcrown:   { name: 'World Crown',  price: null, season: 4, royal: true, body: ['#ffffff', '#4a2a8a'], rim: '#ffe08a', glow: '#ffcf4a', line: '#1a0a3a', fx: 'aurora', mat: 'crystal', accent: '#3dfff0', emissive: 0.85, pattern: 'filigree' },
+});
+// Location boards: tuned to sit on top of each World Tour backdrop (the location keeps its own weather in a match; these weathers show in the store).
+Object.assign(BOARDS, {
+  bastion:   { weather: 'snow', mat: 'ice', loc: 'citadel', name: 'Citadel Ramparts', price: 480, light: '#d8e6f0', dark: '#98b0c4', vein: 'rgba(40,80,120,0.14)', frame: '#7fe0ff', grid: 'rgba(30,60,100,0.16)', wallTop: ['#eef6fc', '#b0c6d8'], wallFront: '#6a8298', bg: ['#1c3448', '#04080c'], mote: '#ffffff', light2: '#bff4ff' },
+  anvil:     { weather: 'embers', weather2: 'ash', mat: 'obsidian', loc: 'forge', name: 'Anvil Floor', price: 520, light: '#3a2a26', dark: '#241816', vein: 'rgba(255,120,40,0.12)', frame: '#ffb347', grid: 'rgba(255,140,60,0.12)', wallTop: ['#54403a', '#3a2a24'], wallFront: '#1a100c', bg: ['#2a1008', '#060201'], mote: '#ffb347', lava: true, light2: '#ff7a2a' },
+  drowned:   { weather: 'rain', weather2: 'bubbles', mat: 'marble', loc: 'temple', name: 'Drowned Altar', price: 500, light: '#3a6a6a', dark: '#245050', vein: 'rgba(180,255,240,0.10)', frame: '#ffd76a', grid: 'rgba(160,255,230,0.12)', wallTop: ['#5a8a84', '#3a6662'], wallFront: '#14302e', bg: ['#0e3434', '#010606'], mote: '#c8fff6', fog: 'rgba(160,255,230,0.06)', light2: '#3dfff0' },
+  topiary:   { weather: 'petals', weather2: 'leaves', mat: 'grass', loc: 'gardens', name: 'Topiary Lawn', price: 450, light: '#4a7a3a', dark: '#36602a', vein: 'rgba(255,255,200,0.06)', frame: '#f4f0e0', grid: 'rgba(20,40,10,0.14)', wallTop: ['#6a9a4a', '#4a7434'], wallFront: '#24401a', bg: ['#1e3a1a', '#040802'], mote: '#ffd1dc', light2: '#fff4c0' },
+  oasis:     { weather: 'sand', mat: 'sand', loc: 'ruins', name: 'Oasis Court', price: 460, light: '#e4c48c', dark: '#b8925a', vein: 'rgba(60,180,200,0.12)', frame: '#2ab8c8', grid: 'rgba(90,60,20,0.14)', wallTop: ['#f0d8a8', '#c4a06a'], wallFront: '#7a5a30', bg: ['#5a3418', '#0a0502'], mote: '#fff0c8', tint: 'rgba(255,190,90,0.04)', light2: '#3dfff0' },
+  foundry:   { weather: 'ash', weather2: 'fog', mat: 'metal', loc: 'works', name: 'Foundry Deck', price: 540, light: '#4a4c52', dark: '#34363c', vein: 'rgba(255,180,80,0.08)', frame: '#ffb347', grid: 'rgba(255,200,120,0.12)', wallTop: ['#6a6c74', '#4a4c54'], wallFront: '#1e2026', bg: ['#202228', '#040405'], mote: '#ffd27a', fog: 'rgba(200,200,210,0.06)', light2: '#ff8a3d' },
+  riftveil:  { weather: 'void', weather2: 'stars', mat: 'crystal', loc: 'rift', name: 'Riftveil Dais', price: 650, light: '#221a44', dark: '#16102e', vein: 'rgba(200,120,255,0.10)', frame: '#d6a6ff', grid: 'rgba(214,166,255,0.16)', wallTop: ['#3e2e70', '#2a1e50'], wallFront: '#120a24', bg: ['#1e0e3a', '#020108'], mote: '#e8d0ff', stars: true, light2: '#b04dff' },
+  mire:      { weather: 'fog', weather2: 'fireflies', mat: 'grass', loc: 'bog', name: 'Mire Boardwalk', price: 480, light: '#3a3a26', dark: '#28281a', vein: 'rgba(166,255,77,0.07)', frame: '#a6ff4d', grid: 'rgba(166,255,77,0.10)', wallTop: ['#4e4a30', '#363220'], wallFront: '#1a180e', bg: ['#16200e', '#020301'], mote: '#c8ff8a', fog: 'rgba(140,220,90,0.08)' },
+  // Season 4 free lane
+  atlas:     { weather: 'dust', weather2: 'stars', mat: 'wood', name: 'Atlas Table', price: null, season: 4, light: '#e8d6ac', dark: '#c4aa78', vein: 'rgba(120,70,20,0.16)', frame: '#3dc8ff', grid: 'rgba(80,50,20,0.16)', wallTop: ['#7a5a34', '#5a4024'], wallFront: '#3a2614', bg: ['#2a1c10', '#060402'], mote: '#fff0c8', light2: '#3dc8ff' },
+  // Season 4 Royal Pass
+  skyharbor: { weather: 'fog', weather2: 'stars', mat: 'marble', royal: true, name: 'Sky Harbor', price: null, season: 4, light: '#e6eef8', dark: '#b4c4dc', vein: 'rgba(60,90,160,0.12)', frame: '#ffd98a', grid: 'rgba(40,70,140,0.14)', wallTop: ['#ffffff', '#c8d6ec'], wallFront: '#8a9ab8', bg: ['#3a5a9a', '#0a1430'], mote: '#ffffff', fog: 'rgba(255,255,255,0.10)', light2: '#ffd98a' },
+  mirage:    { weather: 'sand', weather2: 'stars', mat: 'sand', royal: true, name: 'Desert Mirage', price: null, season: 4, light: '#f0c890', dark: '#d09a5a', vein: 'rgba(255,240,200,0.14)', frame: '#c77dff', grid: 'rgba(120,60,20,0.14)', wallTop: ['#f8dcb0', '#d4a46a'], wallFront: '#8a5a30', bg: ['#6a2a4a', '#10040a'], mote: '#ffe8c8', tint: 'rgba(200,120,255,0.04)', light2: '#ff9ee8' },
+  worldtree: { weather: 'leaves', weather2: 'fireflies', mat: 'grass', royal: true, name: 'World Tree', price: null, season: 4, light: '#2e3a22', dark: '#202a18', vein: 'rgba(255,217,138,0.10)', frame: '#ffd98a', grid: 'rgba(255,217,138,0.12)', wallTop: ['#5a4a2a', '#3e321c'], wallFront: '#1e180c', bg: ['#1a2a14', '#020401'], mote: '#ffe8a8', fog: 'rgba(255,230,160,0.05)', light2: '#7affc8' },
+});
+Object.assign(TRAILS, {
+  snowdrift: { name: 'Snowdrift',     price: 240, rarity: 'rare',   colors: ['#ffffff', '#e0f4ff', '#bfe8ff'], kind: 'dust', g: 0.5, size: 0.04 },
+  cinders:   { name: 'Cinders',       price: 300, rarity: 'rare',   colors: ['#ffb347', '#ff5a1f', '#3a1008'], kind: 'fire', g: -0.8, size: 0.05 },
+  raindrops: { name: 'Raindrops',     price: 220, rarity: 'common', colors: ['#bfe8ff', '#7fc8ff', '#ffffff'], kind: 'dust', g: 1.6, size: 0.03, floor: true },
+  blossom:   { name: 'Blossom Path',  price: 280, rarity: 'rare',   colors: ['#ffd1dc', '#fff4c0', '#ffffff'], kind: 'chunk', g: 0.3, size: 0.05, floor: true },
+  scarab:    { name: 'Scarab Gold',   price: 380, rarity: 'epic',   colors: ['#ffd76a', '#2ab8c8', '#fff0c8'], kind: 'coin', g: 1.4, size: 0.04, floor: true },
+  steam:     { name: 'Steam Vent',    price: 260, rarity: 'rare',   colors: ['#e8e8ee', '#b8bcc8', '#ffffff'], kind: 'dust', g: -1.0, size: 0.06 },
+  riftspark: { name: 'Rift Sparks',   price: 460, rarity: 'epic',   colors: ['#d6a6ff', '#b04dff', '#ffffff'], kind: 'spark', g: -0.3, size: 0.045 },
+  toxic:     { name: 'Toxic Drip',    price: 340, rarity: 'rare',   colors: ['#a6ff4d', '#5aff7a', '#2a4a10'], kind: 'chunk', g: 1.2, size: 0.04, floor: true },
+  compass:   { name: 'Compass Needle', price: null, season: 4, rarity: 'season', colors: ['#3dc8ff', '#ff4d6d', '#fff0c8'], kind: 'spark', g: -0.2, size: 0.045 },
+  jetstream: { name: 'Jetstream',     price: null, season: 4, royal: true, rarity: 'royal', colors: ['#ffffff', '#bfe8ff', '#ffd98a'], kind: 'dust', g: -0.1, size: 0.05 },
+  lanterns:  { name: 'Sky Lanterns',  price: null, season: 4, royal: true, rarity: 'royal', colors: ['#ffb347', '#ffd98a', '#ff7a2a'], kind: 'fire', g: -1.4, size: 0.06 },
+  ribbon:    { name: 'Aurora Ribbon', price: null, season: 4, royal: true, rarity: 'royal', colors: ['#7affc8', '#c99bff', '#3dc8ff', '#ffffff'], kind: 'spark', g: -0.5, size: 0.055 },
+});
+Object.assign(EMOTE_PACKS, {
+  citadel:   { name: 'Frost Citadel',  price: 260, rarity: 'rare',   emotes: { holdgate: 'Hold the gate', brr: 'Brr', icewall: 'Walls of ice', thaw: 'Time to thaw' } },
+  forgepack: { name: 'Volcanic Forge', price: 260, rarity: 'rare',   emotes: { forged: 'Forged in fire', hammer: 'Hammer time', molten: 'Molten', quench: 'Quenched' } },
+  temple:    { name: 'Sunken Temple',  price: 260, rarity: 'rare',   emotes: { tideturn: 'The tide turns', sunk: 'Sunk', deepend: 'Off the deep end', glub: 'Glub glub' } },
+  gardens:   { name: 'Royal Gardens',  price: 260, rarity: 'rare',   emotes: { pruned: 'Pruned', fullbloom: 'In full bloom', tea: 'Tea time', hedge: 'Lost in the hedges' } },
+  ruins:     { name: 'Desert Ruins',   price: 260, rarity: 'rare',   emotes: { bitedust: 'Bite the dust', relic: 'Ancient history', mirage: 'Was that a mirage?', buried: 'Buried' } },
+  works:     { name: 'Iron Works',     price: 260, rarity: 'rare',   emotes: { clank: 'Clank clank', gears: 'Gears turning', overtime: 'Overtime', oiled: 'Well oiled' } },
+  riftpack:  { name: 'Astral Rift',    price: 320, rarity: 'epic',   emotes: { warp: 'Warping in', lostspace: 'Lost in space', mindrift: 'Mind the rift', cosmic: 'Cosmic' } },
+  bog:       { name: 'Witchwood Bog',  price: 260, rarity: 'rare',   emotes: { croak: 'Croak', toxicx: 'Toxic', swamp: 'Swamp thing', hexed: 'Hexed' } },
+  postcards: { name: 'Postcards',      price: null, season: 4, rarity: 'season', emotes: { voyage: 'Bon voyage', wish: 'Wish you were here', arewelost: 'Are we lost?', souvenir: 'Souvenir!' } },
+  grandtour: { name: 'Grand Tour',     price: null, season: 4, royal: true, rarity: 'royal', emotes: { royalwave: 'A royal wave', firstclass: 'First class', nextstop: 'Next stop: you', passport: 'Stamp my passport' } },
+});
+for (const p of Object.values(EMOTE_PACKS)) Object.assign(EMOTES, p.emotes);
+Object.assign(RARITIES.skin, { witchwood: 'epic', ironclad: 'epic', voyager: 'season', worldwalker: 'season', cartographer: 'royal', stormchaser: 'royal', goldleaf: 'royal', worldcrown: 'royal' });
+Object.assign(RARITIES.board, { bastion: 'epic', anvil: 'epic', drowned: 'epic', topiary: 'rare', oasis: 'rare', foundry: 'epic', riftveil: 'legendary', mire: 'epic', atlas: 'season', skyharbor: 'royal', mirage: 'royal', worldtree: 'royal' });
+// Profile banners (the strip behind your name card). Free colours, a season banner from the free lane and Royal Pass banners.
+// pattern: stripes | damask | aurora | cracks | stars (drawn with CSS gradients by store.js bannerCss).
+export const BANNERS = {
+  gold:        { name: 'Gold',            colors: ['#d6b05c', '#4a3410'], price: 0 },
+  crimson:     { name: 'Crimson',         colors: ['#ff4d6d', '#4a0814'], price: 0 },
+  azure:       { name: 'Azure',           colors: ['#4dabff', '#0a2450'], price: 0 },
+  emerald:     { name: 'Emerald',         colors: ['#5cff9d', '#0a3a22'], price: 0 },
+  violet:      { name: 'Violet',          colors: ['#c77dff', '#260a44'], price: 0 },
+  ember:       { name: 'Ember',           colors: ['#ff8f3d', '#401604'], price: 0 },
+  frost:       { name: 'Frost',           colors: ['#bff4ff', '#20506e'], price: 0 },
+  slate:       { name: 'Slate',           colors: ['#8a909a', '#16191f'], price: 0 },
+  tourflag:    { name: 'Tour Flag',       colors: ['#3dc8ff', '#0a2a40'], accent: '#ffd76a', pattern: 'stripes', price: null, season: 4 },
+  royalviolet: { name: 'Royal Violet',    colors: ['#b388ff', '#1e0848'], accent: '#ffd98a', pattern: 'damask', price: null, season: 4, royal: true },
+  northern:    { name: 'Northern Lights', colors: ['#14304a', '#060a18'], accent: '#7affc8', pattern: 'aurora', price: null, season: 4, royal: true },
+  volcanic:    { name: 'Volcanic',        colors: ['#3a0a04', '#0a0200'], accent: '#ff5a1f', pattern: 'cracks', price: null, season: 4, royal: true },
+  starchart:   { name: 'Star Chart',      colors: ['#1a2a5a', '#04050e'], accent: '#ffe8a8', pattern: 'stars', price: null, season: 4, royal: true },
+  royalgold:   { name: 'Royal Gold',      colors: ['#ffe08a', '#6a4008'], accent: '#ffffff', pattern: 'damask', price: null, season: 4, royal: true },
+};
+export const DEFAULT_BANNERS = ['gold', 'crimson', 'azure', 'emerald', 'violet', 'ember', 'frost', 'slate'];
+// World Tour collections: one per location. Items whose art is not in this build yet are skipped until they ship.
+Object.assign(BUNDLES, {
+  t_citadel: { name: 'Frost Citadel', tour: 'citadel', theme: 'frost', color: '#7fe0ff', blurb: 'Hold the walls through the blizzard.', items: [['skin', 'rimeguard'], ['board', 'bastion'], ['trail', 'snowdrift'], ['emote', 'citadel'], ['finisher', 'frozen']], off: 0.2, reward: { marks: 200, title: 'Gatekeeper' } },
+  t_forge:   { name: 'Volcanic Forge', tour: 'forge', theme: 'fire', color: '#ffb347', blurb: 'Where the lava runs and the anvils ring.', items: [['skin', 'brimstone'], ['board', 'anvil'], ['trail', 'cinders'], ['emote', 'forgepack'], ['finisher', 'inferno']], off: 0.2, reward: { marks: 200, title: 'Forgeborn' } },
+  t_temple:  { name: 'Sunken Temple', tour: 'temple', theme: 'sea', color: '#3dfff0', blurb: 'Rain on old stone and a flood on the rise.', items: [['skin', 'tidecaller'], ['board', 'drowned'], ['trail', 'raindrops'], ['emote', 'temple'], ['finisher', 'riptide']], off: 0.2, reward: { marks: 200, title: 'High Priest' } },
+  t_gardens: { name: 'Royal Gardens', tour: 'gardens', theme: 'wild', color: '#ffd1dc', blurb: 'Hedges, petals and the King\'s own lawn.', items: [['skin', 'halcyon'], ['board', 'topiary'], ['trail', 'blossom'], ['emote', 'gardens'], ['finisher', 'sakura']], off: 0.2, reward: { marks: 200, title: 'Head Gardener' } },
+  t_ruins:   { name: 'Desert Ruins', tour: 'ruins', theme: 'sand', color: '#2ab8c8', blurb: 'Sand over gold, and something stirring under it.', items: [['skin', 'sandstone'], ['board', 'oasis'], ['trail', 'scarab'], ['emote', 'ruins'], ['finisher', 'cyclone']], off: 0.2, reward: { marks: 200, title: 'Tomb Raider' } },
+  t_works:   { name: 'Iron Works', tour: 'works', theme: 'storm', color: '#ff8a3d', blurb: 'Steam, gears and the war drums of industry.', items: [['skin', 'ironclad'], ['board', 'foundry'], ['trail', 'steam'], ['emote', 'works'], ['finisher', 'lightning']], off: 0.2, reward: { marks: 200, title: 'Foreman' } },
+  t_rift:    { name: 'Astral Rift', tour: 'rift', theme: 'mythic', color: '#d6a6ff', blurb: 'The board is thin here. Mind the gaps.', items: [['skin', 'voidborn'], ['board', 'riftveil'], ['trail', 'riftspark'], ['emote', 'riftpack'], ['finisher', 'voidrift']], off: 0.2, reward: { marks: 250, title: 'Riftwalker' } },
+  t_bog:     { name: 'Witchwood Bog', tour: 'bog', theme: 'grave', color: '#a6ff4d', blurb: 'Fog, poison pools and the restless dead.', items: [['skin', 'witchwood'], ['board', 'mire'], ['trail', 'toxic'], ['emote', 'bog'], ['finisher', 'reaper']], off: 0.2, reward: { marks: 200, title: 'Bog Witch' } },
+});
 // Daily login streak: day N of a 7-day cycle (the cycle repeats; day 7 is the big one).
 export const LOGIN_REWARDS = [{ marks: 40 }, { marks: 50 }, { marks: 60 }, { marks: 80 }, { marks: 100 }, { marks: 120 }, { marks: 250, xp: 250 }];
 // 10.0 trophies. cat groups them on the Trophies screen. Stats marked (computed) are derived in progression.js.
@@ -491,7 +702,7 @@ Object.assign(ACHIEVEMENTS, {
   mythic1:     { name: 'Mythmaker', desc: 'Own a Mythic item.', stat: 'mythics', goal: 1, reward: 300 },
   streak7:     { name: 'Devoted', desc: 'Log in 7 days in a row.', stat: 'bestLogin', goal: 7, reward: 300 },
   streak30:    { name: 'Unwavering', desc: 'Log in 30 days in a row.', stat: 'bestLogin', goal: 30, reward: 1000 },
-  season3:     { name: 'The Endgame', desc: 'Reach tier 40 of the Season 3 Crown Path.', stat: 'seasonTier', goal: 40, reward: 1000 },
+  season3:     { name: 'The Endgame', desc: 'Reach tier 40 of the Season 3 Crown Path.', stat: 'season3Tier', goal: 40, reward: 1000 },
   veteranS:    { name: 'Old Guard', desc: 'Play in two different seasons.', stat: 'seasonsPlayed', goal: 2, reward: 250 },
   daily14:     { name: 'Fortnight', desc: 'Play the Daily Challenge on 14 different days.', stat: 'dailyDays', goal: 14, reward: 400 },
   level30:     { name: 'Paragon', desc: 'Reach level 30.', stat: 'level', goal: 30, reward: 800 },
@@ -499,3 +710,29 @@ Object.assign(ACHIEVEMENTS, {
 });
 export const ACH_CATS = { combat: 'Combat', modes: 'Modes', mastery: 'Mastery', collection: 'Collection', dedication: 'Dedication' };
 export const ACH_CAT = { wins: 'combat', kills: 'combat', crowns: 'combat', ults: 'combat', hardWins: 'combat', flawless: 'combat', queens: 'combat', hollows: 'combat', shardsTotal: 'combat', bestStreak: 'combat', squadWins: 'modes', siegeWins: 'modes', revives: 'modes', bestWave: 'modes', colossi: 'modes', blitzWins: 'modes', duelWins: 'modes', modesPlayed: 'modes', modesWon: 'modes', topMastery: 'mastery', mastered: 'mastery', minMastery: 'mastery', discoveries: 'mastery', tutorialDone: 'mastery', cosmetics: 'collection', collections: 'collection', mythics: 'collection', wished: 'collection', games: 'dedication', dailyDays: 'dedication', level: 'dedication', bestLogin: 'dedication', seasonTier: 'dedication', seasonsPlayed: 'dedication' };
+// ---------- 15.0 trophies (S): status effects, the boss King, the World Tour, Ascension, the pawn line and parties ----------
+Object.assign(ACHIEVEMENTS, {
+  status50:    { name: 'Afflicter', desc: 'Inflict 50 status effects on other pieces.', stat: 'statusApplied', goal: 50, reward: 200 },
+  status500:   { name: 'Plaguebringer', desc: 'Inflict 500 status effects on other pieces.', stat: 'statusApplied', goal: 500, reward: 800 },
+  regicide1:   { name: 'Regicide', desc: 'Land the final blow on the boss King.', stat: 'regicides', goal: 1, reward: 300 },
+  regicide10:  { name: 'Kingsbane', desc: 'Topple the boss King 10 times.', stat: 'regicides', goal: 10, reward: 800 },
+  tour4:       { name: 'Tourist', desc: 'Play at 4 different World Tour locations.', stat: 'locations', goal: 4, reward: 200 },
+  tour8:       { name: 'Globetrotter', desc: 'Play at all 8 World Tour locations.', stat: 'locations', goal: 8, reward: 600 },
+  ascend1:     { name: 'Ascendant', desc: 'Ascend a piece by honing it to level 3.', stat: 'ascensions', goal: 1, reward: 200 },
+  ascend25:    { name: 'Transcendent', desc: 'Ascend 25 pieces.', stat: 'ascensions', goal: 25, reward: 600 },
+  champion1:   { name: 'People\'s Champion', desc: 'Promote a pawn all the way to Champion.', stat: 'champions', goal: 1, reward: 250 },
+  championWin: { name: 'The Long March', desc: 'Win a match as a Champion pawn.', stat: 'championWins', goal: 1, reward: 500 },
+  party10:     { name: 'Party Animal', desc: 'Play 10 matches in a party.', stat: 'partyGames', goal: 10, reward: 250 },
+  party50:     { name: 'Life of the Party', desc: 'Play 50 matches in a party.', stat: 'partyGames', goal: 50, reward: 700 },
+  season4:     { name: 'Tour de Force', desc: 'Reach tier 40 of the Season 4 Crown Path.', stat: 'season4Tier', goal: 40, reward: 1000 },
+  arsenal:     { name: 'Arsenal', desc: 'Unlock 10 abilities.', stat: 'unlocks', goal: 10, reward: 400 },
+});
+ACH_CATS.tour = 'World Tour';
+Object.assign(ACH_CAT, { statusApplied: 'combat', regicides: 'combat', ascensions: 'mastery', champions: 'mastery', championWins: 'mastery', unlocks: 'mastery', locations: 'tour', partyGames: 'tour', season4Tier: 'tour', season3Tier: 'dedication' });
+// 15.0 daily quests (S). stat = the main.js match-stat key (this.ms) they read.
+Object.assign(QUESTS, {
+  statuses: { text: 'Inflict 5 status effects', goal: 5, reward: 90, stat: 'statuses' },
+  regicide: { text: 'Land a hit on the boss King', goal: 1, reward: 100, stat: 'kingHits' },
+  ascend:   { text: 'Ascend a piece', goal: 1, reward: 110, stat: 'ascended' },
+  pawnline: { text: 'Promote a pawn to Veteran', goal: 1, reward: 90, stat: 'veteran' },
+});

@@ -46,13 +46,17 @@ export class CamDirector {
   plan(box, o = {}) {
     const r = this.r, { w, h } = this.view(), m = o.m ?? 1.3, close = r.defaultZoom();
     const bx0 = box.x0 - m, bx1 = box.x1 + 1 + m, by0 = box.y0 - m, by1 = box.y1 + 1 + m, bw = bx1 - bx0, bh = by1 - by0;
-    const zd = clampN(Math.min(close, w / bw, h / bh), r.fitZoom, r.maxZ);
+    // R 15.0: never zoom out past the current level's floor (8x8 level: at most 0.8x; board level: the whole board)
+    const lo = r.zoomFloor ? r.zoomFloor() : r.fitZoom;
+    const zd = clampN(Math.min(close, w / bw, h / bh), lo, r.maxZ);
     const cur = o.cur || this.tgt();
-    let z = cur.z >= zd * 0.8 && cur.z <= zd * 1.25 && w / cur.z >= bw && h / cur.z >= bh ? cur.z : zd;
+    let z = cur.z >= zd * 0.8 && cur.z <= zd * 1.25 && cur.z >= lo * 0.98 && w / cur.z >= bw && h / cur.z >= bh ? cur.z : zd;
     if (o.push) z = Math.min(r.maxZ, z * o.push);
     const hw = w / z / 2, hh = h / z / 2;
-    const cx = bw >= hw * 2 ? (bx0 + bx1) / 2 : clampN(cur.x, bx1 - hw, bx0 + hw);
-    const cy = bh >= hh * 2 ? (by0 + by1) / 2 : clampN(cur.y, by1 - hh, by0 + hh);
+    let cx = bw >= hw * 2 ? (bx0 + bx1) / 2 : clampN(cur.x, bx1 - hw, bx0 + hw);
+    let cy = bh >= hh * 2 ? (by0 + by1) / 2 : clampN(cur.y, by1 - hh, by0 + hh);
+    // a box wider than the view at this level: keep the actor at least a tile inside the frame
+    const k = o.keep; if (k) { if (bw >= hw * 2) cx = clampN(cx, k.x + 1.5 - hw, k.x - 0.5 + hw); if (bh >= hh * 2) cy = clampN(cy, k.y + 1.5 - hh, k.y - 0.5 + hh); }
     return { x: cx, y: cy, z };
   }
   // ------------------------------------------------------------------ motion
@@ -126,7 +130,8 @@ export class CamDirector {
     const b = this.box ? { x0: Math.min(this.box.x0, box.x0), y0: Math.min(this.box.y0, box.y0), x1: Math.max(this.box.x1, box.x1), y1: Math.max(this.box.y1, box.y1) } : { ...box };
     this.box = b;
     // a push-in zooms about the un-pushed framing's centre, so the zoom back at impact is a pure zoom (no sideways whip)
-    const p = this.plan(b), z = o.push && !this.r.reduced ? Math.min(this.r.maxZ, p.z * o.push) : p.z;
+    const ad = actor != null ? this.r.disp.get(actor) : null;
+    const p = this.plan(b, ad ? { keep: { x: ad.tx, y: ad.ty } } : {}), z = o.push && !this.r.reduced ? Math.min(this.r.maxZ, p.z * o.push) : p.z;
     return this.glide(p.x, p.y, z, { actor, kind: o.hitsMe ? 'mine' : 'act', beat: true, quick: o.quick });
   }
   // A short look at one tile (soul, boss arrival) that keeps the current turn's framing logic.

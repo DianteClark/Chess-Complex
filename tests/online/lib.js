@@ -152,6 +152,7 @@ async function clientJoin(run, label, code, { expect = 'lobby' } = {}) {
 }
 async function startMatch(run, host, { bots = 0, clients = [] } = {}) {
   for (let i = 0; i < bots; i++) await tap(host, '[data-act="add-bot"]');
+  await readyAll(host, clients); // 15.0 (N): party members ready up before the leader can start
   await tap(host, '#btn-start-host');
   const all = [host, ...clients];
   for (const p of all) await p.waitForFunction(() => window.__cc.game.s && document.querySelector('.screen.active').id === 's-game', null, { timeout: 8000 });
@@ -159,6 +160,15 @@ async function startMatch(run, host, { bots = 0, clients = [] } = {}) {
   await sleep(3200); // intro / contenders
 }
 async function clientPid(c) { return c.evaluate(() => window.__cc.session.myPid); }
+// 15.0 (N): tap Ready Up on every member that is in the party lobby and not ready yet, then wait for the leader's Start.
+async function readyAll(host, clients) {
+  for (const c of clients) {
+    if (c.isClosed()) continue;
+    const st = await c.evaluate(() => { const b = document.querySelector('#btn-ready'); const s = window.__cc.session; return { btn: !!b && !b.classList.contains('hidden') && !b.disabled, ready: !!(s && s.amReady) }; });
+    if (st.btn && !st.ready) await tap(c, '#btn-ready');
+  }
+  await waitFor(host, () => !document.querySelector('#btn-start-host').disabled, null, 5000);
+}
 
 // Is the match advancing on page p? Returns delta turnNo over ms.
 async function advancing(p, ms = 4000) {
@@ -172,4 +182,4 @@ async function waitFor(p, fn, arg, ms = 10000) {
 const waitResults = (p, ms = 12000) => waitFor(p, () => !document.querySelector('#m-results').classList.contains('hidden'), null, ms);
 const waitDead = (p, ms = 6000) => waitFor(p, () => !document.querySelector('#m-dead').classList.contains('hidden'), null, ms);
 
-module.exports = { protectHumans, chromium, Run, sleep, tap, visible, view, autoplay, hostKill, killAllExcept, pids, hostLobby, clientJoin, startMatch, clientPid, advancing, waitFor, waitResults, waitDead };
+module.exports = { protectHumans, chromium, Run, sleep, tap, visible, view, autoplay, hostKill, killAllExcept, pids, hostLobby, clientJoin, startMatch, clientPid, advancing, waitFor, waitResults, waitDead, readyAll };

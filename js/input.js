@@ -24,8 +24,8 @@ export function unitAt(r, s, wx, wy, tol = 0) {
   for (const u of s.units) {
     if (!u.alive) continue;
     const d = r.disp && r.disp.get(u.id); const ux = d ? d.x : u.x, uy = d ? d.y : u.y;
-    const BS = u.boss ? 1.5 : u.role === 'mite' ? 0.7 : 1;
-    const base = uy + 0.86, top = base + (PIECE_TOP[pieceKind(u)] || -1) * 0.92 * BS - (d && d.lift || 0);
+    const BS = r.scaleOf ? r.scaleOf(u) : u.boss ? 1.5 : u.role === 'mite' ? 0.7 : 1; // R 15.0: same scale as drawn (boss King 1.22)
+    const base = uy + 0.86, top = base + (PIECE_TOP[pieceKind(u, s)] || -1) * 0.92 * BS - (d && d.lift || 0);
     // silhouette: full body width below, a narrower head in the top third (that is the part that pokes into the tile above)
     const hw = (wy < top + (base - top) * 0.33 ? 0.24 : 0.36) * BS + tol;
     const inBody = wx >= ux + 0.5 - hw && wx <= ux + 0.5 + hw && wy >= top - tol && wy <= base + 0.1;

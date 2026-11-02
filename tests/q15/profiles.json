@@ -1,0 +1,190 @@
+{
+ "v103": {
+  "name": "Veteran",
+  "build": {
+   "preset": null,
+   "pts": {
+    "hp": 2,
+    "atk": 4,
+    "def": 1,
+    "spd": 3
+   },
+   "passive": "bastion",
+   "equips": {
+    "pawn": "phalanx",
+    "knight": "outflank",
+    "bishop": "consecrate",
+    "rook": "bombard",
+    "queen": "gravity"
+   }
+  },
+  "skin": "ivory",
+  "owned": [
+   "ivory",
+   "obsidian",
+   "ember"
+  ],
+  "marks": 2750,
+  "played": [
+   "royale",
+   "mirror",
+   "gauntlet"
+  ],
+  "wins": 31,
+  "games": 120,
+  "kills": 240,
+  "board": "hall",
+  "ownedBoards": [
+   "hall"
+  ],
+  "finisher": "shatter",
+  "ownedFinishers": [
+   "shatter"
+  ],
+  "xp": 400,
+  "level": 22,
+  "botLevel": "hard",
+  "quests": null,
+  "bestAttune": 22,
+  "crowns": 9,
+  "tutorial": [
+   "basics",
+   "evolve"
+  ],
+  "discovered": [
+   "crown"
+  ],
+  "mode": "mirror",
+  "title": "Castellan",
+  "seenReveal10": true,
+  "trail": "none",
+  "stats": {
+   "games": 120,
+   "wins": 31,
+   "kills": 240,
+   "crowns": 9,
+   "queens": 0,
+   "shardsTotal": 0,
+   "ults": 0,
+   "hollows": 0,
+   "streak": 0,
+   "bestStreak": 0,
+   "hardWins": 0,
+   "flawless": 0,
+   "blitzWins": 0,
+   "duelWins": 0,
+   "dailyDays": 0,
+   "squadWins": 0,
+   "siegeWins": 0,
+   "bestWave": 0,
+   "revives": 0,
+   "colossi": 0,
+   "topMastery": 0,
+   "dmgTotal": 0
+  },
+  "mastery": {
+   "pawn": 0,
+   "knight": 0,
+   "bishop": 0,
+   "rook": 0,
+   "queen": 0,
+   "king": 0,
+   "veteran": 0,
+   "champion": 0
+  },
+  "pastSeasons": [],
+  "season": {
+   "id": 4,
+   "xp": 4100,
+   "tier": 0,
+   "pending": [],
+   "shown": 0
+  },
+  "achievements": [],
+  "titles": [],
+  "daily": {
+   "date": "",
+   "best": 0,
+   "days": []
+  },
+  "login": {
+   "last": "",
+   "streak": 0,
+   "best": 0,
+   "claimed": ""
+  },
+  "modesPlayed": [],
+  "modesWon": [],
+  "collections": [],
+  "ownedTrails": [
+   "none"
+  ],
+  "ownedEmotes": [
+   "basic"
+  ],
+  "wishlist": [],
+  "showcase": [],
+  "seenItems": []
+ },
+ "v50": {
+  "name": "Old5",
+  "build": {
+   "preset": "tank",
+   "pts": {
+    "hp": 4,
+    "atk": 2,
+    "def": 2,
+    "spd": 2
+   },
+   "passive": "laststand",
+   "equips": {
+    "pawn": "sprint",
+    "knight": "trample",
+    "bishop": "sanctuary",
+    "rook": "rampart",
+    "queen": "execute"
+   }
+  },
+  "skin": "ivory",
+  "owned": [
+   "ivory",
+   "obsidian"
+  ],
+  "marks": 640,
+  "played": [
+   "royale",
+   "siege"
+  ],
+  "wins": 3,
+  "games": 20,
+  "kills": 15,
+  "board": "hall",
+  "ownedBoards": [
+   "hall"
+  ],
+  "finisher": "shatter",
+  "ownedFinishers": [
+   "shatter"
+  ],
+  "xp": 50,
+  "level": 6,
+  "botLevel": "normal",
+  "quests": null,
+  "bestAttune": 4,
+  "crowns": 1,
+  "tutorial": [],
+  "discovered": [],
+  "mode": "siege"
+ },
+ "broken": {
+  "name": 42,
+  "build": "x",
+  "marks": "lots",
+  "owned": null,
+  "mode": "__proto__",
+  "unlocked": "all",
+  "season": {
+   "xp": -5
+  }
+ }
+}

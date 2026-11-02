@@ -13,11 +13,13 @@ import { FX } from './fx.js';
 import { sfx, playNamed, unlockAudio, settings, saveSettings, haptic } from './audio.js';
 Object.assign(settings, Object.assign({ motion: !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches), onetap: false, quality: 'auto', cb: false, bigtext: false }, settings));
 import { music } from './music.js';
-import { director } from './announcer.js';
+import { director, STATUS, hasStatus, statusList, statusChips, statusGlossary, STATUS_CALL, locationInfo, loadLocations, compass, ASCENDED } from './announcer.js';
 import { initScene, sequelReveal, showroom, modeArt, newsFrom } from './menus.js';
+import * as F from './front15.js'; // F 15.0: title rank, profile editor, grouped Play, build slots + unlocks, location wheel
 import { GameHost, openServer, openClient, makeCode } from './net.js';
 import { chat, hostCheck as chatHostCheck, BOT_LINES } from './chat.js';
 import { voice } from './voice.js';
+import * as party from './party.js'; // 15.0 (N): parties that survive matches
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -63,6 +65,7 @@ function normalizeProfile(d) {
   if (p.daily && (typeof p.daily !== 'object' || !Array.isArray(p.daily.days))) p.daily = null;
   ensureProgress(p); ensureStore(p);
   if (!own(TRAILS, p.trail)) p.trail = 'none';
+  F.normalizeFront(p, d); // F 15.0: avatar, banner, build slots, unlocked
   return p;
 }
 profile = normalizeProfile(profile);
@@ -120,6 +123,7 @@ function renderProfile() {
   else if (np) np.remove();
   $('#t-lvl').textContent = profile.level; $('#t-title').textContent = profile.title || titleFor(profile.level);
   $('#t-xp').style.width = Math.min(100, (profile.xp / xpForLevel(profile.level)) * 100) + '%';
+  F.renderTitle(); // F 15.0: avatar chip, XP numbers, XP gain replay
 }
 function countUp(el, from, to, dur = 900, tick = false) {
   const t0 = performance.now();
@@ -153,7 +157,7 @@ function go(name) {
   if (name === 'loadout') { delete $('#sr-bars').dataset.on; renderLoadout(); }
   SUI.onScreen(name);
   if (name === 'armory') renderArmory();
-  if (name === 'profile') SUI.renderProfileScreen();
+  if (name === 'profile') { SUI.renderProfileScreen(); F.decorateProfile(); }
   if (name === 'title') setTimeout(() => { if (screen === 'title') SUI.maybeLogin(); }, 900);
   if (name === 'play') renderPlay();
   if (name === 'path') renderPath();
@@ -180,9 +184,9 @@ const PRESET_ART = { bruiser: ['rook', 'ember'], scout: ['knight', 'jade'], tank
 const pieceStat = (pc, k, pts = profile.build.pts) => { const p = PIECES[pc]; return k === 'def' ? Math.round(p.def + pts.def * STAT_GAIN.def) : p[k] + pts[k] * STAT_GAIN[k]; };
 const statMax = (k) => Math.max(...PIECE_ORDER.map((pc) => pieceStat(pc, k, { hp: STAT_POINTS, atk: STAT_POINTS, def: STAT_POINTS, spd: STAT_POINTS })));
 function renderLoadout() {
-  if (!PIECE_ORDER.includes(loPiece)) loPiece = 'pawn';
+  if (!F.buildPieces().includes(loPiece)) loPiece = 'pawn';
   const skin = SKINS[profile.skin] ? profile.skin : 'ivory';
-  $('#in-name').value = profile.name;
+  const baseOf = (pc) => (PIECE_ORDER.includes(pc) ? pc : 'pawn'); // F 15.0: pawn-line pieces sit under the Pawn chip
   // showroom
   showroom.attach($('#sr-canvas'), () => screen, settings); showroom.set(loPiece, skin);
   $('#sr-name').textContent = PIECES[loPiece].name;
@@ -199,30 +203,39 @@ function renderLoadout() {
     if (from !== tot) countUp(bEl, from, tot, fresh ? 700 : 350);
     row.title = `${STAT_NAME[k]}: ${base} base + ${tot - base} from your points`;
   }
-  const chips = PIECE_ORDER.map((pc) => `<button class="srp ${pc === loPiece ? 'on' : ''}" data-lopiece="${pc}" role="tab" aria-selected="${pc === loPiece}" aria-label="${PIECES[pc].name}"><img src="${pieceIcon(pc, skin, null, 40)}" alt=""><span>${PIECES[pc].name}</span></button>`).join('');
+  const chips = PIECE_ORDER.map((pc) => `<button class="srp ${pc === baseOf(loPiece) ? 'on' : ''}" data-lopiece="${pc}" role="tab" aria-selected="${pc === baseOf(loPiece)}" aria-label="${PIECES[pc].name}"><img src="${pieceIcon(pc, skin, null, 40)}" alt=""><span>${PIECES[pc].name}</span></button>`).join('');
   $('#sr-pick').innerHTML = chips;
-  // presets
-  $('#presets').innerHTML = Object.entries(PRESETS).map(([k, p]) => {
-    const art = PRESET_ART[k] || ['pawn', skin];
-    return `<button class="preset ${profile.build.preset === k ? 'on' : ''}" data-preset="${k}"><img class="pa" src="${pieceIcon(art[0], SKINS[art[1]] ? art[1] : skin, null, 64)}" alt=""><b>${p.name}</b><span>${p.blurb}</span><div class="pmini">${STAT_KEYS.map((s) => `<i style="--c:${STAT_COL[s]};--v:${p.pts[s] / 5}"></i>`).join('')}</div>${profile.build.preset === k ? '<svg class="pcheck"><use href="#m-check"/></svg>' : ''}</button>`;
-  }).join('');
+  // F 15.0: pawn line ribbon (Pawn -> Veteran -> Champion) under the turntable
+  { let pl = $('#sr-line'); if (!pl) { pl = document.createElement('div'); pl.id = 'sr-line'; $('#sr-pick').after(pl); } pl.innerHTML = F.pawnLineHTML(loPiece, skin); pl.classList.toggle('hidden', !pl.innerHTML); }
+  // presets + the Custom card with 3 named build slots (F 15.0)
+  $('#presets').innerHTML = F.presetsHTML(skin, PRESET_ART, STAT_KEYS, STAT_COL);
   const left = STAT_POINTS - ptsUsed();
-  $('#pts-left').textContent = `${left} point${left === 1 ? '' : 's'} left${profile.build.preset ? '' : ' - Custom'}`;
+  $('#pts-left').textContent = `${left} point${left === 1 ? '' : 's'} left${profile.slot >= 0 && profile.slots[profile.slot] ? ' - ' + profile.slots[profile.slot].name : profile.build.preset ? '' : ' - Custom'}`;
   $('#stat-alloc').innerHTML = STAT_KEYS.map((k) => {
     const v = profile.build.pts[k];
     return `<div class="alloc"><b><svg style="fill:${STAT_COL[k]}"><use href="#${STAT_ICO[k]}"/></svg>${k.toUpperCase()}</b><div class="pips" style="--c:${STAT_COL[k]}">${Array.from({ length: STAT_POINTS }, (_, i) => `<i class="${i < v ? 'on' : ''}"></i>`).join('')}</div><button class="step" data-stat="${k}" data-d="-1" aria-label="Less ${STAT_NAME[k]}">-</button><button class="step" data-stat="${k}" data-d="1" aria-label="More ${STAT_NAME[k]}">+</button></div>`;
   }).join('');
   $('#stat-preview').innerHTML = PIECE_ORDER.map((pc) => `<button class="sp ${pc === loPiece ? 'on' : ''}" data-lopiece="${pc}"><img src="${pieceIcon(pc, skin, null, 48)}" alt=""><div>HP <b>${pieceStat(pc, 'hp')}</b><br>ATK <b>${pieceStat(pc, 'atk')}</b><br>DEF <b>${pieceStat(pc, 'def')}</b><br>SPD <b>${pieceStat(pc, 'spd')}</b></div></button>`).join('');
-  $('#passives').innerHTML = Object.entries(PASSIVES).map(([k, p]) => `<button class="choice ${profile.build.passive === k ? 'on' : ''}" data-passive="${k}"><i class="dot"></i><div><b>${p.name}</b><span>${p.desc}</span></div></button>`).join('');
-  // abilities for the piece on the turntable
-  const p = PIECES[loPiece], sig = ABILITIES[p.sig];
+  $('#passives').innerHTML = F.passivesHTML(); // F 15.0: locked base abilities show their Marks price + Unlock
+  // abilities for the piece on the turntable (F 15.0: locks, signature + ultimate, Ascension preview)
+  const p = PIECES[loPiece], sig = ABILITIES[p.sig], ult = p.ult && ABILITIES[p.ult];
+  const dia = (pc, id, sz) => { try { return diagram(pc, id, sz, skin); } catch { return pieceIcon(pc, skin, null, sz); } };
+  const eqPc = p.equips && p.equips.length ? loPiece : (p.equipFrom && PIECES[p.equipFrom] ? p.equipFrom : loPiece); // pawn line keeps the Pawn's ability
+  const eqs = (PIECES[eqPc].equips || []).filter((e) => ABILITIES[e]);
   $('#equips').innerHTML = `<div class="eq-tabs" role="tablist">${chips}</div>
-    <div class="eq-sigcard"><img class="dia" src="${diagram(loPiece, p.sig, 72, skin)}" alt=""><div><span class="tag t-sig">Signature</span><b>${sig.name}</b><p>${sig.desc}</p></div></div>
-    <div class="ab-grid">${p.equips.filter((e) => ABILITIES[e]).map((e) => { const A = ABILITIES[e], on = profile.build.equips[loPiece] === e; return `<button class="ab-card ${on ? 'on' : ''}" data-equip="${loPiece}:${e}" aria-pressed="${on}"><img class="dia" src="${diagram(loPiece, e, 96, skin)}" alt=""><b>${A.name}</b><span>${A.desc}</span><em><svg><use href="#m-clock"/></svg>Cooldown ${A.cd}</em>${on ? '<svg class="pcheck"><use href="#m-check"/></svg>' : ''}</button>`; }).join('')}</div>`;
+    <div class="eq-sigcard"><img class="dia" src="${dia(loPiece, p.sig, 72)}" alt=""><div><span class="tag t-sig">Signature</span><b>${sig ? sig.name : ''}</b><p>${sig ? sig.desc : ''}</p></div></div>
+    ${ult ? `<div class="eq-sigcard ult"><img class="dia" src="${pieceIcon(loPiece, skin, null, 72)}" alt=""><div><span class="tag t-ult">Ultimate</span><b>${ult.name}</b><p>${ult.desc}</p></div></div>` : ''}
+    ${F.ascHTML(loPiece, skin)}
+    ${eqPc !== loPiece ? `<p class="hint">The ${p.name} keeps the ${PIECES[eqPc].name}'s equipped ability. Changing it here changes it for the ${PIECES[eqPc].name} too.</p>` : ''}
+    ${eqs.length ? `<div class="ab-grid">${eqs.map((e) => { const A = ABILITIES[e], on = profile.build.equips[eqPc] === e, lk = F.equipLocked(e); return `<div class="ab-wrap ${lk ? 'locked' : ''}"><button class="ab-card ${on ? 'on' : ''}" data-equip="${eqPc}:${e}" aria-pressed="${on}" ${lk ? 'aria-disabled="true"' : ''}><img class="dia" src="${dia(eqPc, e, 96)}" alt=""><b>${A.name}</b><span>${A.desc}</span><em><svg><use href="#m-clock"/></svg>Cooldown ${A.cd}</em>${on ? '<svg class="pcheck"><use href="#m-check"/></svg>' : ''}</button>${lk ? F.lockHTML('ability', e) : ''}</div>`; }).join('')}</div>` : '<p class="hint">This piece has no equippable abilities.</p>'}`;
 }
 function onLoadoutClick(e) {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.lopiece) { if (b.dataset.lopiece !== loPiece) { loPiece = b.dataset.lopiece; sfx.tap(); renderLoadout(); } return; }
+  // F 15.0: unlocks, build slots, and locked choices
+  if (b.dataset.unlock) { if (F.tryUnlock(b)) { save(); renderLoadout(); } return; }
+  { const r = F.onBuildClick(b); if (r === 'nosave') return; if (r) { save(); renderLoadout(); return; } }
+  if ((b.dataset.passive && F.passiveLocked(b.dataset.passive)) || (b.dataset.equip && F.equipLocked(b.dataset.equip.split(':')[1]))) { sfx.error(); const w = b.parentElement.querySelector('.lk-buy'); if (w) { w.classList.remove('nudge'); void w.offsetWidth; w.classList.add('nudge'); } toast('Unlock it with Marks first'); return; }
   if (b.dataset.preset) { const p = PRESETS[b.dataset.preset]; profile.build.preset = b.dataset.preset; profile.build.pts = { ...p.pts }; profile.build.passive = p.passive; sfx.select(); }
   else if (b.dataset.stat) {
     const k = b.dataset.stat, d = +b.dataset.d, v = profile.build.pts[k] + d;
@@ -231,7 +244,8 @@ function onLoadoutClick(e) {
   } else if (b.dataset.passive) { profile.build.passive = b.dataset.passive; profile.build.preset = null; sfx.select(); }
   else if (b.dataset.equip) { const [pc, eq] = b.dataset.equip.split(':'); profile.build.equips[pc] = eq; sfx.select(); }
   else return;
-  for (const [k, p] of Object.entries(PRESETS)) if (p.passive === profile.build.passive && ['hp', 'atk', 'def', 'spd'].every((s) => p.pts[s] === profile.build.pts[s])) profile.build.preset = k;
+  if (profile.slot < 0) for (const [k, p] of Object.entries(PRESETS)) if (p.passive === profile.build.passive && ['hp', 'atk', 'def', 'spd'].every((s) => p.pts[s] === profile.build.pts[s])) profile.build.preset = k;
+  if (!b.dataset.preset) F.afterEdit(); // F 15.0: edits land in the selected Custom slot (or the first empty one)
   save(); renderLoadout();
 }
 
@@ -243,21 +257,26 @@ function reveal(kind, id) { SUI.revealItems([[kind, id]]); }
 function renderPlay() {
   // 10.0 (A8): illustrated mode cards (art, glyph, tagline, player count) in a snap carousel, plus a detail strip.
   const dailyDone = profile.daily.date === today();
+  // F 15.0: grouped carousel (Competitive, Co-op, Party, Challenge, Custom), each group led by an illustrated header
+  // card; the tab strip above follows the scroll. Every mode card stays in #modes.
   const modesEl = $('#modes'), prevScroll = modesEl.scrollLeft;
-  modesEl.innerHTML = Object.entries(MODES).map(([k, m], i) => {
+  const modeCard = (k, m, i) => {
     const a = modeArt(k, m, i), on = profile.mode === k;
-    const chip = k === 'daily' && !dailyDone ? '<span class="chip">TODAY</span>' : m.icon ? '<span class="chip new">NEW</span>' : '';
+    const chip = k === 'daily' && !dailyDone ? '<span class="chip">TODAY</span>' : '';
     return `<button class="mode ${on ? 'on' : ''}" data-mode="${k}" aria-pressed="${on}" style="--m1:${a.c1};--m2:${a.c2}"><span class="m-art"><img class="mi" src="${pieceIcon(a.piece, a.skin, null, 120)}" alt=""></span><span class="m-glyph"><svg><use href="#${a.icon}"/></svg></span>${chip}<b>${m.name}</b><p>${esc(a.tag)}</p><span class="m-who">${a.who}</span>${on ? '<svg class="pcheck"><use href="#m-check"/></svg>' : ''}</button>`;
-  }).join('');
+  };
+  modesEl.innerHTML = F.modesHTML(modeCard);
+  $('#g-tabs').innerHTML = F.tabsHTML(F.groupOfMode(profile.mode)); F.bindPlay(modesEl, $('#g-tabs'));
   modesEl.scrollLeft = prevScroll;
   const cur = modesEl.querySelector('.mode.on');
-  if (cur && !renderPlay.seen) { renderPlay.seen = true; requestAnimationFrame(() => cur.scrollIntoView({ inline: 'center', block: 'nearest' })); }
+  if (cur && !renderPlay.seen) { renderPlay.seen = true; requestAnimationFrame(() => { const g = cur.closest('.m-group'); modesEl.scrollLeft = Math.max(0, (g && g.firstElementChild === cur.previousElementSibling ? g.offsetLeft : cur.offsetLeft - (modesEl.clientWidth - cur.offsetWidth) / 2) - 16); }); }
   {
     const m = MODES[profile.mode] || MODES.royale, a = modeArt(profile.mode, m), facts = [a.who];
     if (m.turnMs) facts.push(`${Math.round(m.turnMs / 1000)}s turns`);
     if (m.teams) facts.push(`Teams of ${m.teams}`);
     if (m.siege) facts.push(m.siege.gauntlet ? `${m.siege.waves} bosses` : `${m.siege.waves} waves`); else if (m.storm && m.storm.first < 900) facts.push(`Storm from round ${m.storm.first}`);
-    $('#mode-detail').innerHTML = `<div class="md-glyph" style="--m1:${a.c1};--m2:${a.c2}"><svg><use href="#${a.icon}"/></svg></div><div class="md-body"><b>${m.name}</b><p>${m.desc}</p><div class="md-facts">${facts.map((f) => `<span>${f}</span>`).join('')}</div></div>`;
+    $('#mode-detail').innerHTML = `<div class="md-glyph" style="--m1:${a.c1};--m2:${a.c2}"><svg><use href="#${a.icon}"/></svg></div><div class="md-body"><b>${m.name}</b><p>${m.desc}</p><div class="md-facts">${facts.map((f) => `<span>${f}</span>`).join('')}</div></div>${F.locationHTML(profile.mode, profile.mode === 'daily' ? dailyLoadout().seed : null)}`;
+    const md = $('#mode-detail'); if (renderPlay.lastMode !== profile.mode) { renderPlay.lastMode = profile.mode; md.classList.remove('swap'); void md.offsetWidth; md.classList.add('swap'); }
   }
   const M = profile.mode;
   const rb = $('#in-bots'), lb = $('#opt-bots .lbl');
@@ -283,7 +302,7 @@ function dailyLoadout() {
 function renderSoloMini() {
   const b = profile.build;
   $$('#seg-diff button').forEach((x) => x.classList.toggle('on', x.dataset.diff === profile.botLevel));
-  $('#solo-loadout').innerHTML = `<img src="${pieceIcon('pawn', profile.skin, '#d6b05c', 64)}" alt=""><div class="lm-t"><small>Your loadout</small><b>${esc(profile.name)}</b><span>${b.preset ? PRESETS[b.preset].name : 'Custom'} build - ${PASSIVES[b.passive].name} - ${SKINS[profile.skin].name} - ${FINISHERS[profile.finisher].name}</span></div><svg class="lm-go"><use href="#m-chev"/></svg>`;
+  $('#solo-loadout').innerHTML = `<img src="${pieceIcon('pawn', profile.skin, '#d6b05c', 64)}" alt=""><div class="lm-t"><small>Your loadout</small><b>${esc(profile.name)}</b><span>${profile.slot >= 0 && profile.slots[profile.slot] ? esc(profile.slots[profile.slot].name) : b.preset ? PRESETS[b.preset].name : 'Custom'} build - ${PASSIVES[b.passive].name} - ${SKINS[profile.skin].name} - ${FINISHERS[profile.finisher].name}</span></div><svg class="lm-go"><use href="#m-chev"/></svg>`;
 }
 
 // ---------- crown path ----------
@@ -391,9 +410,14 @@ function endSession() {
   if (tutorial) tutorial.dead = true;
   tutorial = null; $('#coach').classList.add('hidden'); coachUI && coachUI.glow && coachUI.glow(null);
   if (!session) return;
+  // 15.0 (N): the leader always says goodbye, so members' lobbies clear at once (bug: they used to keep a dead lobby)
+  if (session.mode === 'host' && session.conns && !session.dead) { const why = session.started && session.host && !session.host.s.over ? 'ended' : 'closed'; for (const c of session.conns.values()) try { c.send({ t: 'bye', reason: why }); } catch {} }
+  session.dead = true;
   try { session.host && session.host.stop(); } catch {}
-  try { session.server && session.server.close(); } catch {}
+  { const srv = session.server, shut = () => { try { srv.close(); } catch {} }; if (srv) { if (location.search.includes('net=local')) shut(); else setTimeout(shut, 150); } } // let the goodbye flush
+  try { if (session.client && !session.byeReason) session.client.send({ t: 'part' }); } catch {} // a deliberate leave frees the seat at once
   try { session.client && session.client.close(); } catch {}
+  if (session.mode === 'client') party.clearMember(session);
   try { voice.stop(true); chat.clearMatch(); } catch {}
   session = null;
 }
@@ -460,7 +484,8 @@ function startSolo(bots = null, modeArg = null) {
 function lobbyHTML(players, host, gm = 'royale', maxP = 0) {
   const M = MODES[gm] || {}, T = M.teams;
   const col = (i) => (T ? TEAM_COLORS[Math.floor(i / T) % 4] : (settings.cb ? CB_COLORS : PLAYER_COLORS)[i % 8]);
-  const cards = players.map((p, i) => `<li class="pcard ${p.pid === 'me' ? 'host' : ''} ${p.isBot ? 'bot' : ''}" data-pid="${esc(p.pid)}" style="--c:${col(i)};animation-delay:${i * 0.04}s">${T ? `<span class="team-tag">Team ${Math.floor(i / T) + 1}</span>` : M.siege || gm === 'siege' ? '<span class="team-tag">Ally</span>' : ''}<span class="pc-av"><img src="${pieceIcon('pawn', p.skin, null, 44)}" alt=""></span><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${p.pid === 'me' ? '<svg><use href="#m-crown"/></svg>Host' : p.isBot ? '<svg><use href="#m-bot"/></svg>Bot' : 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}" aria-label="Remove ${esc(p.name)}" title="Remove">&times;</button>` : ''}</li>`).join('');
+  const PM = { leader: 'pm-leader', ready: 'pm-ready', wait: 'pm-wait', results: 'pm-wait pm-results', away: 'pm-wait pm-away' }, PL = { ready: 'Ready', wait: 'Not ready', results: 'On results', away: 'Reconnecting' }; // 15.0 (N): party ready states
+  const cards = players.map((p, i) => `<li class="pcard ${p.pid === 'me' ? 'host' : ''} ${p.isBot ? 'bot' : ''} ${PM[p.st] || ''}" data-pid="${esc(p.pid)}" style="--c:${col(i)};animation-delay:${i * 0.04}s">${T ? `<span class="team-tag">Team ${Math.floor(i / T) + 1}</span>` : M.siege || gm === 'siege' ? '<span class="team-tag">Ally</span>' : ''}<span class="pc-av"><img src="${pieceIcon('pawn', p.skin, null, 44)}" alt=""></span><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${p.pid === 'me' ? '<svg><use href="#m-crown"/></svg>Leader' : p.isBot ? '<svg><use href="#m-bot"/></svg>Bot' : PL[p.st] || 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}" aria-label="Remove ${esc(p.name)}" title="Remove">&times;</button>` : ''}</li>`).join('');
   const open = Math.max(0, Math.min(8, maxP) - players.length);
   return cards + Array.from({ length: open }, (_, j) => { const i = players.length + j; return `<div class="pcard open" style="--c:${col(i)}"${T ? ` data-team="Team ${Math.floor(i / T) + 1}"` : ''}><span class="pc-av"><svg><use href="#m-plus"/></svg></span><b>Open seat</b><em>${host ? 'Waiting' : ''}</em></div>`; }).join('');
 }
@@ -478,8 +503,11 @@ function startHostLobby() {
     $('#host-lobby').innerHTML = lobbyHTML(sess.players, true, sess.gameMode, sess.maxP);
     $('#lobby-count').textContent = `${MODES[sess.gameMode].short} - ${sess.players.length}/${sess.maxP}`;
     $('#btn-start-host').disabled = sess.players.length < Math.max(2, MODES[sess.gameMode].players[0]);
-    const pub = sess.players.map(({ pid, name, skin, isBot, title }) => ({ pid, name, skin, isBot, title }));
-    for (const c of sess.conns.values()) c.send({ t: 'lobby', players: pub, code, mode: sess.gameMode });
+    const pub = sess.players.map(({ pid, name, skin, isBot, title }) => ({ pid, name, skin, isBot, title, st: party.memberState(sess, { pid, isBot }) }));
+    const pinfo = party.pub(sess);
+    for (const c of sess.conns.values()) c.send({ t: 'lobby', players: pub, code, mode: sess.gameMode, party: pinfo });
+    if (!sess.started) $('#host-lobby').innerHTML = lobbyHTML(pub, true, sess.gameMode, sess.maxP);
+    party.renderHost(sess); // 15.0 (N): party options + Start gated on everyone being ready
     voice.hostSync(sess); voice.changed();
   };
   sess.renderLobby = renderLobby;
@@ -493,16 +521,20 @@ function startHostLobby() {
     },
     onConn: (conn) => {
       conn.onData((m) => {
-        if (!m || typeof m !== 'object') return;
+        if (!m || typeof m !== 'object' || sess.dead) return;
         if (m.t === 'join') {
           if (conn.pid) return;
           const tok = typeof m.token === 'string' ? m.token.slice(0, 40) : '';
-          const back = tok && Object.entries(sess.tokens || {}).find(([pid, t]) => t === tok && !sess.conns.has(pid) && sess.players.some((p) => p.pid === pid));
+          // 15.0 (N): a member coming back with its token gets its seat back, even if the old link has not timed out yet
+          const back = tok && Object.entries(sess.tokens || {}).find(([pid, t]) => t === tok && sess.players.some((p) => p.pid === pid));
           if (back) {
-            const pid = back[0]; conn.pid = pid; sess.conns.set(pid, conn);
+            const pid = back[0], old = sess.conns.get(pid);
+            if (old && old !== conn) { old.replaced = true; try { old.close(); } catch {} }
+            conn.pid = pid; sess.conns.set(pid, conn); party.lobbyBack(sess, pid);
             conn.send({ t: 'welcome', pid }); voice.hostSync(sess);
-            if (sess.started && sess.host) { const u = sess.host.s.units.find((v) => v.pid === pid); if (u) u.bot = false; conn.send({ t: 'start', pid }); sess.host.publish([]); sess.host.schedule(); if (u) game.feed(`<b>${esc(u.name)}</b> reconnected`); }
-            else renderLobby();
+            const u = sess.started && sess.host && sess.host.s.units.find((v) => v.pid === pid);
+            if (u && !(sess.left && sess.left.has(pid))) { u.bot = false; conn.send({ t: 'start', pid, mid: sess.mid, resume: true }); sess.host.publish([]); sess.host.schedule(); if (!sess.host.s.over) game.feed(`<b>${esc(u.name)}</b> reconnected`); }
+            renderLobby();
             return;
           }
           if (sess.started || sess.players.length >= sess.maxP) { conn.send({ t: 'bye', reason: sess.started ? 'started' : 'full' }); setTimeout(() => conn.close(), 200); return; }
@@ -518,13 +550,14 @@ function startHostLobby() {
         else if (m.t === 'emote' && conn.pid) hostEmote(sess, conn.pid, m.k);
         else if (m.t === 'chat' && conn.pid) hostChat(sess, conn.pid, m);
         else if (m.t === 'vc' && conn.pid) voice.hostMsg(sess, conn.pid, m);
-        else if (m.t === 'leave' && conn.pid && sess.host) { conn.left = true; sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> forfeited - a bot takes over`); }
+        else if ((m.t === 'ready' || m.t === 'back' || m.t === 'part') && conn.pid) party.hostMsg(sess, conn, m);
+        else if (m.t === 'leave' && conn.pid && sess.host) { conn.left = true; (sess.left ||= new Set()).add(conn.pid); sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> forfeited - a bot takes over`); }
       });
       conn.onClose(() => {
-        if (!conn.pid) return;
+        if (!conn.pid || conn.replaced || sess.conns.get(conn.pid) !== conn || sess.dead) return; // 15.0 (N): a replaced link (member reconnected) is not a leave
         sess.conns.delete(conn.pid); voice.hostDrop(sess, conn.pid);
-        if (!sess.started) { sess.players = sess.players.filter((p) => p.pid !== conn.pid); renderLobby(); }
-        else if (sess.host && !conn.left) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u && u.alive && !sess.host.s.over) game.feed(`<b>${esc(u.name)}</b> disconnected - a bot takes over`); }
+        if (!sess.started) { if (party.lobbyDrop(sess, conn)) renderLobby(); else { party.dropMember(sess, conn.pid); sess.players = sess.players.filter((p) => p.pid !== conn.pid); renderLobby(); } } // 15.0 (N): a dropped member keeps the seat for a while
+        else if (sess.host && !(sess.left && sess.left.has(conn.pid))) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u && u.alive && !sess.host.s.over) game.feed(`<b>${esc(u.name)}</b> lost connection - a bot plays until they are back`); }
       });
     },
   });
@@ -544,39 +577,60 @@ function startHost() {
   sess.players = sess.players.filter((p) => p.isBot || p.pid === 'me' || sess.conns.has(p.pid));
   const minP = Math.max(2, MODES[sess.gameMode].players[0]);
   if (sess.players.length < minP) { toast(`${MODES[sess.gameMode].name} needs at least ${minP} players. Add bots to fill.`); sess.renderLobby(); return; }
-  sess.started = true;
+  { const st = party.canStart(sess); if (!st.ok) { toast(st.why); sfx.error(); sess.renderLobby(); return; } } // 15.0 (N): members ready up first
+  sess.started = true; sess.left = new Set(); for (const c of sess.conns.values()) c.left = false;
   sess.players[0] = { ...me() };
-  sess.host = new GameHost(sess.players, (m) => { hostEmit(sess, m); botChatter(sess, m); }, { mode: sess.gameMode });
+  const mid = party.onStart(sess); matchKey = mid;
+  sess.host = new GameHost(sess.players, (m) => { hostEmit(sess, m); botChatter(sess, m); }, { mode: sess.gameMode, ...party.matchOpts(sess) });
   sess.send = (a) => sess.host.act('me', a);
-  for (const c of sess.conns.values()) c.send({ t: 'start', pid: c.pid });
+  for (const c of sess.conns.values()) c.send({ t: 'start', pid: c.pid, mid });
   game.enter();
   sess.host.start();
 }
 
+function drawJoinLobby(m) {
+  const M = MODES[m.mode] || MODES.royale;
+  $('#join-lobby-panel').classList.remove('hidden');
+  $('#join-lobby').innerHTML = lobbyHTML(Array.isArray(m.players) ? m.players : [], false, m.mode, (M.players || [2, 8])[1]);
+  $('#join-lobby-panel .lbl').textContent = `Party - ${M.name}`;
+}
 function joinGame() {
   const code = $('#in-code').value.trim().toUpperCase();
   const st = $('#join-status');
   if (code.length !== 5) { st.textContent = 'Codes are 5 characters.'; st.classList.add('err'); sfx.error(); return; }
   if (!window.Peer && !location.search.includes('net=local')) { st.textContent = 'Online play could not load. Check your connection and reload.'; st.classList.add('err'); return; }
-  endSession();
+  endSession(); party.resetJoin();
   st.textContent = 'Connecting...'; st.classList.remove('err');
   const sess = { mode: 'client', myPid: null, code };
   session = sess;
+  // 15.0 (N): the party is over for this member (leader left, kicked, full, connection lost): clear the lobby everywhere
+  const gone = (msg) => {
+    party.clearMember(sess); try { sess.client.close(); } catch {}
+    st.textContent = msg; st.classList.add('err');
+    if (screen === 'game') { toast(msg); if (game.s && !game.s.over && !game.resultsShown) game.showResults(true, 'hostleft'); }
+  };
   sess.client = openClient(code, {
-    onOpen: () => { st.textContent = 'Connected. Joining lobby...'; let tok = ''; try { tok = localStorage.getItem('cc_tok_' + code) || Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('cc_tok_' + code, tok); } catch {} sess.client.send({ token: tok, t: 'join', name: profile.name, title: profile.title, trail: profile.trail, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
+    // 15.0 (N): the link reconnects by itself (net.js); while it is down the host's bot plays this seat
+    onDrop: () => { if (session !== sess || sess.byeReason) return; party.netBanner('Connection lost. Reconnecting...'); if (screen === 'join') st.textContent = 'Connection lost. Reconnecting...'; },
+    onOpen: (again) => { if (session !== sess) return; if (!again) st.textContent = 'Connected. Joining lobby...'; let tok = ''; try { tok = localStorage.getItem('cc_tok_' + code) || Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('cc_tok_' + code, tok); } catch {} sess.client.send({ token: tok, t: 'join', name: profile.name, title: profile.title, trail: profile.trail, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
     onData: (m) => {
       if (session !== sess) return;
-      if (m.t === 'welcome') { sess.myPid = m.pid; st.textContent = 'In the lobby.'; sfx.select(); }
-      else if (m.t === 'lobby') { sess.lobby = Array.isArray(m.players) ? m.players : []; voice.changed(); $('#join-lobby-panel').classList.remove('hidden'); $('#join-lobby').innerHTML = lobbyHTML(m.players, false, m.mode, ((MODES[m.mode] || MODES.royale).players || [2, 8])[1]); $('#join-lobby-panel .lbl').textContent = `Lobby - ${(MODES[m.mode] || MODES.royale).name}`; }
-      else if (m.t === 'full' || m.t === 'bye') { sess.byeReason = m.reason || 'full'; st.textContent = { full: 'That lobby is full.', started: 'That match has already started.', kicked: 'The host removed you from the lobby.', ended: 'The host ended the match.' }[sess.byeReason] || 'Disconnected.'; st.classList.add('err'); $('#join-lobby-panel').classList.add('hidden'); $('#join-lobby').innerHTML = ''; if (screen === 'game') { toast(st.textContent); game.showResults(true, 'hostleft'); } }
-      else if (m.t === 'start') { sess.myPid = m.pid; matchKey = 'm' + Date.now(); game.enter(); }
-      else if (m.t === 'state' || m.t === 'emote' || m.t === 'chat') game.onMsg(m);
+      if (m.t === 'welcome') { const again = !!sess.myPid; sess.myPid = m.pid; party.netBanner(null); st.classList.remove('err'); st.textContent = 'In the lobby.'; if (again && screen === 'game') toast('Reconnected'); else if (!again) sfx.select(); party.renderMember(sess); }
+      else if (m.t === 'lobby') { sess.lobby = Array.isArray(m.players) ? m.players : []; voice.changed(); drawJoinLobby(m); party.onLobby(sess, m); }
+      else if (m.t === 'full' || m.t === 'bye') { if (sess.byeReason) return; sess.byeReason = m.reason || 'full'; gone({ full: 'That lobby is full.', started: 'That match has already started.', kicked: 'The host removed you from the lobby.', ended: 'The host ended the match.', closed: 'The party leader left, so the party has closed.' }[sess.byeReason] || 'Disconnected.'); }
+      else if (m.t === 'start') {
+        sess.myPid = m.pid; sess.benched = false; sess.amReady = false; party.netBanner(null);
+        if (m.resume && m.mid && m.mid === sess.mid && game.s && screen === 'game') return; // 15.0 (N): reconnected mid-match: carry on where we were
+        sess.mid = m.mid; matchKey = typeof m.mid === 'string' ? m.mid.slice(0, 24) : 'm' + Date.now(); game.enter();
+      }
+      else if (m.t === 'state') { if (!sess.benched) game.onMsg(m); } // back in the party lobby: the old match plays on without us
+      else if (m.t === 'emote' || m.t === 'chat') game.onMsg(m);
       else if (m.t === 'vc') voice.onMsg(m);
     },
-    onClose: () => {
-      if (session !== sess) return;
-      if (screen === 'game' && game.s && !game.s.over) { toast('The host left the match'); game.showResults(true, 'hostleft'); }
-      else if (screen === 'join' && !sess.byeReason) { st.textContent = 'Disconnected from host.'; st.classList.add('err'); $('#join-lobby-panel').classList.add('hidden'); }
+    onClose: () => { // gave up reconnecting
+      if (session !== sess || sess.byeReason) return;
+      sess.byeReason = 'lost';
+      gone(screen === 'game' && game.s && !game.s.over ? 'Lost connection to the host.' : 'Lost connection to the party.');
     },
     onError: (t) => {
       if (session !== sess) return;
@@ -613,6 +667,7 @@ const game = {
     const loopBody = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
       if (screen === 'game') { director.tick(); if (this.potmOn && this.potmR) this.potmR.frame(dt); else { this.r.frame(dt); if (this.r.loupe) TAP.drawLoupe(this.r); } this.tickTimer(); this.heartbeat(dt); }
+      else if (!this.r.asleep) { this.r.sleep(); if (this.potmR && this.potmR.sleep) this.potmR.sleep(); } // R 15.0: release the match's caches once on leaving
       SUI.frame(dt);
 
     };
@@ -636,6 +691,7 @@ const game = {
     // 10.2 (N): quick chat picker (js/chat.js) owns #emote-menu; voice (js/voice.js) adds the Talk button and lobby panels
     const names = () => { const n = {}; for (const p of (session && (session.players || session.lobby)) || []) n[p.pid] = p.name; if (this.s) for (const u of this.s.units) if (u.kind === 'player') n[u.pid] = u.name; return n; };
     chat.mount({ profile: () => profile, save, settings, saveSettings, activeEmotes, game: this, session: () => session, toast, sfx, director, voice });
+    party.mount({ session: () => session, profile: () => profile, save, toast, sfx, go: (n) => go(n), drawLobby: (m) => drawJoinLobby(m), rerender: () => { if (session && session.mode === 'host' && session.renderLobby && !session.started) session.renderLobby(); } }); // 15.0 (N)
     voice.mount({ session: () => session, toast, game: this, sfx, screen: () => screen, names, sys: (t) => chat.system(t), onChange: () => { if (!$('#emote-menu').classList.contains('hidden') && chat.tab === 'players') chat.render(); } });
     this.renderEmotes = () => chat.render();
     $('#h-portrait').parentElement.addEventListener('click', () => { const u = this.me; if (u) { this.r.recentre(u.x, u.y); sfx.tap(); } }); // R 10.3: recentre ends a manual override
@@ -643,7 +699,7 @@ const game = {
   },
   after(fn, ms) { const g = this.gen; return setTimeout(() => { if (g === this.gen) fn(); }, (ms || 0) + (this.evLag || 0)); }, // R 10.3: + evLag while handling a state's events
   enter() {
-    this.gen = (this.gen || 0) + 1;
+    this.gen = (this.gen || 0) + 1; F.stopWheel(); // F 15.0
     this.ms = { kills: 0, hollows: 0, ults: 0, crown: false, rook: false, queen: false, pieces: ["pawn"], revives: 0, colossi: 0 }; this.best = null; this.potmOn = false; this.minHp = 1; this.taken = {}; this.since = {}; this.killedBy = null; this.danger = false; this.r.danger = null; $('#btn-danger').classList.remove('on');
     this.r.reduced = settings.motion; this.r.setQuality(settings.quality); this.r.setCamMode(settings.cam); // R 10.3
     document.body.classList.toggle('bigtext', !!settings.bigtext);
@@ -665,9 +721,9 @@ const game = {
     const bot = $('.hud-bottom').getBoundingClientRect();
     const ub = $('#ult-btn').getBoundingClientRect();
     const side = bot.top < innerHeight * 0.5 && bot.left > innerWidth * 0.3; // landscape: HUD is a right-hand column
-    if (side) { this.r.setPad(top + 4, 4, Math.max(0, innerWidth - bot.left + 4)); $('#s-game').style.setProperty('--hb', '0px'); return; }
+    if (side) { this.r.setPad((director.bossOn ? Math.max(top, director.bossEl.getBoundingClientRect().bottom) : top) + 4, 4, Math.max(0, innerWidth - bot.left + 4)); $('#s-game').style.setProperty('--hb', '0px'); return; }
     const lowest = Math.min(bot.top, ub.top > 0 ? ub.top : bot.top);
-    this.r.setPad(top + 4, Math.max(0, innerHeight - lowest - 4));
+    this.r.setPad((director.bossOn ? Math.max(top, director.bossEl.getBoundingClientRect().bottom) : top) + 4,Math.max(0, innerHeight - lowest - 4));
     $('#s-game').style.setProperty('--hb', Math.round(innerHeight - bot.top) + 'px');
   },
   get me() { return this.s && session ? this.s.units.find((u) => u.pid === session.myPid) : null; },
@@ -717,22 +773,32 @@ const game = {
     if (first) {
       if (!tut) {
         this.showContenders();
-        this.after(() => s.siege ? this.banner('Hold the Line', `${s.siege.waves} waves. Survive together.`, 'cyan', { kicker: (MODES[s.mode] || {}).name, prio: 45, ttl: 4000 }) : this.banner('Round 1', s.teams ? 'Last team standing wins' : 'Last piece standing wins', '', { kicker: (MODES[s.mode] || {}).name, prio: 45, ttl: 4000 }), 2750);
-        if (s.mutator && s.mutator !== 'none' && MUTATORS[s.mutator]) { const list = s.mutator === 'chaos' && Array.isArray(s.mutators) ? s.mutators.map((k) => (MUTATORS[k] || {}).name).filter(Boolean).join(' + ') : ''; this.after(() => this.banner(MUTATORS[s.mutator].name, list || MUTATORS[s.mutator].desc, 'cyan', { kicker: 'Hazard', prio: 38, ttl: 6000 }), 3000); }
-        if (s.mirrorBuild && PASSIVES[s.mirrorBuild.passive]) this.after(() => this.banner('Mirror Match', `Everyone is ${PASSIVES[s.mirrorBuild.passive].name}`, 'cyan', { kicker: 'Same build for all', prio: 39, ttl: 6000 }), 3000);
+        // F 15.0: the location wheel spins after the contender reveal and lands on s.location; the opening banners wait for it
+        const wl = s.location ? F.wheelMs() + 900 : 0;
+        if (wl) this.after(() => F.locationIntro(this.s || s, { director, sfx }), 2700);
+        this.after(() => s.siege ? this.banner('Hold the Line', `${s.siege.waves} waves. Survive together.`, 'cyan', { kicker: (MODES[s.mode] || {}).name, prio: 45, ttl: 4000 }) : this.banner('Round 1', s.teams ? 'Last team standing wins' : 'Last piece standing wins', '', { kicker: (MODES[s.mode] || {}).name, prio: 45, ttl: 4000 }), 2750 + wl);
+        if (s.mutator && s.mutator !== 'none' && MUTATORS[s.mutator]) { const list = s.mutator === 'chaos' && Array.isArray(s.mutators) ? s.mutators.map((k) => (MUTATORS[k] || {}).name).filter(Boolean).join(' + ') : ''; this.after(() => this.banner(MUTATORS[s.mutator].name, list || MUTATORS[s.mutator].desc, 'cyan', { kicker: 'Hazard', prio: 38, ttl: 6000 }), 3000 + wl); }
+        if (s.mirrorBuild && PASSIVES[s.mirrorBuild.passive]) this.after(() => this.banner('Mirror Match', `Everyone is ${PASSIVES[s.mirrorBuild.passive].name}`, 'cyan', { kicker: 'Same build for all', prio: 39, ttl: 6000 }), 3000 + wl);
+        this.locIntro(s, ev); // D 15.0: location name + one line when the wheel lands
       }
       return;
     }
     if (!tut) this.checkDiscoveries(ev);
     if (!tut) this.tips(ev);
     for (const e of ev) {
+      if (!tut) this.hud15(e, s, myId); // D 15.0: status, boss King, crown telegraph, Ascension and pawn-line callouts
       if (e.e === 'dmg' && e.id === myId) { if (e.self) continue; const src = e.storm ? 'The storm' : e.meteor ? 'Meteors' : e.lava ? 'Lava' : e.trap ? 'A trap' : (unitById(s, e.src) || {}).name || 'Unknown'; this.taken[src] = (this.taken[src] || 0) + e.n; this.since[src] = (this.since[src] || 0) + e.n; }
       if (e.e === 'timeout' && e.id === myId) { toast('Time ran out - turn skipped'); sfx.error(); }
       if (e.e === 'turn' && e.id === myId) { const lines = Object.entries(this.since).sort((a, b) => b[1] - a[1]); if (lines.length) this.after(() => this.feed(`<span class="x">Since your last turn:</span> ${lines.map(([n, v]) => `<b>${esc(n)}</b> -${v}`).join(', ')}`), 600); this.since = {}; } // R 10.3: the camera director focuses my piece (and clears a manual override) when my turn plays
-      if (e.e === 'turn' && e.id === myId) this.after(() => { if (!tut) this.banner('Your Turn', 'Round ' + s.round, ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
+      if (e.e === 'turn' && e.id === myId) this.after(() => { if (!tut) this.banner('Your Turn', hasStatus(this.me, 'freeze') ? 'Frozen - attack only' : hasStatus(this.me, 'stun') ? 'Stunned - move only' : 'Round ' + s.round, ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
       if (e.e === 'storm') this.after(() => e.phase === 'crack' ? this.banner('The Storm Gathers', 'The outer ring collapses next round', 'red', { kicker: 'Storm', key: 'storm', prio: 48 }) : this.banner('Collapse', s.storm.ring >= STORM.maxRing ? 'Sudden death - everyone burns' : 'Stay inside the ring', 'red', { kicker: 'Storm', key: 'storm', prio: 52 }), 200);
-      if (e.e === 'crownSpawn') this.banner('The Crown', crownWhere(s), '', { kicker: 'Round ' + s.round, prio: 50 });
-      if (e.e === 'world' && !(e.kind === 'meteor' && e.phase === 'strike') && WORLD_EVENTS[e.kind]) { const W = WORLD_EVENTS[e.kind]; const mine = e.kind === 'bounty' && e.id === myId; this.after(() => this.banner(mine ? 'A Price On Your Head' : W.name, mine ? 'Whoever takes you gets 3 shards' : W.desc, e.kind === 'meteor' || e.kind === 'bloodMoon' || mine ? 'red' : 'cyan', { kicker: 'World event', key: 'world', prio: mine ? 58 : 50, tier: mine ? 2 : 1 }), 300); }
+      if (e.e === 'crownSpawn') this.banner(this.juice.crownWarn ? 'The Crown Has Landed' : 'The Crown', this.juice.crownWarn ? crownWhere(s).replace('Has appeared', 'Claim it') : crownWhere(s), '', { kicker: 'Round ' + s.round, prio: 50, key: 'crown' });
+      if (e.e === 'world' && !(e.kind === 'meteor' && e.phase === 'strike') && WORLD_EVENTS[e.kind]) { // D 15.0: warn copy, location kicker, the status callout speaks for pieces it hit
+        const W = WORLD_EVENTS[e.kind]; const mine = e.kind === 'bounty' && e.id === myId, warn = e.phase === 'warn' && W.warn;
+        const hitMe = !warn && Array.isArray(e.ids) && e.ids.includes(myId) && ev.some((x) => x.e === 'status' && x.on && x.id === myId && (x.k === 'freeze' || x.k === 'stun'));
+        this.juice.worldName = W.name; this.juice.worldAt = s.turnNo;
+        if (!hitMe) this.after(() => this.banner(mine ? 'A Price On Your Head' : W.name, mine ? 'Whoever takes you gets 3 shards' : warn ? W.warn : W.desc, mine ? 'red' : W.tone || (/^(meteor|bloodMoon|eruption|toxicFog|sandstorm)$/.test(e.kind) ? 'red' : 'cyan'), { kicker: warn ? 'Next round' : (locationInfo(s.location) || {}).name || 'World event', key: 'world', prio: mine ? 58 : warn ? 54 : 50, tier: mine || warn ? 2 : 1 }), 300);
+      }
       if (e.e === 'ability' && e.id === myId && e.slot === 'ult') this.ms.ults++;
       if (e.e === 'crowned' && e.id === myId) { this.ms.crown = true; this.ms.pieces.push('king'); }
       if (e.e === 'promote' && e.id === myId && e.type === 'evolve') this.ms.pieces.push(e.piece);
@@ -742,15 +808,21 @@ const game = {
       if (e.e === 'promote' && e.id === myId && e.piece === 'queen') this.ms.queen = true;
       if (e.e === 'attune' && e.id === myId) { const p = $('#h-attune'); p.classList.remove('bump'); void p.offsetWidth; p.classList.add('bump'); }
       if (e.e === 'death' && e.by === myId) { const v = unitById(s, e.id); if (v && v.kind === 'hollow') this.ms.hollows++; else if (v) this.ms.kills++; }
+      { const M = this.ms; // 15.0 (S): trophy/quest counters (status effects, boss King, Ascension, pawn line)
+        if (e.e === 'status' && e.on && (e.by === myId || e.src === myId) && e.id !== myId) M.statuses = (M.statuses || 0) + 1;
+        if (e.e === 'dmg' && e.src === myId && e.id !== myId && (unitById(s, e.id) || {}).piece === 'king') M.kingHits = (M.kingHits || 0) + 1;
+        if (e.e === 'death' && e.regicide && e.by === myId) M.regicide = (M.regicide || 0) + 1;
+        if (e.id === myId && ((e.e === 'promote' && e.type === 'hone' && e.hone >= 3) || e.e === 'ascend')) M.ascended = (M.ascended || 0) + 1;
+        if (e.e === 'promote' && e.id === myId && (e.piece === 'veteran' || e.piece === 'champion')) { M.veteran = 1; if (e.piece === 'champion') M.champion = true; } }
       if (e.e === 'crowned') { const u = unitById(s, e.id); if (u) this.banner(u.id === myId ? 'You Are King' : 'A New King', u.id === myId ? 'Everyone is coming for you' : `${u.name} wears the Crown`, '', { kicker: 'The Crown', key: 'crown', tier: u.id === myId ? 3 : 2, prio: u.id === myId ? 84 : 64, level: 3 }); }
-      if (e.e === 'promote' && e.id === myId) this.after(() => this.banner(e.type === 'evolve' ? PIECES[e.piece].name : 'Honed', e.type === 'evolve' ? 'Evolution complete' : `${PIECES[e.piece].name} level ${e.hone}`, 'cyan', { kicker: e.type === 'evolve' ? 'Promotion' : 'Hone', key: 'promote', prio: 44 }), 300);
+      if (e.e === 'promote' && e.id === myId && !this.bigPromo(e)) this.after(() => this.banner(e.type === 'evolve' ? PIECES[e.piece].name : 'Honed', e.type === 'evolve' ? 'Evolution complete' : `${PIECES[e.piece].name} level ${e.hone}`, 'cyan', { kicker: e.type === 'evolve' ? 'Promotion' : 'Hone', key: 'promote', prio: 44 }), 300);
       if (e.e === 'death') {
         const v = unitById(s, e.id); if (!v || v.kind !== 'player') continue;
         const k = e.by ? unitById(s, e.by) : null;
         const ico = (u) => `<img src="${pieceIcon(u.piece, u.skin, null, 18)}" alt="">`;
         this.after(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : e.cause === 'lava' ? 'burned in the lava' : e.cause === 'trap' ? 'was caught in a trap' : e.cause === 'geyser' ? 'was launched by a geyser' : e.cause === 'crumble' ? 'fell through the floor' : e.cause === 'earthquake' ? 'was swallowed by the quake' : k && k.kind === 'hollow' ? 'was overrun by Hollows' : 'fell to the storm'}</span>`, 'death' + e.id), 400);
         if (e.shutdown && k) this.after(() => this.announce('Shutdown', `${k.name} ended ${v.name}'s streak`, k.color, 'shutdown', 3, { group: 'k' + k.id, kicker: 'Streak ended', tier: 2, prio: 78 }), 700);
-        if (e.regicide && k) this.after(() => this.announce('Regicide', `${k.name} toppled the King`, '#ffd24d', 'regicide', 5, { group: 'k' + k.id, kicker: 'The Crown shatters', tier: 3, prio: 88 }), 700);
+        if (e.regicide && k) this.after(() => this.announce('Regicide', `${k.name} toppled the King`, '#ffd24d', 'regicide', 5, { group: 'k' + k.id, kicker: 'The Crown shatters', tier: 4, prio: 99, nameSub: false, subHtml: `<b style="color:${k.color}">${esc(k.name)}</b> toppled the King` }), 700);
         if (s.teams && !s.over && e.id !== myId && this.me && ally(this.me, v) && this.me.alive) this.after(() => this.banner('Ally Down', 'Step on their soul within 3 rounds to revive them', 'red', { kicker: v.name, prio: 60, key: 'ally' + v.id }), 900);
         if (e.id === myId) { this.killedBy = k && k.id !== myId ? k : null; if (!s.over) this.after(() => this.showDead(), 1700); }
       }
@@ -824,7 +896,7 @@ const game = {
     $('#btn-keepspec').classList.add('hidden'); $('#btn-menu').textContent = 'Menu';
     $('#btn-potm').classList.toggle('hidden', !this.best);
     if (this.best) $('#btn-potm').innerHTML = `Play of the Match <small style="color:${this.best.color}">${esc(this.best.name)}</small>`;
-    $('#btn-rematch').classList.toggle('hidden', !!(session && session.mode === 'client'));
+    party.rematchButton(session, s, false);
     $('#spec-bar').classList.add('hidden');
     $('#m-results').classList.remove('hidden');
   },
@@ -921,8 +993,9 @@ const game = {
       const id = slotAbility(u, slot); if (!id) return;
       const A = ABILITIES[id];
       const cd = slot === 'ult' ? `Charge ${Math.round(u.ult || 0)}/100` : A.cd ? `Cooldown ${A.cd}${u.cd[slot] ? ` - ready in ${u.cd[slot]}` : ''}` : 'Every turn';
-      box.innerHTML = `<img src="${diagram(u.piece, id, 96, u.skin)}" alt=""><div><b>${A.name}</b><p>${A.desc}</p><em>${cd}${A.free ? ' - Free action' : ''}${A.honed ? `<br>Honed: ${A.honed}` : ''}</em></div>`;
+      box.innerHTML = `<img src="${diagram(u.piece, id, 96, u.skin)}" alt=""><div><b>${A.name}</b><p>${A.desc}</p><em>${cd}${A.free ? ' - Free action' : ''}${A.honed ? `<br>Honed: ${A.honed}` : ''}</em>${statusGlossary(A.desc, A.honed, A.status, A.applies)}</div>`; // D 15.0: status glossary
     }
+    if (this.locks && this.locks[slot]) box.querySelector('div').insertAdjacentHTML('beforeend', `<div class="ab-lock">${this.locks[slot]}</div>`);
     box.classList.remove('hidden'); sfx.hover(); haptic(10);
   },
   onStreak(e) {
@@ -967,6 +1040,95 @@ const game = {
   heartbeat(dt) {
     const u = this.me; if (!u || !u.alive || !this.s || this.s.over) return;
     if (u.hp / stats(u).maxHp < 0.3) { this.beatT -= dt; if (this.beatT <= 0) { this.beatT = 1.1; sfx.heartbeat(); } }
+  },
+  // ---------- D 15.0: in-match HUD feedback. Vocabulary (status glyphs, locations, compass) and the boss bar live in js/announcer.js.
+  bigPromo(e) { return e.e === 'promote' && ((e.type === 'hone' && e.hone >= 3 && !!ASCENDED[e.piece]) || e.piece === 'veteran' || e.piece === 'champion'); },
+  hud15(e, s, myId) {
+    const J = this.juice || (this.juice = {});
+    const nm = (u) => `<b style="color:${u.kind === 'player' ? u.color : '#ccc'}">${esc(u.name)}</b>`;
+    if (e.e === 'status' && e.on && STATUS[e.k]) {
+      const u = unitById(s, e.id), src = e.src != null ? unitById(s, e.src) : null; if (!u) return;
+      const S = STATUS[e.k], ico = `<span class="stc st-${e.k}" style="--sc:${S.c}">${S.icon}</span>`;
+      if (e.id === myId && (e.k === 'freeze' || e.k === 'stun')) { const C = STATUS_CALL[e.k]; this.after(() => director.say({ text: C.text, sub: C.sub, color: C.color, tier: 2, prio: 72, key: 'st-me', kicker: src && src.id !== myId ? `By ${src.name}` : (J.worldAt === s.turnNo && J.worldName) || 'Status', ttl: 3400, level: 2, haptic: [30, 40, 30] }), 250); }
+      else if (e.id === myId && src && src.piece === 'king' && e.k === 'slow') { if (!J.aura) { J.aura = 1; this.after(() => this.feed(`${ico}<b style="color:${S.c}">Royal aura</b><span class="x">slows you near the King</span>`, 'st-aura'), 250); } }
+      else if (e.id === myId) this.after(() => this.feed(`${ico}<b style="color:${S.c}">${(STATUS_CALL[e.k] || S).text || S.name}</b><span class="x">${e.k === 'shield' && e.n ? e.n + ' absorb' : e.t ? e.t + ' turn' + (e.t > 1 ? 's' : '') : ''}</span>`, 'st-me-' + e.k), 250);
+      else if (e.src === myId && /^(freeze|stun|burn|poison|slow)$/.test(e.k)) this.after(() => this.feed(`${ico}<span class="x">${S.name}:</span>${nm(u)}`, 'st-by-' + e.k + e.id), 250);
+      else if (u.piece === 'king' && (e.k === 'freeze' || e.k === 'stun')) this.after(() => this.feed(`${ico}<span class="x">The King is</span><b style="color:${S.c}">${S.name}</b>`, 'st-king-' + e.k), 250);
+    }
+    if (e.e === 'crownWarn' || e.e === 'crownSoon' || e.e === 'crownTelegraph') {
+      const w = e.x != null ? e : s.crownWarn || {};
+      J.crownWarn = { x: w.x, y: w.y, round: s.round };
+      const where = w.x != null ? compass(s, w.x, w.y) : 'the marked tile';
+      this.after(() => director.say({ text: 'The Crown Descends', sub: `Next round at ${where}`, kicker: `Round ${s.round}`, color: '#ffd24d', tier: 2, prio: 70, key: 'crown', ttl: 4200, level: 3 }), 250);
+      this.after(() => this.tip('crownwarn', '<b>The Crown is coming.</b> The gold marker shows where it lands next round. Race for it, or get ready to hunt whoever takes it.'), 2200);
+    }
+    if (e.e === 'crowned') { J.crownWarn = null; const k = unitById(s, e.id); if (k && k.id !== myId) this.after(() => this.tip('exposed', '<b>Gang up on the King.</b> Every different attacker in a round adds an Exposed stack: less DEF until the King moves again.'), 2600); }
+    if (e.e === 'kingPhase' || (e.e === 'phase' && (unitById(s, e.id) || {}).piece === 'king')) { J.kpEv = 1; this.kingPhaseCall(s, unitById(s, e.id), e.phase || e.n || 1); }
+    if (e.e === 'enrage' && (unitById(s, e.id) || {}).piece === 'king') J.enraged = 1; // the Siege copy ("every round") does not fit the King's short enrage
+    if ((e.e === 'promote' && this.bigPromo(e)) || e.e === 'ascend') {
+      const u = unitById(s, e.id); if (!u) return;
+      const p = e.piece || u.piece, pawn = p === 'veteran' || p === 'champion', mine = e.id === myId, k = 'pr' + u.id + p + (e.hone || '');
+      if (J[k]) return; J[k] = 1;
+      const name = pawn ? (PIECES[p] && PIECES[p].name) || (p === 'veteran' ? 'Veteran' : 'Champion') : ASCENDED[p] || 'Ascended';
+      const col = pawn ? '#e8c87a' : '#c9a6ff';
+      if (mine) this.after(() => this.announce(name, pawn ? (p === 'veteran' ? 'The pawn line holds: tougher, with a new signature' : 'The pawn who never fell: a new ultimate') : 'A new passive and an empowered ultimate', col, null, 4, { kicker: pawn ? 'Pawn promotion' : 'Ascension', tier: p === 'veteran' ? 2 : 3, prio: 80, key: 'promote' }), 300);
+      else {
+        this.after(() => this.feed(`${nm(u)}<span class="x">${pawn ? 'is now a' : 'ascended:'}</span><b style="color:${col}">${esc(name)}</b>`, 'pr' + u.id), 300);
+        if (!pawn || p === 'champion') this.after(() => this.banner(name, `${u.name} has ${pawn ? 'risen' : 'ascended'}`, 'violet', { kicker: pawn ? 'Pawn promotion' : 'Ascension', key: 'asc' + u.id, prio: 52 }), 400);
+      }
+    }
+  },
+  kingPhaseCall(s, k, ph) {
+    const J = this.juice; if (!k || J['kp' + k.id + ph]) return; J['kp' + k.id + ph] = 1;
+    const mine = !!(this.me && k.id === this.me.id);
+    const t = ph >= 2 ? { text: 'The Last Stand', sub: mine ? 'One third left. Hold on.' : 'One third left. Finish the King together.' } : { text: 'Royal Wrath', sub: mine ? 'Shockwave! You enrage for a short time.' : `${k.name} unleashes a shockwave and enrages` };
+    this.after(() => director.say({ ...t, kicker: `The King - ${ph >= 2 ? 33 : 66}%`, color: mine ? '#ffd24d' : '#ff6a4d', tier: 3, prio: 82, key: 'kphase', ttl: 4000, level: 4, haptic: [30, 30, 60] }), 350);
+  },
+  locIntro(s, ev) {
+    const id = s.location || ((ev || []).find((x) => x.e === 'location') || {}).id; if (!id) return;
+    loadLocations();
+    const gen = this.gen; let done = false, spun = false;
+    const show = () => { if (done || gen !== this.gen) return; done = true; removeEventListener('cc:wheel-landed', on); removeEventListener('cc:wheel-start', st); const L = locationInfo(id); if (L) director.say({ text: L.name, sub: L.blurb, kicker: 'World Tour', color: L.c, tier: 'loc', prio: 62, key: 'loc', ttl: 9000, level: 2 }); };
+    const on = (x) => { if (!x.detail || !x.detail.id || x.detail.id === id) setTimeout(show, 300); };
+    const st = () => { spun = true; };
+    addEventListener('cc:wheel-landed', on); addEventListener('cc:wheel-start', st);
+    setTimeout(() => (spun ? setTimeout(show, 8000) : show()), 4200); // the wheel says when it spins and lands; without a wheel the intro still plays
+  },
+  hud15Refresh(s, u) {
+    const J = this.juice || (this.juice = {});
+    // boss bar: the King for everyone, otherwise a Siege boss
+    const k = s.over ? null : s.units.find((v) => v.alive && v.piece === 'king') || s.units.find((v) => v.alive && v.boss);
+    let info = null;
+    if (k) {
+      const isK = k.piece === 'king', sl = statusList(k), ex = sl.find((x) => x.k === 'exposed'), en = sl.find((x) => x.k === 'enrage');
+      info = { key: k.id + (isK ? 'k' : 'b'), name: k.name, color: k.kind === 'player' ? k.color : '#b98cff', hp: k.hp, max: stats(k).maxHp, kind: isK ? 'king' : 'boss', me: !!(u && k.id === u.id), exposed: ex ? ex.n || 1 : 0, enrage: en ? en.t || 1 : !isK && k.hunt ? 1 : 0, statusHtml: statusChips(k, { skip: ['exposed', 'enrage'], max: 3 }), phases: isK ? [0.66, 0.33] : [] };
+      const ph = k.phase ?? k.kingPhase; // engine-side phase counter, if the King carries one
+      if (isK && !J.kpEv && ph > 0 && J.kph && J.kph.id === k.id && ph > J.kph.ph) this.kingPhaseCall(s, k, ph);
+      if (isK) J.kph = { id: k.id, ph: ph || 0 };
+    }
+    if (director.boss(info)) requestAnimationFrame(() => this.fitPad());
+    if (!u) return;
+    // status chips on my card (absolute badge row: no layout shift)
+    let row = $('#h-status');
+    if (!row) { const pc = $('#h-piece'); if (pc) { pc.insertAdjacentHTML('beforebegin', '<div class="st-row" id="h-status" aria-label="Status effects"></div>'); row = $('#h-status'); } }
+    if (row) { const h = u.alive ? statusChips(u, { max: 5 }) : ''; if (row._h !== h) { row.innerHTML = h; row._h = h; row.classList.toggle('on', !!h); } }
+    // frozen / stunned: lock the right buttons and say why
+    const my = this.myTurn(), T = s.turn || {};
+    const fz = hasStatus(u, 'freeze') || !!(my && (T.frozen || T.freeze)), sn = hasStatus(u, 'stun') || !!(my && (T.stunned || T.stun));
+    this.locks = { now: my };
+    if (u.alive) {
+      if (fz && (!my || !canMove(s, u))) this.locks.move = my ? 'Frozen: you cannot move this turn' : 'Frozen: no moving on your next turn';
+      if (sn && (!my || !canAct(s, u))) this.locks.atk = this.locks.sig = this.locks.eq = this.locks.ult = my ? 'Stunned: you cannot act this turn' : 'Stunned: no actions on your next turn';
+    }
+    for (const b of $$('#h-actions .act')) { const L = this.locks[b.dataset.slot]; b.classList.toggle('locked', !!L); if (L) b.dataset.lock = L.split(':')[0]; else delete b.dataset.lock; }
+    $('#ult-btn').classList.toggle('locked', !!this.locks.ult);
+    $('#h-card').style.setProperty('--pc', u.color);
+    $('#h-card').classList.toggle('st-frozen', fz && u.alive); $('#h-card').classList.toggle('st-stunned', sn && u.alive);
+    // event chip: the crown telegraph beats everything but red alerts; the location takes the quiet slot
+    const chip = $('#event-chip'), quiet = chip.classList.contains('hidden') || chip.classList.contains('dim');
+    const cw = s.crownWarn || (J.crownWarn && !s.crownSpawned ? J.crownWarn : null);
+    if (cw && !s.crownSpawned && cw.x != null && !chip.classList.contains('red')) { chip.textContent = `Crown lands next round - ${compass(s, cw.x, cw.y).replace('the ', '')}`; chip.className = 'event-chip gold'; }
+    else if (quiet && s.location) { const L = locationInfo(s.location); if (L) { chip.textContent = L.name; chip.className = 'event-chip dim loc'; chip.style.setProperty('--lc', L.c); } }
   },
 
   options() {
@@ -1052,8 +1214,8 @@ const game = {
     else if (s.teams) { const mate = this.me && s.units.find((w) => w.kind === 'player' && ally(this.me, w)); const nT = new Set(alivePlayers(s).map((w) => w.team)).size; $('#h-alive').innerHTML = `${nT} team${nT === 1 ? '' : 's'}${mate ? ` <span class="mate" style="color:${mate.color}">${esc(mate.name)} ${mate.alive ? Math.round(mate.hp / stats(mate).maxHp * 100) + '%' : s.items.some((i) => i.k === 'soul' && i.id === mate.id) ? 'DOWN' : 'OUT'}</span>` : ''}`; }
     else $('#h-alive').textContent = `${alivePlayers(s).length} left`;
     const order = predictOrder(s, 7);
-    const oh = order.map((id) => { const v = unitById(s, id); if (!v) return ''; return `<div class="o ${u && v.id === u.id ? 'me' : u && ally(u, v) ? 'ally' : v.kind === 'hollow' ? 'foe-hollow' : ''}" style="--c:${v.kind === 'player' ? v.color : '#555'}"><img src="${pieceIcon(v.piece, v.skin, null, 36)}" alt=""></div>`; }).join('');
-    const ok = order.map((id) => { const v = unitById(s, id); return v ? id + v.piece + v.skin + v.color : id; }).join(',');
+    const oh = order.map((id) => { const v = unitById(s, id); if (!v) return ''; return `<div class="o ${u && v.id === u.id ? 'me' : u && ally(u, v) ? 'ally' : v.kind === 'hollow' ? 'foe-hollow' : ''}${v.piece === 'king' || v.boss ? ' boss' : ''}${hasStatus(v, 'freeze') ? ' st-fz' : hasStatus(v, 'stun') ? ' st-sn' : ''}" style="--c:${v.kind === 'player' ? v.color : '#555'}"><img src="${pieceIcon(v.piece, v.skin, null, 36)}" alt=""></div>`; }).join('');
+    const ok = order.map((id) => { const v = unitById(s, id); return v ? id + v.piece + v.skin + v.color + (hasStatus(v, 'freeze') ? 'f' : '') + (hasStatus(v, 'stun') ? 's' : '') : id; }).join(',');
     const ordEl = $('#h-order');
     if (ordEl.dataset.k !== ok) { const shifted = ordEl.dataset.first && ordEl.dataset.first !== String(order[0]); ordEl.innerHTML = oh; ordEl.dataset.k = ok; ordEl.dataset.first = order[0]; if (shifted && !settings.motion) { ordEl.classList.remove('shift'); void ordEl.offsetWidth; ordEl.classList.add('shift'); } }
     if (!u) return;
@@ -1133,6 +1295,7 @@ const game = {
     else if (this.mode === 'move') tip = canMove(s, u) ? `<b>Move:</b> ${PIECES[u.piece].moveDesc} Tap a blue tile.` : canAct(s, u) ? 'Choose an action, or end your turn.' : '';
     else { const id = slotAbility(u, this.mode), ab = ABILITIES[id]; tip = `<b>${ab.name}:</b> ${ab.desc}${honedTip(u, id)} ${this.preview ? '<b>Tap again to confirm.</b>' : 'Tap a target.'}`; }
     $('#h-tip').innerHTML = tip;
+    this.hud15Refresh(s, u);
   },
   tickTimer() {
     const t = $('#h-timer'); if (!this.s || this.s.over) { t.style.transform = 'scaleX(0)'; return; }
@@ -1141,6 +1304,13 @@ const game = {
     const left = Math.max(0, this.deadline - Date.now());
     t.style.transform = `scaleX(${human ? left / ((this.s.rules && this.s.rules.turnMs) || TURN_MS) : 0})`;
     t.classList.toggle('low', left < 8000);
+    { // D 15.0: my-turn timer glow, the active portrait's time ring, seconds on End Turn when it gets tight
+      const mine = human && this.myTurn(), frac = human ? Math.round(left / ((this.s.rules && this.s.rules.turnMs) || TURN_MS) * 200) / 200 : 0;
+      t.parentElement.classList.toggle('mine', mine);
+      const o0 = $('#h-order').firstElementChild; if (o0 && o0._tl !== frac) { o0._tl = frac; o0.style.setProperty('--tl', frac); o0.classList.toggle('timed', human); }
+      const sec = mine && left < 10000 ? String(Math.ceil(left / 1000)) : '', eb = $('#h-actions .act.end');
+      if (eb && (eb.dataset.s || '') !== sec) { if (sec) eb.dataset.s = sec; else delete eb.dataset.s; }
+    }
     if (human && this.myTurn() && left < 5000 && Math.floor(left / 1000) !== this.lastTick) { this.lastTick = Math.floor(left / 1000); sfx.warn(); }
   },
   onAction(slot) {
@@ -1148,6 +1318,7 @@ const game = {
     if (!this.myTurn()) { sfx.error(); return; }
     const u = this.me;
     if (slot === 'end') { sfx.tap(); session.send({ type: 'end' }); return; }
+    if (this.locks && this.locks[slot] && this.locks.now) { sfx.error(); toast(this.locks[slot]); this.pulse($(`#h-actions .act[data-slot="${slot}"]`), 'deny', 400); return; } // D 15.0: frozen / stunned
     if (slot === 'promote') { this.openPromote(); return; }
     if (slot === this.mode && this.preview) { this.exec(this.preview); return; }
     if (slot === 'move') { this.mode = 'move'; this.preview = null; sfx.tap(); this.refresh(); return; }
@@ -1244,8 +1415,8 @@ const game = {
     if (!v) { box.classList.add('hidden'); return; }
     const st = stats(v);
     const extra = v.dummy ? 'A training dummy. It will not fight back.' : v.kind === 'hollow' ? 'Guards a shard cache. Drops 2 shards.' : `${PASSIVES[v.passive].name} - ${v.shards} shard${v.shards === 1 ? '' : 's'} - Attune ${v.attune || 0} - Ult ${Math.round(v.ult || 0)}% - ${v.kills} KO`;
-    box.innerHTML = `<img src="${pieceIcon(v.piece, v.skin, v.color, 46)}" alt=""><div>${v.title ? `<span style="color:var(--gold);font-size:10px;letter-spacing:.12em;text-transform:uppercase">${esc(v.title)}</span>` : ''}<b style="color:${v.kind === 'player' ? v.color : '#bbb'}">${esc(v.name)}${v.piece === 'king' ? ' - King' : v.kind === 'player' ? ' - ' + PIECES[v.piece].name : ''}</b><span>HP ${v.hp}/${st.maxHp} - ATK ${st.atk} - DEF ${st.def} - SPD ${st.spd}</span><span>${extra}</span></div>`;
-    const co = $('#coach'); box.style.top = co.classList.contains('hidden') ? '' : (co.getBoundingClientRect().bottom + 6) + 'px';
+    box.innerHTML = `<img src="${pieceIcon(v.piece, v.skin, v.color, 46)}" alt=""><div>${v.title ? `<span style="color:var(--gold);font-size:10px;letter-spacing:.12em;text-transform:uppercase">${esc(v.title)}</span>` : ''}<b style="color:${v.kind === 'player' ? v.color : '#bbb'}">${esc(v.name)}${v.piece === 'king' ? ' - King' : v.kind === 'player' ? ' - ' + PIECES[v.piece].name : ''}</b><span>HP ${v.hp}/${st.maxHp} - ATK ${st.atk} - DEF ${st.def} - SPD ${st.spd}</span><span>${extra}</span>${statusList(v).length ? `<span class="ins-st">${statusChips(v, { names: true, max: 4 })}</span>` : ''}</div>`;
+    const co = $('#coach'); box.style.top = co.classList.contains('hidden') ? (director.bossOn ? director.L.top + 'px' : '') : (co.getBoundingClientRect().bottom + 6) + 'px';
     box.classList.remove('hidden'); sfx.tap();
     this.inspT = setTimeout(() => box.classList.add('hidden'), 3200);
   },
@@ -1321,14 +1492,14 @@ const game = {
     let earned = 0, xpGain = 0, levels = 0;
     const startLvl = profile.level, startXp = profile.xp;
     const quit = aborted && u.alive && !s.over;
-    if (quit && session) { try { if (session.mode === 'host') session.host.setBot('me'); else if (session.mode === 'client') { if (reason !== 'hostleft') { session.client.send({ t: 'leave' }); setTimeout(() => endSession(), 300); } } else session.host.stop(); } catch {} }
+    if (quit && session) { try { if (session.mode === 'host') session.host.setBot('me'); else if (session.mode === 'client') { if (reason !== 'hostleft') { session.client.send({ t: 'leave' }); session.benched = true; } } else session.host.stop(); } catch {} } // 15.0 (N): a forfeit keeps you in the party
     if (quit) { profile.played = [...profile.played.slice(-30), matchKey]; if (reason === 'hostleft') { profile.marks += 15; earned = 15; } else recordMatch(profile, { kills: 0, hollows: 0, ults: 0, shards: 0, crown: false, queen: false, win: false, hard: false, minHpRatio: 0, mode: (session && session.gameMode) || 'royale' }); save(); this.seasonGain = []; this.achGain = []; this.dailyScore = null; }
     if (!profile.played.includes(matchKey)) {
       earned = 20 + u.kills * 15 + (u.hk || 0) * 2 + rankBonus + (win ? 60 : 0);
       xpGain = 40 + u.kills * 30 + (u.hk || 0) * 5 + Math.round(rankBonus * 1.8) + Math.round((u.dmgDealt || 0) / 6) + (win ? 100 : 0);
       profile.marks += earned;
       const gmode = (session && session.gameMode) || s.mode || 'royale';
-      recordMatch(profile, { kills: u.kills, hollows: this.ms.hollows, ults: this.ms.ults, shards: u.attune || 0, crown: this.ms.crown, queen: this.ms.queen, win, hard: !!(session && session.hard), minHpRatio: u.alive ? this.minHp ?? 0 : 0, mode: gmode, cleared, revives: this.ms.revives, colossi: this.ms.colossi });
+      recordMatch(profile, { kills: u.kills, hollows: this.ms.hollows, ults: this.ms.ults, shards: u.attune || 0, crown: this.ms.crown, queen: this.ms.queen, win, hard: !!(session && session.hard), minHpRatio: u.alive ? this.minHp ?? 0 : 0, mode: gmode, cleared, revives: this.ms.revives, colossi: this.ms.colossi, statuses: this.ms.statuses, regicide: this.ms.regicide, ascended: this.ms.ascended, champion: !!this.ms.champion || u.piece === 'champion', location: s.location, party: !!(session && (session.mode === 'host' || session.mode === 'client') && s.units.some((v) => v.kind === 'player' && !v.bot && v.id !== u.id)) });
       this.masteryGain = gmode === 'daily' ? [] : addMastery(profile, [...this.ms.pieces.filter((k) => k !== u.piece), u.piece], { kills: u.kills, hollows: this.ms.hollows, win, dmg: u.dmgDealt || 0 });
       this.seasonGain = addSeasonXp(profile, xpGain);
       if (gmode === 'daily') { const sc = dailyScore(place, u.kills, u.dmgDealt || 0, total); const t = today(); if (profile.daily.date !== t) { profile.daily.date = t; profile.daily.best = 0; } this.dailyNew = sc > profile.daily.best; this.dailyScore = sc; profile.daily.best = Math.max(profile.daily.best, sc); if (!profile.daily.days.includes(t)) profile.daily.days = [...profile.daily.days.slice(-60), t]; profile.stats.dailyDays = profile.daily.days.length; }
@@ -1362,7 +1533,7 @@ const game = {
     this.questsDone = [];
     for (const m of this.masteryGain || []) if (m.piece === u.piece || m.to > m.from) $('#r-quests').insertAdjacentHTML('beforeend', `<div class="r-mastery ${m.to > m.from ? 'up' : ''}" style="animation-delay:1.2s"><img src="${pieceIcon(m.piece, profile.skin, null, 26)}" alt=""><span>${PIECES[m.piece].name} mastery ${m.to > m.from ? `<b>${m.from} &rarr; ${m.to}</b>` : m.to}${m.title ? ` - title unlocked: <b>${esc(m.title)}</b>` : ''}</span><em>+${m.gain}</em></div>`);
     this.masteryGain = [];
-    const unlocks = [...(this.seasonGain || []).map((g) => { const L = rewardLabel(g); return `<div class="r-unlock" style="animation-delay:1.3s"><span>Crown Path tier ${g.tier}: ${L.name}</span><b>${L.kind}</b></div>`; }), ...(this.achGain || []).map((a) => `<div class="r-unlock" style="animation-delay:1.5s"><span>Trophy: ${a.name}</span><b>+${a.reward}</b></div>`)];
+    const unlocks = [...(this.seasonGain || []).map((g) => { const L = rewardLabel(g); return `<div class="r-unlock" style="animation-delay:1.3s"><span>${g.prem ? 'Royal Pass' : 'Crown Path'} tier ${g.tier}: ${L.name}</span><b>${L.kind}</b></div>`; }), ...(this.achGain || []).map((a) => `<div class="r-unlock" style="animation-delay:1.5s"><span>Trophy: ${a.name}</span><b>+${a.reward}</b></div>`)];
     const tier = seasonTier(profile);
     $('#r-quests').insertAdjacentHTML('beforeend', `<div class="r-season" style="animation:rise .4s 1.1s both">Crown Path - Tier ${tier}${tier < SEASON.tiers ? ` (${profile.season.xp % SEASON.tierXp}/${SEASON.tierXp})` : ''}<div class="xpbar"><i style="width:${tier >= SEASON.tiers ? 100 : seasonProgress(profile) * 100}%"></i></div></div>` + unlocks.join(''));
     if (this.dailyScore != null) $('#r-quests').insertAdjacentHTML('afterbegin', `<div class="r-unlock"><span>Daily score: ${this.dailyScore}${this.dailyNew ? ' - new best!' : ''}</span><b>Best ${profile.daily.best}</b></div>`);
@@ -1381,7 +1552,7 @@ const game = {
     $('#btn-potm').classList.toggle('hidden', !this.best);
     if (this.best) $('#btn-potm').innerHTML = `Play of the Match <small style="color:${this.best.color}">${esc(this.best.name)}</small>`;
     $('#btn-menu').textContent = liveSpec && session && session.mode === 'host' ? 'Leave' : 'Menu';
-    $('#btn-rematch').classList.toggle('hidden', !!(liveSpec || (session && (session.mode === 'client' || (session.mode === 'host' && !s.over)))));
+    party.rematchButton(session, s, liveSpec); F.partyResults(session); // F 15.0: Back to Party styling // 15.0 (N): "Back to Party" online, "Play Again" solo
     $('#spec-bar').classList.add('hidden');
     $('#m-results').classList.remove('hidden');
     music.set(0, 'results');
@@ -1523,6 +1694,7 @@ document.addEventListener('click', (e) => {
     case 'close-settings': $('#m-settings').classList.add('hidden'); sfx.tap(); break;
     case 'close-info': $('#m-info').classList.add('hidden'); sfx.tap(); break;
     case 'whatsnew': e.preventDefault(); info('What\'s New', WHATS_NEW); break;
+    case 'edit-profile': F.openEditor(); break; // F 15.0
     case 'credits': e.preventDefault(); info('Credits', `<p><b>Chess Complex</b><br>Created by Diante Clark.</p><p>Built with plain HTML, Canvas and the Web Audio API. Every sound and piece of art is generated in code.</p><p>Fonts: Cinzel and Chakra Petch (SIL Open Font License). Online play uses PeerJS (MIT).</p>`); break;
     case 'export-profile': { const body = btoa(unescape(encodeURIComponent(JSON.stringify(profile)))); const code = body + '.' + sig(body); copy(code, 'Backup code copied'); info('Backup Code', `<p>Keep this somewhere safe. Paste it into Restore Backup on any device.</p><textarea readonly>${code}</textarea>`); break; }
     case 'import-profile': info('Restore Backup', `<p>Paste a backup code. This replaces your current progress.</p><textarea id="import-code"></textarea><button class="btn wide gold" data-act="do-import">Restore</button>`); break;
@@ -1535,7 +1707,7 @@ document.addEventListener('click', (e) => {
     case 'start-host': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startHost(); break;
     case 'join': joinGame(); break;
     case 'danger': game.danger = !game.danger; $('#btn-danger').classList.toggle('on', game.danger); game.refresh(); sfx.tap(); if (game.danger) toast('Red tiles: where enemy pieces can attack next turn'); break;
-    case 'zoom': if (game.r.cam.tz > game.r.fitZoom * 1.05) game.r.overview(); else game.r.closeup(); sfx.tap(); break;
+    case 'zoom': game.r.toggleZoom(); sfx.tap(); break; // R 15.0: two levels (8x8 around my piece / whole board)
     case 'menu': $('#m-menu').classList.remove('hidden'); sfx.tap(); break;
     case 'close-menu': $('#m-menu').classList.add('hidden'); break;
     case 'close-promote': $('#m-promote').classList.add('hidden'); break;
@@ -1555,6 +1727,7 @@ document.addEventListener('click', (e) => {
     case 'rematch':
       if (!session || session.mode === 'solo') { const n = session ? session.bots : 7; const gm = session ? session.gameMode : profile.mode; matchKey = 'm' + Date.now(); startSolo(n, gm); }
       else if (session.mode === 'host') { if (game.s && !game.s.over) { toast('Wait for the match to finish'); break; } try { session.host.stop(); } catch {} session.host = null; session.started = false; session.rematch = true; go('host'); }
+      else if (session.mode === 'client') { sfx.select(); party.backToParty(session); } // 15.0 (N)
       break;
   }
 });
@@ -1563,6 +1736,7 @@ $('#host-lobby').addEventListener('click', (e) => {
   const pid = b.dataset.kick; const c = session.conns.get(pid);
   if (c) { c.send({ t: 'bye', reason: 'kicked' }); setTimeout(() => c.close(), 200); session.conns.delete(pid); }
   if (session.tokens) delete session.tokens[pid];
+  party.dropMember(session, pid);
   session.players = session.players.filter((p) => p.pid !== pid); session.renderLobby();
 });
 function confirmBox(title, body, yes, no, onYes, onNo) {
@@ -1588,6 +1762,7 @@ function copy(text, msg) {
 }
 $('#s-loadout').addEventListener('click', onLoadoutClick);
 SUI.init({ profile: () => profile, save: () => save(), sfx, haptic, toast: (m) => toast(m), uiFlash: () => uiFlash(), pieceIcon, renderProfile: () => renderProfile(), go: (n) => go(n), today: () => today(), settings });
+F.init({ profile: () => profile, save: () => save(), sfx, haptic, toast: (m) => toast(m), go: (n) => go(n), screen: () => screen, settings, SUI, renderProfile: () => renderProfile(), renderLoadout: () => renderLoadout(), onLocations: () => { if (screen === 'play') renderPlay(); } });
 $('#in-name').addEventListener('input', (e) => { profile.name = e.target.value.replace(/[<>]/g, '').slice(0, 14) || 'Player'; save(); });
 $('#in-bots').addEventListener('input', (e) => { $('#bot-n').textContent = e.target.value; sfx.tick(); });
 $('#in-code').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
@@ -1598,8 +1773,11 @@ $('#lesson-list').addEventListener('click', (e) => { const b = e.target.closest(
 $('#codex-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-ctab]'); if (!b) return; codexTab = b.dataset.ctab; sfx.tap(); renderCodexTab(); });
 $('#coach-next').addEventListener('click', () => { sfx.select(); if (tutorial) tutorial.next(); });
 $('#coach-text').addEventListener('click', () => { clearInterval(coachUI.tw); $('#coach-text').textContent = coachUI.full || ''; });
-$('#modes').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (!b) return; profile.mode = b.dataset.mode; save(); sfx.select(); renderPlay(); });
-$('#seg-diff').addEventListener('click', (e) => { const b = e.target.closest('[data-diff]'); if (!b) return; profile.botLevel = b.dataset.diff; save(); sfx.select(); renderSoloMini(); });
+$('#modes').addEventListener('click', (e) => {
+  // F 15.0: the Custom card opens the party/custom lobby (N's party.js renders the rules into the Host screen)
+  if (e.target.closest('[data-custom]')) { const cm = F.customModes(); if (!cm.includes(profile.mode)) profile.mode = cm[0] || 'royale'; save(); sfx.select(); uiFlash(); go('host'); if (session && session.mode === 'host') { session.custom = true; party.setGroup(session, 'custom'); if (session.renderLobby) session.renderLobby(); } return; }
+  const b = e.target.closest('[data-mode]'); if (!b) return; profile.mode = b.dataset.mode; save(); sfx.select(); renderPlay();
+});$('#seg-diff').addEventListener('click', (e) => { const b = e.target.closest('[data-diff]'); if (!b) return; profile.botLevel = b.dataset.diff; save(); sfx.select(); renderSoloMini(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; const open = [...document.querySelectorAll('.modal:not(.hidden)')].pop(); if (open && open.id !== 'm-results' && open.id !== 'm-lesson') open.classList.add('hidden'); });
 addEventListener('beforeunload', (e) => { if (session && session.mode === 'host' && game.s && !game.s.over && screen === 'game' && session.conns.size) { e.preventDefault(); e.returnValue = ''; } });
@@ -1610,7 +1788,7 @@ renderProfile();
 document.body.classList.toggle('bigtext', !!settings.bigtext); document.body.classList.toggle('reduced', !!settings.motion);
 // 10.0 (A8): the title news card reads its headlines from WHATS_NEW, and returning players get the sequel reveal once.
 { const n = newsFrom(WHATS_NEW); if (n.ver) $('#nc-head').textContent = `Chess Complex ${n.ver}`; if (n.items.length) $('#nc-body').textContent = n.items.slice(0, 3).join(', ') + (n.items.length > 3 ? ` and ${n.items.length - 3} more` : ''); }
-const afterSplash = (showNew) => { if (!profile.seenReveal10 && (profile.games || profile.tutorial.length) && !q0.get('join')) { profile.seenReveal10 = true; save(); sequelReveal(showNew, { reduced: !!settings.motion, sfx }); } else showNew(); };
+const afterSplash = (showNew) => { if (!profile.seenReveal15 && (profile.games || profile.tutorial.length) && !q0.get('join')) { profile.seenReveal15 = profile.seenReveal10 = true; save(); sequelReveal(showNew, { reduced: !!settings.motion, sfx }); } else showNew(); }; // F 15.0: the "15" reveal, once
 const q0 = new URLSearchParams(location.search);
 setTimeout(() => { $('#splash').classList.add('out'); afterSplash(() => { if (profile.seenVersion !== '10.3' && (profile.games || profile.tutorial.length)) { info('What\'s New in 10.3', WHATS_NEW); } profile.seenVersion = '10.3'; save(); }); }, 700);
 const q = new URLSearchParams(location.search);

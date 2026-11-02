@@ -1,4 +1,4 @@
-// Chess Complex piece art (10.0, A4).
+// Chess Complex piece art (10.0, A4; 15.0 CA: pawn line, Ascended variants, boss King, auras).
 // Pieces are sculpted signed-distance models, ray-marched once per (piece, resolution) into a skin-independent
 // G-buffer (normal, position, material id, ambient occlusion, soft shadow, creases). Each skin is then a cheap
 // per-pixel material pass (stone, porcelain, metal, glass, crystal, jade, magma, neon, cosmic, ...) baked into a
@@ -12,9 +12,33 @@ export const COLOSSUS_SKIN = { body: ['#8e7bb0', '#1a1226'], rim: '#efe2ff', glo
 export const skinOf = (id) => (id === 'hollow' ? HOLLOW_SKIN : id === 'colossus-boss' ? COLOSSUS_SKIN : SKINS[id] || SKINS.ivory);
 
 // Projected top of each piece (sprite units, used by the renderer for labels/bars).
-export const PIECE_TOP = { pawn: -0.86, rook: -0.98, bishop: -1.15, knight: -1.16, queen: -1.1, king: -1.33, hollow: -0.98, colossus: -1.32 };
-// Use for the Siege boss: drawPiece(ctx, pieceKind(u), u.skin, ...) gives the Colossus its own model.
-export const pieceKind = (u) => (u && u.boss ? 'colossus' : u ? u.piece : 'pawn');
+export const PIECE_TOP = { pawn: -0.86, rook: -0.98, bishop: -1.15, knight: -1.16, queen: -1.1, king: -1.33, hollow: -0.98, colossus: -1.32,
+  veteran: -0.93, champion: -1.06, 'knight.asc': -1.3, 'bishop.asc': -1.2, 'rook.asc': -1.2, 'queen.asc': -1.25, 'king.boss': -1.39 };
+// 15.0 variants. A variant is a model id of its own ('knight.asc', 'king.boss'), so every sprite cache keyed by the
+// piece string (fx.hiSprite, fx.pieceSprite, icons) works unchanged. Callers may also pass the base piece plus
+// opts.ascended / opts.boss to drawPiece and pieceIcon.
+export const ASCENDABLE = ['knight', 'bishop', 'rook', 'queen'];
+export const pieceVariant = (piece, o) => {
+  if (!o || !piece) return piece;
+  if (o.boss && piece === 'king') return 'king.boss';
+  if (o.ascended && ASCENDABLE.includes(piece)) return piece + '.asc';
+  return piece;
+};
+export const basePiece = (kind) => { const i = kind ? kind.indexOf('.') : -1; return i > 0 ? kind.slice(0, i) : kind; };
+export const isAscendedKind = (kind) => !!kind && kind.endsWith('.asc');
+// True when the unit is drawn Ascended (honed to 3; C may also set u.ascended).
+export const isAscended = (u) => !!u && ASCENDABLE.includes(u.piece) && (!!u.ascended || (u.hone && (u.hone[u.piece] || 0) >= 3));
+// True when the unit is the raid-boss King (C: s.kingBoss for the state, or u.kingBoss on the unit).
+export const isBossKing = (u, s) => !!u && u.piece === 'king' && !!(u.kingBoss || (s && s.kingBoss && (typeof s.kingBoss === 'object' ? s.kingBoss.id == null || s.kingBoss.id === u.id : s.kingBoss === true || s.kingBoss === u.id)));
+// Model id for a unit: drawPiece(ctx, pieceKind(u, s), u.skin, ...) gives the Colossus, Ascended pieces and the
+// boss King their own models. `s` (game state) is optional.
+export const pieceKind = (u, s) => {
+  if (!u) return 'pawn';
+  if (u.boss) return 'colossus';
+  if (isBossKing(u, s)) return 'king.boss';
+  if (isAscended(u)) return u.piece + '.asc';
+  return u.piece;
+};
 
 let MOTION = true, MOTION_SET = false, motionTick = 0;
 // Reduced-motion hook: setPieceMotion(false) freezes skin animation (drawPiece then draws the t=0 frame).
@@ -289,10 +313,10 @@ LAZY.king = () => { // KING
     if (y < -0.82) {
       d = MX(d, -sdSph(x, y, z, 0, -1.02, 0, 0.19)); // crown bowl
       fold(x, z, 8);
-      const a = AB(FOLD_A) / (Math.PI / 8), yTop = -1.04 + 0.085 * Math.pow(a, 0.7);
+      const a = AB(FOLD_A) / (Math.PI / 8), yTop = -1.045 + 0.105 * Math.pow(a, 0.7); // 15.0: deeper points read at icon sizes
       d = MX(d, (yTop - y) * 0.55); m = 1;
       const rho = SQ(x * x + z * z), lx = rho * Math.cos(FOLD_A) - 0.205, lz = rho * Math.sin(FOLD_A);
-      const pearl = SQ(lx * lx + (y + 1.05) * (y + 1.05) + lz * lz) - 0.022;
+      const pearl = SQ(lx * lx + (y + 1.055) * (y + 1.055) + lz * lz) - 0.026;
       if (pearl < d) { d = pearl; m = 1; }
     }
     MT = m;
@@ -312,13 +336,13 @@ LAZY.king = () => { // KING
       const a = MN(a1, a2); if (a < d) { d = a; MT = 1; }
     }
     const orb = sdSph(x, y, z, 0, -1.155, 0, 0.048); if (orb < d) { d = orb; MT = 1; }
-    const cr = MN(sdBox(x, y + 1.27, z, 0.02, 0.075, 0.02, 0.008), sdBox(x, y + 1.285, z, 0.062, 0.02, 0.02, 0.008));
+    const cr = MN(sdBox(x, y + 1.27, z, 0.025, 0.075, 0.024, 0.009), sdBox(x, y + 1.287, z, 0.07, 0.024, 0.024, 0.009));
     if (cr < d) { d = cr; MT = 1; }
     const gem = sdSph(x, y, z, 0, -1.285, 0.022, 0.014); if (gem < d) { d = gem; MT = 2; }
     return d;
   });
 };
-LAZY.knight = () => { // KNIGHT (faces +x)
+LAZY.knight = LAZY['knight.asc'] = () => { // KNIGHT (faces +x); the Ascended Knight shares the baked grids
   const T = makeLathe([...FOOT(), disk(-0.27, -0.15, 0.218, 0.03)]);
   const HEAD = smoothPoly([
     [-0.2, -0.16], [-0.235, -0.32], [-0.245, -0.5], [-0.225, -0.68], [-0.175, -0.84], [-0.1, -0.97], [-0.05, -1.04],
@@ -342,16 +366,16 @@ LAZY.knight = () => { // KNIGHT (faces +x)
     GM.g[j * G.nx + i] = md - (0.022 + 0.026 * tooth) * sstep(0, 0.08, s) * (1 - sstep(0.85, 0.95, s));
     GT.g[j * G.nx + i] = 0.075 * (1 - 0.4 * tooth);
   }
-  scene('knight', 0.42, -1.22, (x, y, z) => {
-    let d = latheD(T, x, y, z);
+  const make = (asc) => (x, y, z) => {
+    let d = latheD(T, x, y, z), m = MT;
     if (bb(x, y, z, 0.015, -0.675, 0, 0.4, 0.57, 0.17) < d) {
       const d2 = sampG(G, x, y);
       const H = (0.125 + 0.03 * sat((y + 0.6) / 0.4) - 0.03 * sat((x - 0.12) / 0.25)) * (y < -1.02 ? 0.62 : 1);
       const Rb = 0.085, e = MN(-d2, Rb) / Rb, zm = d2 < 0 ? H * SQ(MX(0, 1 - (1 - e) * (1 - e))) : 0;
-      let hd = MX(d2, AB(z) - zm) * 0.72;
+      let hd = MX(d2, AB(z) - zm) * 0.72, mane = 9;
       if (x < 0.02) {
         const m2 = sampG(GM, x, y), mz = AB(z) - sampG(GT, x, y), a = MX(m2, 0), b = MX(mz, 0);
-        const mane = (SQ(a * a + b * b) + MN(MX(m2, mz), 0) - 0.012) * 0.8;
+        mane = (SQ(a * a + b * b) + MN(MX(m2, mz), 0) - 0.012) * 0.8;
         hd = smin(hd, mane, 0.02);
       }
       if (z > 0.02) {
@@ -360,11 +384,29 @@ LAZY.knight = () => { // KNIGHT (faces +x)
         if (x > 0.25) { hd = MX(hd, -sdSph(x, y, z, 0.335, -0.628, 0.088, 0.02)); hd = MX(hd, -sdCap(x, y, z, 0.375, -0.567, 0.06, 0.29, -0.563, 0.08, 0.007)); }
         if (x > 0.03 && x < 0.16 && y > -0.77 && y < -0.6) hd = MX(hd, -sdCap(x, y, z, 0.06, -0.63, 0.12, 0.13, -0.74, 0.12, 0.008) + 0.002);
       }
-      if (hd < d + 0.02) { d = smin(d, hd, 0.02); MT = 0; }
-      const eye = sdSph(x, y, z, 0.135, -0.86, 0.095, 0.024); if (eye < d) { d = eye; MT = 4; }
+      if (hd < d + 0.02) { d = smin(d, hd, 0.02); m = asc && mane < hd + 0.006 ? 8 : 0; }
+      const eye = sdSph(x, y, z, 0.135, -0.86, 0.095, 0.024); if (eye < d) { d = eye; m = asc ? 5 : 4; }
+      if (asc) {
+        const az = AB(z);
+        // bridle: noseband ring around the muzzle and a cheek strap on each side (gilt)
+        if (x > 0.12 && x < 0.32 && y > -0.97 && y < -0.52) {
+          const ey = (y + 0.625) / 0.088, ez = z / 0.118, el = (SQ(ey * ey + ez * ez) - 1) * 0.088;
+          const nb = MX(AB(x - 0.285) - 0.017, AB(el) - 0.011);
+          const ck = sdCap(x, y, az, 0.275, -0.66, 0.104, 0.165, -0.905, 0.112, 0.012);
+          const br = MN(nb, ck); if (br < d) { d = br; m = 8; }
+          const ros = sdSph(x, y, az, 0.215, -0.785, 0.118, 0.022); if (ros < d) { d = ros; m = 5; }
+        }
+      }
     }
+    if (asc && y < -1.2) { // halo floating above the ears
+      const q = SQ(x * x + z * z) - 0.125, h = SQ(q * q + (y + 1.3) * (y + 1.3)) - 0.016;
+      if (h < d) { d = h; m = 5; }
+    }
+    MT = m === 1 && asc ? 8 : m;
     return d;
-  });
+  };
+  scene('knight', 0.42, -1.22, make(false));
+  scene('knight.asc', 0.42, -1.34, make(true)); SCENES['knight.asc'].asc = 1;
 };
 LAZY.hollow = () => { // HOLLOW: hooded wraith with a tattered hem
   const T = makeLathe([
@@ -390,7 +432,7 @@ LAZY.hollow = () => { // HOLLOW: hooded wraith with a tattered hem
       const cav = sdEll(x, y + 0.77, z - 0.15, 0.105, 0.125, 0.12);
       if (-cav > d) { d = -cav; MT = 3; }
     }
-    const e = sdSph(ax, y, z, 0.046, -0.785, 0.075, 0.021);
+    const e = sdSph(ax, y, z, 0.05, -0.785, 0.078, 0.027); // 15.0: bigger eyes read on dark boards
     if (e < d) { d = e; MT = 4; }
     return d;
   });
@@ -417,10 +459,200 @@ LAZY.colossus = () => { // COLOSSUS: armoured stone giant with a violet core
       if (y < -1.0 && y > -1.1 && x < 0.1) { const visor = sdBox(X, y + 1.05, z - 0.11, 0.06, 0.013, 0.04, 0.004); if (-visor > d) { d = -visor; MT = 3; } }
       if (y < -0.64 && y > -0.84 && x < 0.1) { const sock = sdSph(X, y, z, 0, -0.74, 0.17, 0.075); if (-sock > d) { d = -sock; MT = 3; } }
     }
-    const eye = sdSph(x, y, z, 0.03, -1.05, 0.085, 0.016); if (eye < d) { d = eye; MT = 4; }
-    const core = sdSph(X, y, z, 0, -0.74, 0.135, 0.058); if (core < d) { d = core; MT = 2; }
+    const eye = sdSph(x, y, z, 0.032, -1.05, 0.088, 0.02); if (eye < d) { d = eye; MT = 4; }
+    const core = sdSph(X, y, z, 0, -0.74, 0.14, 0.066); if (core < d) { d = core; MT = 2; }
     return d;
   });
+};
+
+// ---------------------------------------------------------------- 15.0: pawn line, Ascended variants, boss King (CA)
+// Extra material ids: 5 divine emissive (halos, orbs, ascended gems), 6 cloth (capes, plumes, straps),
+// 7 ermine fur, 8 gilt (always gold, or the skin accent), 9 steel (helms, pauldrons).
+const torH = (x, y, z, cy, R, r) => { const q = SQ(x * x + z * z) - R, w = y - cy; return SQ(q * q + w * w) - r; };
+const torV = (x, y, z, cx, cy, cz, R, r) => { const q = Math.hypot(x - cx, y - cy) - R, w = z - cz; return SQ(q * q + w * w) - r; };
+// rounded flat disc (helm brims)
+function sdDisc(x, y, z, cy, R, h, r) { const rho = SQ(x * x + z * z), q = MX(rho - R, 0), w = MX(AB(y - cy) - h, 0); return SQ(q * q + w * w) + MN(MX(rho - R, AB(y - cy) - h), 0) - r; }
+// a carved 2D slot through the front of a piece (scars, visors): distance to a segment in xy, front half only
+function slot(x, y, z, ax, ay, bx, by, r, z0) { const ex = bx - ax, ey = by - ay, h = sat(((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey)); return MX(Math.hypot(x - ax - ex * h, y - ay - ey * h) - r, z0 - z); }
+const PAWNLINE = (k = 1) => [...FOOT(),
+  curve([[-0.5, 0.1 * k], [-0.42, 0.107 * k], [-0.33, 0.128 * k], [-0.24, 0.165 * k], [-0.17, 0.21], [-0.15, 0.22]]),
+  disk(-0.535, -0.49, 0.156 * k, 0.018, 1), ring(-0.5, 0.022, 0.138 * k, 1),
+  curve([[-0.575, 0.082], [-0.555, 0.088], [-0.535, 0.1]]),
+];
+LAZY.veteran = () => { // VETERAN: pawn in a kettle helm with a comb, a pauldron, a strap and a few scars
+  const T = makeLathe([...PAWNLINE(1.04), sph(-0.708, 0.158)]);
+  const ua = [-Math.cos(0.42), Math.sin(0.42)], va = [Math.sin(0.42), Math.cos(0.42)];
+  scene('veteran', 0.32, -0.98, (x, y, z) => {
+    let d = latheD(T, x, y, z), m = MT;
+    if (y > -0.5 && y < -0.16 && z > 0.04) { // two battle scars across the front
+      const sc = MN(slot(x, y, z, -0.06, -0.4, 0.05, -0.31, 0.0065, 0.06), slot(x, y, z, 0.07, -0.27, 0.12, -0.33, 0.006, 0.06));
+      if (-sc > d) { d = -sc; m = 3; }
+    }
+    if (y < -0.6 && bb(x, y, z, 0, -0.79, 0, 0.23, 0.15, 0.23) < d) { // helm
+      let hm = MX(sdSph(x, y, z, 0, -0.712, 0, 0.177), y + 0.7);
+      hm = MN(hm, sdDisc(x, y, z, -0.703, 0.198, 0.004, 0.011)); // brim
+      if (y < -0.78) hm = MN(hm, MX(AB(x) - 0.015, MX(Math.hypot(y + 0.712, z) - 0.218, y + 0.8))); // comb
+      hm = MX(hm, -sdSph(x, y, z, 0.1, -0.85, 0.15, 0.032)); // dent
+      if (hm < d) { d = hm; m = 9; }
+    }
+    if (x < 0 && bb(x, y, z, -0.15, -0.51, 0, 0.13, 0.1, 0.14) < d) { // pauldron: two lames on the left shoulder
+      const px = x + 0.13, py = y + 0.535, lx = px * ua[0] + py * ua[1], ly = px * va[0] + py * va[1];
+      let pa = sdEll(lx, ly + 0.012, z, 0.112, 0.052, 0.122);
+      pa = MN(pa, sdEll(lx - 0.075, ly + 0.0, z, 0.075, 0.042, 0.1));
+      if (pa < d) { d = pa; m = 9; }
+      const rv = sdSph(lx, ly, z, 0.0, -0.06, 0.095, 0.013); if (rv < d) { d = rv; m = 1; }
+    }
+    if (y > -0.55 && y < -0.15 && bb(x, y, z, 0.02, -0.35, 0, 0.21, 0.2, 0.21) < d) { // leather strap from the pauldron to the hip
+      const pl = 0.72 * (x + 0.12) - 0.69 * (y + 0.5);
+      const st = MX(AB(pl) - 0.021, latheD(T, x, y, z) - 0.012);
+      if (st < d) { d = st; m = 6; }
+    }
+    MT = m; return d;
+  });
+};
+LAZY.champion = () => { // CHAMPION: crested helm, laurel, cape: the pawn as a hero
+  const T = makeLathe([...PAWNLINE(1.08), sph(-0.712, 0.158)]);
+  const TC = makeLathe([curve([[-0.57, 0.11], [-0.52, 0.175], [-0.42, 0.215], [-0.3, 0.25], [-0.19, 0.285], [-0.12, 0.305], [-0.05, 0.315], [0.0, 0.318]])]);
+  scene('champion', 0.36, -1.08, (x, y, z) => {
+    let d = latheD(T, x, y, z), m = MT === 1 ? 8 : MT;
+    if (bb(x, y, z, 0, -0.34, -0.08, 0.33, 0.25, 0.26) < d) { // cape: bell of cloth hung from the shoulders, open at the front
+      let c = latheD(TC, x, y, z);
+      const fold = 0.013 * Math.sin(Math.atan2(x, -z) * 7) * sat((y + 0.52) / 0.3);
+      c = (c + fold) * 0.85;
+      c = MX(MX(c, -c - 0.03), y + 0.12);
+      c = MX(c, (z - 0.03 + 0.09 * sat((y + 0.5) / 0.35)) * 0.9);
+      if (c < d) { d = c; m = 6; }
+      const cl = MN(sdSph(x, y, z, 0.125, -0.53, 0.075, 0.03), sdSph(x, y, z, -0.125, -0.53, 0.075, 0.03)); // clasps
+      if (cl < d) { d = cl; m = 8; }
+    }
+    if (y < -0.56 && bb(x, y, z, 0, -0.8, 0, 0.32, 0.24, 0.2) < d) {
+      let hm = MX(sdSph(x, y, z, 0, -0.722, 0, 0.17), y + 0.6), mm = 9; // helm with cheek guards
+      if (y < -0.74) { // transverse crest
+        const cx = Math.hypot(x, y + 0.73), ang = Math.atan2(y + 0.73, x);
+        const outer = 0.285 + 0.006 * Math.sin(ang * 30), th = 0.032 * (0.55 + 0.45 * sat((cx - 0.12) / 0.16));
+        const cr = MX(MX(AB(z) - th, cx - outer), MX(0.13 - cx, y + 0.78 + 0.12 * AB(x))) * 0.85;
+        if (cr < hm) { hm = cr; mm = 6; }
+        const ridge = MX(torV(x, y, z, 0, -0.73, 0, 0.172, 0.02), y + 0.78); // gilt crest holder
+        if (ridge < hm) { hm = ridge; mm = 8; }
+      }
+      if (hm < d) { d = hm; m = mm; }
+      if (y < -0.76 && y > -0.86) { // laurel wreath at the brow
+        let lw = torH(x, y, z, -0.81, 0.152, 0.011);
+        fold(x, z, 18);
+        const rho = SQ(x * x + z * z), lx = rho * Math.cos(FOLD_A) - 0.158, lz = rho * Math.sin(FOLD_A);
+        lw = MN(lw, sdEll(lx, y + 0.826, lz, 0.016, 0.022, 0.011), sdEll(lx, y + 0.796, lz - 0.008, 0.016, 0.022, 0.011));
+        if (lw < d) { d = lw; m = 8; }
+      }
+      if (z > 0.06 && y > -0.77) { // T visor (carves helm and face)
+        const vs = MN(MX(AB(x) - 0.105, AB(y + 0.738) - 0.017), MX(AB(x) - 0.027, AB(y + 0.66) - 0.075));
+        const cv = -MX(vs, 0.1 - z);
+        if (cv > d) { d = cv; m = 3; }
+      }
+    }
+    MT = m; return d;
+  });
+};
+// Ascended filigree bands (y centres), read by the shader for any scene with .asc
+const FIL = { 'knight.asc': [-0.33], 'bishop.asc': [-0.33, -0.83], 'rook.asc': [-0.33, -0.62], 'queen.asc': [-0.33, -0.86] };
+LAZY['bishop.asc'] = () => { // ARCHBISHOP: halo behind the mitre, gilt cross finial
+  const B = getScene('bishop').fn;
+  scene('bishop.asc', 0.32, -1.3, (x, y, z) => {
+    let d = B(x, y, z), m = MT === 1 ? 8 : MT;
+    if (bb(x, y, z, 0, -0.9, -0.2, 0.24, 0.24, 0.025) < d) {
+      const h = torV(x, y, z, 0, -0.9, -0.2, 0.215, 0.017); if (h < d) { d = h; m = 5; }
+    }
+    if (y < -1.1) { const c = MN(sdBox(x, y + 1.215, z, 0.017, 0.062, 0.017, 0.006), sdBox(x, y + 1.235, z, 0.048, 0.016, 0.017, 0.006)); if (c < d) { d = c; m = 8; } }
+    const gm = sdSph(x, y, z, 0, -0.62, 0.095, 0.022); if (gm < d) { d = gm; m = 5; } // collar jewel
+    MT = m; return d;
+  });
+  SCENES['bishop.asc'].asc = 1;
+};
+LAZY['rook.asc'] = () => { // FORTRESS ROOK: a crown rising from the battlements, a ward ring, a lit arrow slit
+  const B = getScene('rook').fn;
+  scene('rook.asc', 0.34, -1.24, (x, y, z) => {
+    let d = B(x, y, z), m = MT === 1 ? 8 : MT === 3 ? 5 : MT;
+    if (bb(x, y, z, 0, -1.04, 0, 0.16, 0.17, 0.16) < d) {
+      const rho = SQ(x * x + z * z);
+      fold(x, z, 6);
+      const a = AB(FOLD_A) / (Math.PI / 6), yTop = -1.17 + 0.1 * Math.pow(a, 0.8);
+      let cr = MX(MX(AB(rho - 0.12) - 0.017, y + 0.9), (yTop - y) * 0.6);
+      let mm = 8;
+      const lx = rho * Math.cos(FOLD_A) - 0.12, lz = rho * Math.sin(FOLD_A);
+      const pe = SQ(lx * lx + (y + 1.18) * (y + 1.18) + lz * lz) - 0.022; if (pe < cr) { cr = pe; mm = 5; }
+      const core = sdSph(x, y, z, 0, -1.0, 0, 0.065); if (core < cr) { cr = core; mm = 5; }
+      if (cr < d) { d = cr; m = mm; }
+    }
+    if (bb(x, y, z, 0, -0.5, 0, 0.32, 0.03, 0.32) < d) { const w = torH(x, y, z, -0.5, 0.3, 0.012); if (w < d) { d = w; m = 5; } }
+    MT = m; return d;
+  });
+  SCENES['rook.asc'].asc = 1;
+};
+LAZY['queen.asc'] = () => { // EMPRESS: sunburst halo, glowing pearls
+  const B = getScene('queen').fn;
+  scene('queen.asc', 0.34, -1.3, (x, y, z) => {
+    let d = B(x, y, z), m = MT === 1 ? 8 : MT === 2 ? 5 : MT;
+    if (bb(x, y, z, 0, -1.04, -0.2, 0.33, 0.3, 0.03) < d) {
+      let h = torV(x, y, z, 0, -1.0, -0.2, 0.225, 0.016);
+      if (y < -0.93) { // rays
+        const ax = x, ay = y + 1.0, r = Math.hypot(ax, ay), s = 2 * Math.PI / 14, an = Math.atan2(ay, ax) + Math.PI / 2, la = an - s * Math.round(an / s);
+        const lr = r - 0.235, lt = r * Math.sin(la), w = 0.015 * (1 - sat(lr / 0.08));
+        const ray = MX(MX(AB(lt) - w, AB(lr - 0.04) - 0.04), AB(z + 0.2) - 0.009) * 0.75;
+        h = MN(h, ray);
+      }
+      if (h < d) { d = h; m = 5; }
+    }
+    MT = m; return d;
+  });
+  SCENES['queen.asc'].asc = 1;
+};
+LAZY['king.boss'] = () => { // BOSS KING: wider body, ermine-trimmed mantle, tall jewelled crown, glowing orb
+  const K = 1.1;
+  const T = makeLathe([...FOOT(),
+    curve([[-0.69, 0.094], [-0.6, 0.098], [-0.49, 0.112], [-0.37, 0.136], [-0.27, 0.168], [-0.19, 0.208], [-0.155, 0.22]]),
+    disk(-0.74, -0.69, 0.162, 0.016, 1), ring(-0.7, 0.022, 0.142, 1), ring(-0.758, 0.018, 0.115, 1),
+    curve([[-0.84, 0.17], [-0.81, 0.15], [-0.77, 0.12]], 1),
+  ]);
+  const TM = makeLathe([curve([[-0.77, 0.13], [-0.7, 0.19], [-0.56, 0.235], [-0.4, 0.27], [-0.26, 0.3], [-0.17, 0.318], [-0.135, 0.322], [-0.06, 0.33], [0.0, 0.335]])]); // runs past the hem (cut by a plane) so the field stays well-conditioned
+  scene('king.boss', 0.38, -1.42, (x, y, z) => {
+    let d = latheD(T, x / K, y, z / K), m = MT === 1 ? 8 : MT;
+    if (y > -0.8 && bb(x, y, z, 0, -0.44, 0, 0.35, 0.36, 0.35) < d) { // mantle
+      let c = latheD(TM, x, y, z);
+      const ang = Math.atan2(x, -z), fold = 0.012 * Math.sin(ang * 8) * sat((y + 0.6) / 0.35);
+      c = (c + fold) * 0.85;
+      c = MX(MX(c, -c - 0.03), y + 0.15);
+      let mm = y > -0.2 ? 7 : 6;
+      if (z > 0) { const hw = 0.05 + 0.17 * sat((y + 0.72) / 0.6), e = (hw - AB(x)) * 0.9; c = MX(c, e); if (e > -0.035) mm = 7; } // ermine along the opening
+      if (c < d) { d = c; m = mm; }
+      const col = torH(x, y, z, -0.76, 0.165, 0.058); if (col < d) { d = col; m = 7; } // ermine collar
+      const br = sdSph(x, y, z, 0, -0.73, 0.22, 0.03); if (br < d) { d = br; m = 2; } // brooch
+    }
+    if (y < -0.78 && bb(x, y, z, 0, -1.08, 0, 0.29, 0.33, 0.29) < d) { // crown
+      const rho = SQ(x * x + z * z), ro = 0.2 + 0.06 * sat((-0.8 - y) / 0.25);
+      let cr = MX(rho - ro, y + 0.79) * 0.96;
+      cr = MX(cr, -sdSph(x, y, z, 0, -1.09, 0, 0.235));
+      fold(x, z, 8);
+      const a = AB(FOLD_A) / (Math.PI / 8), yTop = -1.17 + 0.13 * Math.pow(a, 0.7);
+      cr = MX(cr, (yTop - y) * 0.55);
+      let mm = 8;
+      const lx = rho * Math.cos(FOLD_A) - 0.25, lz = rho * Math.sin(FOLD_A);
+      const pe = SQ(lx * lx + (y + 1.18) * (y + 1.18) + lz * lz) - 0.026; if (pe < cr) { cr = pe; mm = 8; }
+      fold(x, z, 8, Math.PI / 8);
+      const jx = rho * Math.cos(FOLD_A) - 0.222, jz = rho * Math.sin(FOLD_A), jw = sdEll(jx, y + 0.9, jz, 0.03, 0.038, 0.03);
+      if (jw < cr) { cr = jw; mm = 2; }
+      const cap = sdSph(x, y, z, 0, -0.99, 0, 0.215); if (cap < cr) { cr = cap; mm = 3; }
+      if (y < -1.04) {
+        const yy = (y + 1.04) * (y + 1.04), q1 = SQ(x * x + yy) - 0.2, a1 = MX(SQ(q1 * q1 + z * z) - 0.027, y + 1.06);
+        const q2 = SQ(z * z + yy) - 0.2, a2 = MX(SQ(q2 * q2 + x * x) - 0.027, y + 1.06);
+        const ar = MN(a1, a2); if (ar < cr) { cr = ar; mm = 8; }
+      }
+      const orb = sdSph(x, y, z, 0, -1.28, 0, 0.062); if (orb < cr) { cr = orb; mm = 5; }
+      const cx = MN(sdBox(x, y + 1.37, z, 0.019, 0.035, 0.019, 0.006), sdBox(x, y + 1.37, z, 0.042, 0.014, 0.019, 0.006));
+      if (cx < cr) { cr = cx; mm = 8; }
+      if (cr < d) { d = cr; m = mm; }
+    }
+    MT = m; return d;
+  });
+  SCENES['king.boss'].boss = 1;
 };
 
 // ---------------------------------------------------------------- G-buffer (skin independent)
@@ -572,12 +804,13 @@ function rgb(c) {
 const lerp3 = (a, b, t) => [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)];
 const mul3 = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
 const lum = (c) => c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+const hex3 = (c) => '#' + c.map((v) => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join('');
 
 // defaults for skins that predate the material fields (SKINS fields always win)
 const HINTS = {
-  ivory: { mat: 'porcelain', accent: '#d8b15e' }, obsidian: { mat: 'obsidian', accent: '#c4bcff' },
-  ember: { mat: 'magma' }, glacier: { mat: 'glass', pattern: 'frost' }, verdant: { mat: 'jade', pattern: 'veins' },
-  neon: { mat: 'neon' }, gilded: { mat: 'metal', pattern: 'filigree' }, crimson: { mat: 'lacquer', accent: '#ffcf6a', pattern: 'filigree' },
+  ivory: { mat: 'porcelain', accent: '#d8b15e', cape: '#9c1a2c' }, obsidian: { mat: 'obsidian', accent: '#c4bcff' },
+  ember: { mat: 'magma', cape: '#3a1630' }, glacier: { mat: 'glass', pattern: 'frost' }, verdant: { mat: 'jade', pattern: 'veins' },
+  neon: { mat: 'neon' }, gilded: { mat: 'metal', pattern: 'filigree', cape: '#8a1224' }, crimson: { mat: 'lacquer', accent: '#ffcf6a', pattern: 'filigree', cape: '#241840' },
   celestial: { mat: 'iridescent', pattern: 'stars' }, voidborn: { mat: 'cosmic' }, arcane: { mat: 'iridescent', pattern: 'runes' },
   sovereign: { mat: 'obsidian', accent: '#ffd76a', pattern: 'filigree' }, warden: { mat: 'metal', accent: '#e8f6ff', pattern: 'runes' },
   colossus: { mat: 'cosmic', pattern: 'cracks', emissive: 0.6 }, jade: { mat: 'jade' }, amethyst: { mat: 'crystal' },
@@ -637,6 +870,20 @@ export function materialOf(skinId) {
   m.anim = animOf(m, sk);
   m.void3 = lerp3(m.line, m.glow, 0.12); m.velvet3 = lerp3(mul3(m.glow, 0.32), m.deep, 0.35); m.eyeDark = mul3(m.line, 0.7);
   m.hotC = lerp3(m.glow, m.b0, 0.5); m.veinC = m.accent || lerp3(m.line, m.b1, 0.4); m.inkC = lerp3(m.line, m.glow, 0.35); m.specC = type === 'metal' ? lerp3(m.rim, m.b0, 0.3) : m.rim;
+  // 15.0 extra materials: gilt (gold, or the skin's own accent), steel, divine emissive, cloth, ermine
+  const GOLD = [1.0, 0.79, 0.36];
+  m.gilt = m.accent || (type === 'metal' ? lerp3(GOLD, m.b0, 0.35) : GOLD);
+  m.steel = lerp3(lerp3([0.74, 0.77, 0.83], m.b0, 0.18), m.b1, lum(m.b0) < 0.3 ? 0.15 : 0.05);
+  m.divC = lerp3([1.0, 0.9, 0.62], m.glow, 0.3);
+  m.ermC = [0.96, 0.95, 0.91];
+  const capeHex = sk.cape || h.cape;
+  if (capeHex) m.clothC = rgb(capeHex);
+  else {
+    const gl = m.glow, mx = MX(gl[0], gl[1], gl[2]), sv = mx - MN(gl[0], gl[1], gl[2]);
+    if (sv < 0.4) m.clothC = [0.58, 0.08, 0.12];
+    else { const c = mul3(gl, 0.6 / MX(0.05, mx)), l = lum(c); m.clothC = [clamp(l + (c[0] - l) * 1.25, 0, 1), clamp(l + (c[1] - l) * 1.25, 0, 1), clamp(l + (c[2] - l) * 1.25, 0, 1)]; }
+  }
+  m.divHex = hex3(m.divC);
   MATCACHE.set(skinId, m); return m;
 }
 function animOf(m, sk) {
@@ -713,11 +960,11 @@ function pattern(p, x, y, z, ph) {
 
 // Shade a G-buffer for a skin. Returns RGBA for the base and additive overlay layers (one per animation phase).
 function shadeInit(g, skinId) {
-  const m = materialOf(skinId), n = g.W * g.H, nph = m.anim ? NPH[m.anim] : 0;
+  const m = materialOf(skinId), n = g.W * g.H, anim = m.anim, nph = anim ? NPH[anim] : 0;
   // RGBA buffers cover only the rows with coverage (offset `off`), and are pooled to keep GC quiet
   const k0 = g.by1 >= 0 ? g.by0 * g.W : 0, k1 = g.by1 >= 0 ? (g.by1 + 1) * g.W : 0, len = MX(4, (k1 - k0) * 4);
   const layers = []; for (let k = 0; k < nph; k++) layers.push(takeBuf(len));
-  return { g, skinId, m, base: takeBuf(len), layers, nph, k: k0, n: k1, off: k0 };
+  return { g, skinId, m, anim, base: takeBuf(len), layers, nph, k: k0, n: k1, off: k0 };
 }
 function shade(g, skinId) { const st = shadeInit(g, skinId); shadeRun(st, 1e12); return st; }
 const POOL = new Map();
@@ -765,13 +1012,26 @@ function shadeRun(st, count) {
     let alpha = a0;
     em[0] = em[1] = em[2] = 0; for (let q = 0; q < nph; q++) dyn[q] = 0;
     let dynC = m.glow; // overlay colour
-    if (mid === 1 && m.accent) { // metal trim
-      const e = envL(rx, ry, rz), I = clamp((0.2 + 0.75 * e + 0.35 * MX(0, ndl)) * (0.4 + 0.6 * occ) * (0.6 + 0.4 * sh), 0, 1.6), a = m.accent;
+    if ((mid === 1 && m.accent) || mid === 8 || mid === 9) { // metal trim, gilt, steel
+      const e = envL(rx, ry, rz), I = clamp((0.2 + 0.75 * e + 0.35 * MX(0, ndl)) * (0.4 + 0.6 * occ) * (0.6 + 0.4 * sh), 0, 1.6), a = mid === 8 ? m.gilt : mid === 9 ? m.steel : m.accent;
       const t = sat(I * 1.15);
       col[0] = mix(a[0] * 0.28, a[0], t); col[1] = mix(a[1] * 0.28, a[1], t); col[2] = mix(a[2] * 0.28, a[2], t);
       const s = Math.pow(ndh, 90) * 1.6 * sh + MX(0, I - 1) * 0.8; col[0] += s; col[1] += s; col[2] += s * 0.9;
-      if (m.anim === 'shimmer') for (let q = 0; q < nph; q++) dyn[q] = shimC(HQ[q], ci, nx, ny, nz, q, nph) * 0.9;
-      dynC = m.rim;
+      if (m.anim === 'shimmer' || (mid === 8 && nph)) for (let q = 0; q < nph; q++) dyn[q] = shimC(HQ[q], ci, nx, ny, nz, q, nph) * 0.9;
+      dynC = mid === 8 ? lerp3(m.gilt, [1, 1, 1], 0.5) : m.rim;
+    } else if (mid === 5) { // divine emissive (halos, orbs, ascended gems)
+      const c = m.divC, dl = 0.5 + 0.5 * MX(0, ndl), s = Math.pow(ndh, 50) * 1.3;
+      col[0] = c[0] * dl + s; col[1] = c[1] * dl + s; col[2] = c[2] * dl + s;
+      em[0] = c[0] * 0.3; em[1] = c[1] * 0.3; em[2] = c[2] * 0.3;
+      for (let q = 0; q < nph; q++) dyn[q] = 0.4 + 0.35 * Math.cos(6.2832 * q / nph);
+      dynC = c;
+    } else if (mid === 6) { // cloth: soft wrap light, velvet sheen at grazing angles
+      const c = m.clothC, I = (0.2 + 0.8 * sat((ndl + 0.4) / 1.4) * sh) * occ, sv = F * 0.55, sp = Math.pow(ndh, 14) * 0.1 * sh;
+      col[0] = c[0] * I * 1.25 + mix(c[0], m.rim[0], 0.5) * sv + sp; col[1] = c[1] * I * 1.25 + mix(c[1], m.rim[1], 0.5) * sv + sp; col[2] = c[2] * I * 1.25 + mix(c[2], m.rim[2], 0.5) * sv + sp;
+    } else if (mid === 7) { // ermine: white fur with black tail spots
+      const c = m.ermC, I = (0.45 + 0.6 * sat((ndl + 0.5) / 1.5)) * (0.5 + 0.5 * occ) * (0.7 + 0.3 * sh), fz = 0.9 + 0.18 * vnoise(x * 80, y * 80, z * 80);
+      const sp = heavy ? sstep(0.8, 0.86, vnoise(x * 16 + 5, y * 16, z * 16)) : 0, k2 = I * fz * (1 - 0.86 * sp);
+      col[0] = c[0] * k2; col[1] = c[1] * k2; col[2] = c[2] * k2;
     } else if (mid === 2) { // jewel / core
       const gm = m.gem, d = MX(0, ndl);
       col[0] = gm[0] * (0.3 + 0.7 * d) + gm[0] * F * 0.6; col[1] = gm[1] * (0.3 + 0.7 * d) + gm[1] * F * 0.6; col[2] = gm[2] * (0.3 + 0.7 * d) + gm[2] * F * 0.6;
@@ -780,7 +1040,7 @@ function shadeRun(st, count) {
       for (let q = 0; q < nph; q++) dyn[q] = 0.25 + 0.25 * Math.cos(6.2832 * q / nph);
       dynC = gm;
     } else if (mid === 3) { // cavity / velvet
-      const isVoid = isGhost || type === 'colossus' || g.piece !== 'king';
+      const isVoid = isGhost || type === 'colossus' || (g.piece !== 'king' && g.piece !== 'king.boss');
       const base3 = isVoid ? m.void3 : m.velvet3;
       const sheen = isVoid ? 0.15 : 0.55;
       const I = (0.25 + 0.75 * MX(0, ndl)) * occ;
@@ -860,7 +1120,7 @@ function shadeRun(st, count) {
         case 'ghost': {
           ramp(m, 0.25 + I * 0.75, col);
           const fade = sstep(0.0, -0.32, y);
-          alpha *= (0.38 + 0.5 * fade + 0.3 * F) * (g.piece === 'hollow' ? 1 : 0.9);
+          alpha *= g.piece === 'hollow' ? MN(1, 0.52 + 0.45 * fade + 0.3 * F) : (0.38 + 0.5 * fade + 0.3 * F) * 0.9; // 15.0: Hollows hold up on dark boards
           const w = pv * 0.35; em[0] = m.glow[0] * (w + F * 0.6); em[1] = m.glow[1] * (w + F * 0.6); em[2] = m.glow[2] * (w + F * 0.6);
           for (let q = 0; q < nph; q++) { const WQa = WQ[q]; let v = WQa ? WQa[ci] : NaN; if (v !== v) { v = pattern('wisps', x, y, z, q / nph); if (WQa) WQa[ci] = v; } dyn[q] = v * 0.45 * (0.4 + fade); }
           pv = 0;
@@ -868,7 +1128,7 @@ function shadeRun(st, count) {
         }
         case 'colossus': {
           ramp(m, I, col);
-          const cr = pv; em[0] = m.glow[0] * cr * 1.1 + m.glow[0] * PAT_C * 0.18; em[1] = m.glow[1] * cr * 1.1 + m.glow[1] * PAT_C * 0.18; em[2] = m.glow[2] * cr * 1.1 + m.glow[2] * PAT_C * 0.18;
+          const cr = pv; em[0] = m.glow[0] * cr * 1.3 + m.glow[0] * PAT_C * 0.24; em[1] = m.glow[1] * cr * 1.3 + m.glow[1] * PAT_C * 0.24; em[2] = m.glow[2] * cr * 1.3 + m.glow[2] * PAT_C * 0.24;
           for (let q = 0; q < nph; q++) dyn[q] = cr * (0.4 + 0.6 * Math.cos(6.2832 * (y * 0.9 - q / nph)) ** 2);
           pv = 0;
           break;
@@ -893,6 +1153,16 @@ function shadeRun(st, count) {
         else if (pat === 'frost') { const k2 = pv * 0.45; col[0] = mix(col[0], 1, k2); col[1] = mix(col[1], 1, k2); col[2] = mix(col[2], 1, k2); }
         else if (pat === 'swirl') { const k2 = (pv - 0.5) * 0.5; col[0] *= 1 + k2; col[1] *= 1 + k2; col[2] *= 1 + k2; }
         else if (pat === 'grain' || pat === 'pores') { const k2 = pv * 0.28; col[0] *= 1 - k2; col[1] *= 1 - k2; col[2] *= 1 - k2; }
+      }
+      if (g.S.asc && mid === 0) { // Ascended: gilt filigree bands with a faint inner glow
+        const fv = ascFil(FIL[g.piece], x, y, z);
+        if (fv > 0) {
+          const a = m.gilt, I2 = 0.4 + 0.9 * I, k2 = fv * 0.85, dv = m.divC;
+          col[0] = mix(col[0], a[0] * I2, k2); col[1] = mix(col[1], a[1] * I2, k2); col[2] = mix(col[2], a[2] * I2, k2);
+          em[0] += dv[0] * fv * 0.18; em[1] += dv[1] * fv * 0.18; em[2] += dv[2] * fv * 0.18;
+          for (let q = 0; q < nph; q++) dyn[q] = MX(dyn[q], fv * (0.25 + 0.25 * Math.cos(6.2832 * (Math.atan2(x, z) * 0.16 - q / nph))));
+          if (!m.anim) dynC = dv;
+        }
       }
       // specular, environment, rim light, subsurface
       const sp = Math.pow(ndh, m.shin) * m.spec * sh * (type === 'metal' ? 1.2 : 1);
@@ -929,6 +1199,18 @@ function shimmer(nx, ny, nz, q, nph) {
   const lx = Math.cos(a) * 0.8, ly = -0.55, lz = 0.35 + Math.sin(a) * 0.3;
   const hx = lx + V[0], hy = ly + V[1], hz = lz + V[2], hl = Math.hypot(hx, hy, hz);
   return Math.pow(MX(0, (nx * hx + ny * hy + nz * hz) / hl), 70) * 1.3;
+}
+function ascFil(B, x, y, z) {
+  if (!B) return 0;
+  let best = 0;
+  for (let i = 0; i < B.length; i++) {
+    const v = y - B[i]; if (v > 0.05 || v < -0.05) continue;
+    const u = Math.atan2(x, z) * SQ(x * x + z * z);
+    const lines = sstep(0.009, 0.004, AB(AB(v) - 0.04)), vine = sstep(0.008, 0.003, AB(v - 0.022 * Math.sin(u * 52)));
+    const bud = sstep(0.012, 0.006, Math.hypot(fract(u * 52 / 6.2832 + 0.25) * 0.121 - 0.06, v));
+    best = MX(best, lines, vine, bud);
+  }
+  return best;
 }
 const tone = (v) => 255 * (v < 0.82 ? v : 0.82 + 0.18 * (1 - Math.exp(-(v - 0.82) * 4.5)));
 
@@ -997,7 +1279,7 @@ function* finishSteps(piece, skinId, res, g, sh) {
     if (big) yield;
     layers.push({ img: imgCanvas(Bs.w, Bs.h, sub(L2, Bs)), x: Bs.x, y: Bs.y, w: Bs.w, h: Bs.h });
   }
-  const s = { c: { img: c, x: B.x, y: B.y, w: B.w, h: B.h }, sil: { img: silB, x: Bs.x, y: Bs.y, w: Bs.w, h: Bs.h }, layers, W, H, res, ox: g.ox, oy: g.oy, anim: m.anim, outl: new Map(), used: now() }; sprVer++;
+  const s = { c: { img: c, x: B.x, y: B.y, w: B.w, h: B.h }, sil: { img: silB, x: Bs.x, y: Bs.y, w: Bs.w, h: Bs.h }, layers, W, H, res, ox: g.ox, oy: g.oy, anim: sh.anim, outl: new Map(), used: now() }; sprVer++;
   giveBufs(sh);
   s.px = B.w * B.h + Bs.w * Bs.h * (1 + layers.length);
   const old = SPR.get(key); if (old) sprPx -= old.px;
@@ -1096,6 +1378,15 @@ function pick() {
       if (g && !g.done && j.res >= BIG && ![...JOBS.values()].some((o) => o.piece === j.piece && o.res === j.res)) GB.delete(gk);
       continue;
     }
+    // R 15.0 (menu slowdown fix, CA please review): an icon whose <img> left the page (match HUD, feed, results after
+    // going back to the menu) kept its job and stand-in forever; swapIcons re-requested every stand-in whenever any
+    // sprite finished, so the queue never emptied and scanVisible ran getBoundingClientRect on every stand-in <img>
+    // ~7 times a second on the menus. Drop such a job (and its stand-ins) after a grace period; pieceIcon() makes a new
+    // one if that icon is shown again.
+    if (j.icon && !j.fin && t - j.born > 2500 && t - j.seen > STALE_MS) {
+      let shown = false; for (const k of j.iconKeys || []) { const e = TEMP.get(k); if (e && INDOM.has(e)) { shown = true; break; } }
+      if (!shown) { for (const k of j.iconKeys || []) { const e = TEMP.get(k); if (e) { TEMP.delete(k); TEMPURL.delete(e.url); } } JOBS.delete(j.key); continue; }
+    }
     const p = prioOf(j, t);
     if (p > bp) { bp = p; best = j; }
   }
@@ -1170,6 +1461,7 @@ function drawFallback(ctx, piece, sk) {
 const PENDING = new Map(), FADES = new Map(), FADE_MS = 240, BIGSTABLE = new Map();
 export function drawPiece(ctx, piece, skinId, opts = {}) {
   const { flash = 0, alpha = 1, outline = null } = opts, live = opts.t !== undefined, t = opts.t || 0;
+  piece = pieceVariant(piece, opts);
   if (!LAZY[piece]) piece = 'pawn';
   if (piece === 'colossus' && skinId === 'hollow') skinId = 'colossus-boss';
   if (skinId !== 'hollow' && skinId !== 'colossus-boss' && !SKINS[skinId]) skinId = 'ivory';
@@ -1205,6 +1497,8 @@ export function drawPiece(ctx, piece, skinId, opts = {}) {
   if (s) s.used = now();
   ctx.save();
   ctx.globalAlpha *= alpha;
+  const aura = live && opts.aura !== false && hasAura(piece);
+  if (aura) drawPieceAura(ctx, piece, skinId, t, 'back');
   if (from) { // cross-fade from what was shown before the matching sprite was ready
     ctx.save();
     if (from.s) blitSprite(ctx, from.s, 0, null, 0); else drawFallback(ctx, piece, skinOf(skinId));
@@ -1217,7 +1511,58 @@ export function drawPiece(ctx, piece, skinId, opts = {}) {
     ctx.restore(); return;
   }
   blitSprite(ctx, s, flash, outline, t);
+  if (aura) drawPieceAura(ctx, piece, skinId, t, 'front');
   ctx.restore();
+}
+
+// ---------------------------------------------------------------- 15.0 aura (Ascended pieces, boss King)
+// Cheap per frame: 2-3 cached glow sprites plus 4-7 motes, all drawImage, additive. drawPiece with opts.t draws it
+// itself (opts.aura = false to skip); callers that blit static sprites (fx.hiSprite) call drawPieceAura themselves:
+// 'back' before the piece and 'front' after it, in the same local units as drawPiece. Reduced motion: static glow.
+export const hasAura = (kind) => isAscendedKind(kind) || kind === 'king.boss';
+const HOT = { 'knight.asc': [0, -1.25, 0.2], 'bishop.asc': [0, -0.92, 0.3], 'rook.asc': [0, -0.97, 0.2], 'queen.asc': [0, -1.02, 0.3], 'king.boss': [0, -1.23, 0.26] };
+const GLOWTEX = new Map();
+function glowTex(col, kind = 0) {
+  const key = col + kind; let c = GLOWTEX.get(key); if (c) return c;
+  if (typeof document === 'undefined') return null;
+  c = mkCanvas(64, 64); const x = c.getContext('2d');
+  if (kind === 1) { // soft ellipse ring for the ground
+    x.translate(32, 32); x.scale(1, 0.32); const g = x.createRadialGradient(0, 0, 14, 0, 0, 31);
+    g.addColorStop(0, col + '00'); g.addColorStop(0.55, col + 'cc'); g.addColorStop(0.75, col + '55'); g.addColorStop(1, col + '00');
+    x.fillStyle = g; x.beginPath(); x.arc(0, 0, 31, 0, Math.PI * 2); x.fill();
+  } else {
+    const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    if (kind === 2) { g.addColorStop(0, '#ffffff'); g.addColorStop(0.25, col); g.addColorStop(1, col + '00'); }
+    else { g.addColorStop(0, col + 'cc'); g.addColorStop(0.45, col + '44'); g.addColorStop(1, col + '00'); }
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  }
+  if (GLOWTEX.size > 48) GLOWTEX.clear();
+  GLOWTEX.set(key, c); return c;
+}
+export function drawPieceAura(ctx, kind, skinId, t = 0, layer = 'back', k = 1) {
+  if (!hasAura(kind)) return;
+  const boss = kind === 'king.boss', col = boss ? '#ffc23d' : materialOf(skinId === 'hollow' ? 'ivory' : skinId).divHex;
+  const G = glowTex(col), D = glowTex(col, 2); if (!G) return;
+  const tt = MOTION ? t : 0, top = -(PIECE_TOP[kind] || 1.1), ga = ctx.globalAlpha, p = 0.5 + 0.5 * Math.sin(tt * 2.2);
+  const op = ctx.globalCompositeOperation; ctx.globalCompositeOperation = 'lighter';
+  if (layer !== 'front') {
+    const w = boss ? 1.3 : 0.95, h = top * (boss ? 1.35 : 1.2);
+    ctx.globalAlpha = ga * k * (boss ? 0.3 : 0.2) * (0.8 + 0.2 * p); ctx.drawImage(G, -w / 2, -top * 0.52 - h / 2, w, h);
+    const rw = (boss ? 0.92 : 0.78) * (1 + 0.05 * p);
+    ctx.globalAlpha = ga * k * (boss ? 0.55 : 0.4); ctx.drawImage(glowTex(col, 1), -rw / 2, -rw * 0.16, rw, rw * 0.32);
+    const hs = HOT[kind]; if (hs) { const r = hs[2] * (1 + 0.12 * p); ctx.globalAlpha = ga * k * (0.35 + 0.2 * p); ctx.drawImage(G, hs[0] - r, hs[1] - r, r * 2, r * 2); }
+    if (boss) { ctx.globalAlpha = ga * k * 0.22 * (0.7 + 0.3 * p); ctx.drawImage(glowTex('#ff3f6c'), -0.55, -0.85, 1.1, 0.8); }
+  }
+  const n = boss ? 7 : 4;
+  for (let i = 0; i < n; i++) {
+    const a = 6.2832 * (i / n) + tt * (boss ? 0.7 : 0.9), dz = Math.sin(a);
+    if ((layer === 'front') !== (dz > 0) && layer !== 'both') continue;
+    const life = fract(tt * 0.32 + i * 0.37), r = (boss ? 0.36 : 0.3) * (1 - life * 0.35);
+    const sz = (boss ? 0.075 : 0.06) * (0.7 + 0.3 * dz), x = Math.cos(a) * r, y = -0.08 - life * top * 0.95 + dz * 0.05;
+    ctx.globalAlpha = ga * k * Math.sin(Math.PI * life) * (0.55 + 0.35 * dz); if (ctx.globalAlpha <= 0.02) continue;
+    ctx.drawImage(D, x - sz / 2, y - sz / 2, sz, sz);
+  }
+  ctx.globalCompositeOperation = op; ctx.globalAlpha = ga;
 }
 function blitSprite(ctx, s, flash, outline, t) {
   const ir = 1 / s.res, dx = -s.ox * ir, dy = -s.oy * ir;
@@ -1266,7 +1611,9 @@ function iconCanvas(piece, skinId, color, px, res) {
   const sc = iconFrame(piece, px);
   x.translate(px / 2, px * 0.9);
   x.scale(sc, sc);
+  if (hasAura(piece)) drawPieceAura(x, piece, skinId, 0, 'back', px < 48 ? 0.8 : 1);
   drawPiece(x, piece, skinId, { res });
+  if (hasAura(piece) && px >= 48) drawPieceAura(x, piece, skinId, 0, 'front');
   return c;
 }
 const SVGD = {};
@@ -1279,7 +1626,8 @@ function svgStandIn(piece, skinId, color, px) {
     + `<g opacity=".85" transform="translate(${px / 2} ${px * 0.9}) scale(${sc.toFixed(3)})"><path d="${d}" fill="url(#b)" stroke="${sk.line}" stroke-width="0.03" stroke-linejoin="round"/></g></svg>`;
   return 'data:image/svg+xml,' + encodeURIComponent(svg);
 }
-export function pieceIcon(piece, skinId, color = null, px = 64) {
+export function pieceIcon(piece, skinId, color = null, px = 64, opts = null) {
+  piece = pieceVariant(piece, opts);
   const key = piece + '|' + skinId + '|' + color + '|' + px;
   const hit = ICONS.get(key); if (hit) return hit;
   const tmp = TEMP.get(key); if (tmp) return tmp.url;
@@ -1300,7 +1648,7 @@ export function pieceIcon(piece, skinId, color = null, px = 64) {
   return url;
 }
 // debug / tests: true once pieceIcon(...) returns the final (non stand-in) image
-export const iconReady = (piece, skinId, color = null, px = 64) => ICONS.has(piece + '|' + skinId + '|' + color + '|' + px);
+export const iconReady = (piece, skinId, color = null, px = 64, opts = null) => ICONS.has(pieceVariant(piece, opts) + '|' + skinId + '|' + color + '|' + px);
 // B3 10.1: blob: icon URLs pin their PNG until revoked; free them when the memo is dropped (shown <img>s keep their decoded image)
 function clearIcons() {
   const old = [...ICONS.values()].filter((u) => typeof u === 'string' && u.startsWith('blob:')); ICONS.clear();
@@ -1367,8 +1715,13 @@ class SvgRec {
   arc(cx, cy, r) { this.ellipse(cx, cy, r, r); }
 }
 function tracePiece(p, piece) {
+  piece = basePiece(piece);
   plinth(p);
   switch (piece) {
+    case 'veteran': p.rect(-0.2, -0.73, 0.4, 0.035); // brim, then the pawn
+    // falls through
+    case 'champion': if (piece === 'champion') { p.moveTo(-0.28, -0.8); p.quadraticCurveTo(0, -1.18, 0.28, -0.8); p.lineTo(0.14, -0.8); p.quadraticCurveTo(0, -0.95, -0.14, -0.8); p.closePath(); p.moveTo(-0.3, -0.12); p.lineTo(-0.16, -0.55); p.lineTo(0.16, -0.55); p.lineTo(0.3, -0.12); p.closePath(); }
+    // falls through
     case 'pawn': p.moveTo(-0.2, -0.16); p.quadraticCurveTo(-0.1, -0.3, -0.09, -0.5); p.lineTo(0.09, -0.5); p.quadraticCurveTo(0.1, -0.3, 0.2, -0.16); p.closePath(); p.moveTo(0.16, -0.7); p.arc(0, -0.7, 0.16, 0, Math.PI * 2); break;
     case 'rook': p.moveTo(-0.22, -0.16); p.lineTo(-0.18, -0.78); p.lineTo(0.18, -0.78); p.lineTo(0.22, -0.16); p.closePath(); p.rect(-0.25, -0.98, 0.5, 0.2); break;
     case 'bishop': p.moveTo(-0.2, -0.16); p.lineTo(-0.09, -0.6); p.lineTo(0.09, -0.6); p.lineTo(0.2, -0.16); p.closePath(); p.ellipse(0, -0.82, 0.16, 0.24, 0, 0, Math.PI * 2); p.moveTo(0.04, -1.11); p.arc(0, -1.11, 0.04, 0, Math.PI * 2); break;

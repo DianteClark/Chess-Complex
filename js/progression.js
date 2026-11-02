@@ -1,28 +1,45 @@
 // Season track (Crown Path), achievements, titles, login streak, collections and profile stats. Pure functions over the saved profile.
-import { SEASON, PAST_SEASONS, SEASON_REWARDS, ACHIEVEMENTS, SKINS, BOARDS, FINISHERS, TRAILS, EMOTE_PACKS, BUNDLES, MODES, LOGIN_REWARDS, RARITIES, DEFAULT_SKINS, DEFAULT_BOARDS, DEFAULT_FINISHERS, PIECES, MASTERY_MAX, masteryCost, MASTERY_TITLES } from './data.js';
+import { SEASON, PAST_SEASONS, SEASON_REWARDS, ROYAL_PASS, ROYAL_REWARDS, ACHIEVEMENTS, SKINS, BOARDS, FINISHERS, TRAILS, EMOTE_PACKS, BANNERS, DEFAULT_BANNERS, BUNDLES, MODES, LOGIN_REWARDS, RARITIES, DEFAULT_SKINS, DEFAULT_BOARDS, DEFAULT_FINISHERS, PIECES, PASSIVES, ABILITIES, MASTERY_MAX, masteryCost, MASTERY_TITLES } from './data.js';
 
 const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 
 export function ensureProgress(p) {
-  p.stats = Object.assign({ games: 0, wins: 0, kills: 0, crowns: 0, queens: 0, shardsTotal: 0, ults: 0, hollows: 0, streak: 0, bestStreak: 0, hardWins: 0, flawless: 0, blitzWins: 0, duelWins: 0, dailyDays: 0, squadWins: 0, siegeWins: 0, bestWave: 0, revives: 0, colossi: 0, topMastery: 0, dmgTotal: 0 }, p.stats && typeof p.stats === 'object' ? p.stats : {});
+  p.stats = Object.assign({ games: 0, wins: 0, kills: 0, crowns: 0, queens: 0, shardsTotal: 0, ults: 0, hollows: 0, streak: 0, bestStreak: 0, hardWins: 0, flawless: 0, blitzWins: 0, duelWins: 0, dailyDays: 0, squadWins: 0, siegeWins: 0, bestWave: 0, revives: 0, colossi: 0, topMastery: 0, dmgTotal: 0, statusApplied: 0, regicides: 0, ascensions: 0, champions: 0, championWins: 0, partyGames: 0 }, p.stats && typeof p.stats === 'object' ? p.stats : {});
   for (const k of Object.keys(p.stats)) if (typeof p.stats[k] !== 'number' || !isFinite(p.stats[k])) p.stats[k] = 0;
   if (!p.mastery || typeof p.mastery !== 'object') p.mastery = {};
   for (const k of Object.keys(PIECES)) p.mastery[k] = Math.max(0, Math.floor(+p.mastery[k] || 0));
   // migrate legacy counters
   p.stats.games = Math.max(p.stats.games, p.games || 0); p.stats.wins = Math.max(p.stats.wins, p.wins || 0);
   p.stats.kills = Math.max(p.stats.kills, p.kills || 0); p.stats.crowns = Math.max(p.stats.crowns, p.crowns || 0);
-  // seasons: a profile from an older season keeps a record of how far it got, then starts the new track at tier 0
+  // seasons: a profile from an older season keeps a record of how far it got (and whether it had the Royal Pass), then starts the new track at tier 0
   if (!Array.isArray(p.pastSeasons)) p.pastSeasons = [];
   p.pastSeasons = p.pastSeasons.filter((s) => s && typeof s === 'object' && typeof s.id === 'number');
   if (!p.season || typeof p.season !== 'object' || p.season.id !== SEASON.id) {
     const old = p.season && typeof p.season === 'object' ? p.season : null;
-    if (old && typeof old.id === 'number' && old.id !== SEASON.id && !p.pastSeasons.some((s) => s.id === old.id)) p.pastSeasons.push({ id: old.id, tier: Math.max(0, Math.floor(+old.tier || 0)) });
-    p.season = { id: SEASON.id, xp: 0, tier: 0 };
+    if (old && typeof old.id === 'number' && old.id !== SEASON.id && !p.pastSeasons.some((s) => s.id === old.id)) {
+      const otx = +old.txp > 0 ? +old.txp : 250; // seasons before 15.0 used 250 XP tiers and never stored it
+      const t0 = Math.floor(+old.tier || (+old.xp || 0) / otx);
+      const rec = { id: old.id, tier: Number.isFinite(t0) ? Math.max(0, Math.min(99, t0)) : 0 };
+      if (old.pass === true) rec.pass = true;
+      p.pastSeasons.push(rec);
+    }
+    p.season = { id: SEASON.id, xp: 0, tier: 0, txp: SEASON.tierXp, pass: false, prem: -1 };
   }
   p.season.xp = Math.max(0, Math.floor(+p.season.xp || 0));
+  // tier size changed mid-season (a rebalance): rescale XP so nobody loses or re-earns a tier
+  if (+p.season.txp > 0 && p.season.txp !== SEASON.tierXp) p.season.xp = Math.round(p.season.xp * SEASON.tierXp / p.season.txp);
+  p.season.txp = SEASON.tierXp;
   p.season.tier = Math.min(SEASON.tiers, Math.floor(p.season.xp / SEASON.tierXp));
   if (!Array.isArray(p.season.pending)) p.season.pending = [];
-  if (typeof p.season.shown !== 'number') p.season.shown = p.season.tier; // last tier whose item reward was shown with the reveal // tiers whose reward fell back (e.g. finisher not shipped yet)
+  if (typeof p.season.shown !== 'number') p.season.shown = p.season.tier; // last tier whose item reward was shown with the reveal
+  // Royal Pass: pass = bought this season; prem = highest premium tier already granted (-1 = none); ppending = premium tiers paid as a fallback
+  p.season.pass = p.season.pass === true;
+  p.season.prem = p.season.pass ? Math.max(-1, Math.min(SEASON.tiers, Math.floor(Number.isFinite(+p.season.prem) ? +p.season.prem : -1))) : -1;
+  if (!Array.isArray(p.season.ppending)) p.season.ppending = [];
+  if (typeof p.season.pshown !== 'number') p.season.pshown = p.season.prem;
+  if (!Array.isArray(p.locations)) p.locations = [];
+  p.locations = [...new Set(arr(p.locations))].slice(0, 40);
+  ensureUnlocks(p);
   if (!Array.isArray(p.achievements)) p.achievements = [];
   if (!Array.isArray(p.titles)) p.titles = [];
   p.titles = arr(p.titles);
@@ -48,9 +65,10 @@ export function resolveReward(r) {
   if (r.board && !BOARDS[r.board]) return r.fallback || { marks: 500 };
   if (r.trail && !TRAILS[r.trail]) return r.fallback || { marks: 300 };
   if (r.emote && !EMOTE_PACKS[r.emote]) return r.fallback || { marks: 200 };
+  if (r.banner && !BANNERS[r.banner]) return r.fallback || { marks: 150 };
   return r;
 }
-export const rewardKind = (r) => (r.skin ? 'skin' : r.board ? 'board' : r.finisher ? 'finisher' : r.trail ? 'trail' : r.emote ? 'emote' : null);
+export const rewardKind = (r) => (r.skin ? 'skin' : r.board ? 'board' : r.finisher ? 'finisher' : r.trail ? 'trail' : r.emote ? 'emote' : r.banner ? 'banner' : null);
 export function rewardLabel(r0) {
   const r = resolveReward(r0);
   if (r.skin) return { kind: 'Piece Set', name: SKINS[r.skin].name, icon: 'skin', id: r.skin, k: 'skin' };
@@ -58,6 +76,7 @@ export function rewardLabel(r0) {
   if (r.finisher) return { kind: 'Finisher', name: FINISHERS[r.finisher].name, icon: 'finisher', id: r.finisher, k: 'finisher' };
   if (r.trail) return { kind: 'Trail', name: TRAILS[r.trail].name, icon: 'trail', id: r.trail, k: 'trail' };
   if (r.emote) return { kind: 'Emote Pack', name: EMOTE_PACKS[r.emote].name, icon: 'emote', id: r.emote, k: 'emote' };
+  if (r.banner) return { kind: 'Banner', name: BANNERS[r.banner].name, icon: 'banner', id: r.banner, k: 'banner' };
   if (r.title) return { kind: 'Title', name: r.title, icon: 'title' };
   return { kind: 'Marks', name: `${r.marks || 0} Marks`, icon: 'marks' };
 }
@@ -71,11 +90,12 @@ export function grantReward(p, r0) {
   if (r.finisher) push(p.ownedFinishers, r.finisher);
   if (r.trail) { if (!Array.isArray(p.ownedTrails)) p.ownedTrails = ['none']; push(p.ownedTrails, r.trail); }
   if (r.emote) { if (!Array.isArray(p.ownedEmotes)) p.ownedEmotes = ['basic']; push(p.ownedEmotes, r.emote); }
+  if (r.banner) { if (!Array.isArray(p.ownedBanners)) p.ownedBanners = [...DEFAULT_BANNERS]; push(p.ownedBanners, r.banner); }
   if (r.title) push(p.titles, r.title);
   return r;
 }
 
-// Adds season XP; returns the list of tiers newly reached with their rewards (already granted).
+// Adds season XP; returns the list of tiers newly reached with their rewards (already granted). Royal Pass tiers come back with prem: true.
 export function addSeasonXp(p, xp) {
   ensureProgress(p);
   const before = seasonTier(p);
@@ -84,20 +104,89 @@ export function addSeasonXp(p, xp) {
   const out = [];
   for (let t = before + 1; t <= after; t++) { const r = SEASON_REWARDS[t]; const got = grantReward(p, r); if (got !== r) p.season.pending.push(t); out.push({ tier: t, ...got }); }
   p.season.tier = after;
+  out.push(...grantRoyalTo(p, after));
   return out;
 }
-// If a fallback was paid for a tier and the real item has since shipped, grant the item too.
+// If a fallback was paid for a tier and the real item has since shipped, grant the item too (free and Royal lanes).
 export function settlePending(p) {
   ensureProgress(p);
   const out = [];
   p.season.pending = p.season.pending.filter((t) => { const r = SEASON_REWARDS[t]; if (r && resolveReward(r) === r) { grantReward(p, { ...r, marks: 0 }); out.push({ tier: t, ...r }); return false; } return true; });
+  p.season.ppending = p.season.ppending.filter((t) => { const r = ROYAL_REWARDS[t]; if (r && resolveReward(r) === r) { grantReward(p, { ...r, marks: 0 }); out.push({ tier: t, prem: true, ...r }); return false; } return true; });
   return out;
 }
 
+// ---------- 15.0: Royal Pass (premium Crown Path lane, bought with Marks once per season) ----------
+export const hasRoyal = (p) => !!(p.season && p.season.pass);
+// Grants every Royal tier from prem+1 up to tier (idempotent: prem only moves forward).
+function grantRoyalTo(p, tier) {
+  const out = [];
+  if (!hasRoyal(p)) return out;
+  for (let t = p.season.prem + 1; t <= Math.min(tier, SEASON.tiers); t++) { const r = ROYAL_REWARDS[t]; if (!r) { p.season.prem = t; continue; } const got = grantReward(p, r); if (got !== r) p.season.ppending.push(t); p.season.prem = t; out.push({ tier: t, prem: true, ...got }); }
+  return out;
+}
+export function royalStatus(p) {
+  ensureProgress(p);
+  const tier = seasonTier(p);
+  return { owned: hasRoyal(p), price: ROYAL_PASS.price, afford: p.marks >= ROYAL_PASS.price, tier, claimable: hasRoyal(p) ? 0 : tier + 1, rebate: Object.values(ROYAL_REWARDS).reduce((a, r) => a + (r.marks || 0), 0) };
+}
+// Buys the pass: deducts Marks and grants tier 0 plus every tier already reached (the retroactive claim). Returns { ok, reason?, granted }.
+export function buyRoyalPass(p) {
+  ensureProgress(p);
+  if (hasRoyal(p)) return { ok: false, reason: 'owned', granted: [] };
+  if (!(p.marks >= ROYAL_PASS.price)) return { ok: false, reason: 'marks', need: ROYAL_PASS.price - p.marks, granted: [] };
+  p.marks -= ROYAL_PASS.price;
+  p.season.pass = true; p.season.prem = -1; p.season.pshown = -1;
+  p.stats.royalPasses = (p.stats.royalPasses || 0) + 1;
+  const granted = grantRoyalTo(p, seasonTier(p));
+  return { ok: true, granted };
+}
+
+// ---------- 15.0: ability unlocks (profile.unlocked = ['passive:<id>', 'ability:<id>']) ----------
+const UTAB = { passive: PASSIVES, ability: ABILITIES };
+export const unlockKey = (kind, id) => `${kind}:${id}`;
+export function unlockPrice(kind, id) { const T = UTAB[kind] && UTAB[kind][id]; return T && +T.unlock > 0 ? Math.floor(+T.unlock) : 0; }
+export function isUnlocked(p, kind, id) { return unlockPrice(kind, id) === 0 || (Array.isArray(p.unlocked) && p.unlocked.includes(unlockKey(kind, id))); }
+// Pure purchase: { ok, reason: 'free'|'owned'|'marks'|'unknown', price }.
+export function buyUnlock(p, kind, id) {
+  if (!UTAB[kind] || !Object.prototype.hasOwnProperty.call(UTAB[kind], id)) return { ok: false, reason: 'unknown', price: 0 };
+  const price = unlockPrice(kind, id);
+  if (!price) return { ok: false, reason: 'free', price };
+  ensureUnlocks(p);
+  if (p.unlocked.includes(unlockKey(kind, id))) return { ok: false, reason: 'owned', price };
+  if (!(p.marks >= price)) return { ok: false, reason: 'marks', price, need: price - p.marks };
+  p.marks -= price; p.unlocked.push(unlockKey(kind, id));
+  return { ok: true, price };
+}
+// Pieces that carry an ability in their equips (for labels in the store).
+export function abilityPieces(id) { return Object.keys(PIECES).filter((k) => (PIECES[k].equips || []).includes(id)); }
+// Everything with a price, for the Abilities store tab: [{ kind, id, name, desc, price, owned, pieces }]
+export function unlockList(p) {
+  const out = [];
+  for (const id of Object.keys(PASSIVES)) out.push({ kind: 'passive', id, name: PASSIVES[id].name, desc: PASSIVES[id].desc || '', price: unlockPrice('passive', id), owned: isUnlocked(p, 'passive', id), pieces: [] });
+  const seen = new Set();
+  for (const pc of Object.keys(PIECES)) for (const id of PIECES[pc].equips || []) { if (seen.has(id) || !ABILITIES[id]) continue; seen.add(id); out.push({ kind: 'ability', id, name: ABILITIES[id].name, desc: ABILITIES[id].desc || '', price: unlockPrice('ability', id), owned: isUnlocked(p, 'ability', id), pieces: abilityPieces(id) }); }
+  return out;
+}
+// Defaults + the one-time 15.0 migration: whatever an old save had equipped stays usable.
+export function ensureUnlocks(p) {
+  const ok = (s) => typeof s === 'string' && /^(passive|ability):[A-Za-z0-9_]+$/.test(s);
+  p.unlocked = Array.isArray(p.unlocked) ? [...new Set(p.unlocked.filter(ok))] : [];
+  if (p.unlockMig !== 15) {
+    const keep = (b) => { if (!b || typeof b !== 'object') return; if (typeof b.passive === 'string') p.unlocked.push(unlockKey('passive', b.passive)); if (b.equips && typeof b.equips === 'object') for (const v of Object.values(b.equips)) if (typeof v === 'string') p.unlocked.push(unlockKey('ability', v)); };
+    keep(p.build);
+    if (Array.isArray(p.slots)) for (const sl of p.slots) keep(sl && (sl.build || sl));
+    p.unlocked = [...new Set(p.unlocked.filter(ok))];
+    p.unlockMig = 15;
+  }
+  return p;
+}
+
 // ---------- counts ----------
-const OWN_KEYS = { skin: ['owned', SKINS, DEFAULT_SKINS], board: ['ownedBoards', BOARDS, DEFAULT_BOARDS], finisher: ['ownedFinishers', FINISHERS, DEFAULT_FINISHERS], trail: ['ownedTrails', TRAILS, ['none']], emote: ['ownedEmotes', EMOTE_PACKS, ['basic']] };
+const OWN_KEYS = { skin: ['owned', SKINS, DEFAULT_SKINS], board: ['ownedBoards', BOARDS, DEFAULT_BOARDS], finisher: ['ownedFinishers', FINISHERS, DEFAULT_FINISHERS], trail: ['ownedTrails', TRAILS, ['none']], emote: ['ownedEmotes', EMOTE_PACKS, ['basic']], banner: ['ownedBanners', BANNERS, DEFAULT_BANNERS] };
 export function rarityOfAny(kind, id) {
-  const T = OWN_KEYS[kind][1][id];
+  const T = (OWN_KEYS[kind] || [])[1] && OWN_KEYS[kind][1][id];
+  if (T && T.royal) return 'royal';
   if (T && T.rarity) return T.rarity;
   const r = (RARITIES[kind] || {})[id];
   if (r) return r;
@@ -145,12 +234,17 @@ export function achievementValue(p, a) {
     case 'minMastery': return Math.min(...['pawn', 'knight', 'bishop', 'rook', 'queen'].filter((k) => PIECES[k]).map((k) => masteryLevel((p.mastery || {})[k] || 0).lv));
     case 'bestLogin': return (p.login || {}).best || 0;
     case 'seasonTier': return seasonTier(p);
+    case 'season3Tier': return pastTier(p, 3);
+    case 'season4Tier': return pastTier(p, 4);
+    case 'locations': return (p.locations || []).length;
+    case 'unlocks': return (p.unlocked || []).filter((k) => { const [kind, id] = k.split(':'); return unlockPrice(kind, id) > 0; }).length;
     case 'seasonsPlayed': return (p.pastSeasons || []).length + 1;
     case 'wished': return Math.max(s.wished || 0, (p.wishlist || []).length);
     default: return s[a.stat] || 0;
   }
 }
 
+const pastTier = (p, id) => (p.season && p.season.id === id ? seasonTier(p) : Math.max(0, ...(p.pastSeasons || []).filter((s) => s.id === id).map((s) => s.tier || 0)));
 // Unlocks any achievements whose goal is met; grants Marks + the achievement name as a title.
 export function checkAchievements(p) {
   ensureProgress(p);
@@ -182,6 +276,11 @@ export function recordMatch(p, m) {
   } else s.streak = 0;
   if (m.mode === 'siege') s.bestWave = Math.max(s.bestWave, m.cleared || 0);
   s.revives += m.revives || 0; s.colossi += m.colossi || 0;
+  // 15.0: status effects inflicted, boss King kills, Ascensions, the pawn line, locations and parties
+  s.statusApplied += Math.max(0, Math.floor(+m.statuses || 0)); s.regicides += Math.max(0, Math.floor(+m.regicide || 0)); s.ascensions += Math.max(0, Math.floor(+m.ascended || 0));
+  if (m.champion) { s.champions++; if (m.win) s.championWins++; }
+  if (m.party) s.partyGames++;
+  if (typeof m.location === 'string' && m.location && m.location.length < 24 && !p.locations.includes(m.location)) p.locations.push(m.location);
   p.games = s.games; p.wins = s.wins; p.kills = s.kills; p.crowns = s.crowns;
 }
 

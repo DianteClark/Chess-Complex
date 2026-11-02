@@ -11,7 +11,7 @@
 //   { t: 'vc', a: 'join', vid }  { t: 'vc', a: 'leave' }  { t: 'vc', a: 'talk', on: 0|1 }
 //   host -> all: { t: 'vc', a: 'roster', list: [{ pid, vid }] }  { t: 'vc', a: 'talk', pid, on }
 import { music } from './music.js';
-import { buses, settings } from './audio.js';
+import { buses, settings, getCtx, setVoiceMode, onCtxSwap, holdContext, voiceOut } from './audio.js';
 import { PEER_OPTS } from './net.js';
 
 const VID_RE = /^[A-Za-z0-9_-]{6,64}$/;
@@ -22,6 +22,30 @@ const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) 
 const MIC_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0h-2a4 4 0 0 1-8 0zM11 18h2v3h-2z"/></svg>';
 
 // ---------------------------------------------------------------- transports
+// 15.0 (N, mic crackle): pin the Opus parameters on every offer and answer. Mono voice (stereo=0), in-band FEC on
+// (lost packets are rebuilt instead of clicking), DTX off (DTX gates the stream on and off, which sounds like crackle
+// and pumping on phones), 48 kHz capture/playback (no resampling between the mic, the Opus encoder and the context),
+// 20 ms frames, 32 kbps average. Applied as PeerJS sdpTransform and to the local transport's descriptions.
+const OPUS_FMTP = { minptime: '10', useinbandfec: '1', usedtx: '0', stereo: '0', 'sprop-stereo': '0', maxplaybackrate: '48000', 'sprop-maxcapturerate': '48000', maxaveragebitrate: '32000', cbr: '0' };
+export function opusSdp(sdp) {
+  if (typeof sdp !== 'string') return sdp;
+  const pts = []; const re = /^a=rtpmap:(\d+) opus\/48000(?:\/2)?\r?$/gim; let m;
+  while ((m = re.exec(sdp))) pts.push(m[1]);
+  if (!pts.length) return sdp;
+  const nl = sdp.includes('\r\n') ? '\r\n' : '\n';
+  let lines = sdp.split(/\r?\n/);
+  for (const pt of pts) {
+    const i = lines.findIndex((l) => l.startsWith(`a=fmtp:${pt} `));
+    const cur = {}; if (i >= 0) for (const kv of lines[i].slice(`a=fmtp:${pt} `.length).split(';')) { const [k, v] = kv.split('='); if (k && k.trim()) cur[k.trim()] = (v || '').trim(); }
+    const line = `a=fmtp:${pt} ` + Object.entries({ ...cur, ...OPUS_FMTP }).map(([k, v]) => `${k}=${v}`).join(';');
+    if (i >= 0) lines[i] = line; else { const r = lines.findIndex((l) => l.startsWith(`a=rtpmap:${pt} `)); lines.splice(r + 1, 0, line); }
+  }
+  // 20 ms packets for voice
+  lines = lines.filter((l) => l !== '' && !/^a=ptime:/.test(l));
+  const ai = lines.findIndex((l) => l.startsWith('m=audio')); if (ai >= 0) { let j = ai + 1; while (j < lines.length && !lines[j].startsWith('m=')) j++; lines.splice(j, 0, 'a=ptime:20'); }
+  return lines.join(nl) + nl;
+}
+const SDP_OPTS = { sdpTransform: opusSdp };
 // T = { id, onCall(cb), call(remoteId, stream) -> C, close() }   C = { peer, answer(stream), onStream(cb), onClose(cb), close() }
 function peerTransport() {
   return new Promise((res, rej) => {
@@ -29,14 +53,14 @@ function peerTransport() {
     const peer = new window.Peer(PEER_OPTS); let done = false;
     const to = setTimeout(() => { if (!done) { done = true; try { peer.destroy(); } catch {} rej(new Error('timeout')); } }, 12000);
     const wrap = (c) => {
-      const C = { peer: c.peer, _s: [], _c: [], answer: (s) => c.answer(s), onStream(f) { this._s.push(f); }, onClose(f) { this._c.push(f); }, close() { try { c.close(); } catch {} } };
+      const C = { peer: c.peer, _s: [], _c: [], answer: (s) => c.answer(s, SDP_OPTS), onStream(f) { this._s.push(f); }, onClose(f) { this._c.push(f); }, close() { try { c.close(); } catch {} } };
       let closed = false; const fin = () => { if (closed) return; closed = true; C._c.forEach((f) => f()); };
       c.on('stream', (s) => C._s.forEach((f) => f(s))); c.on('close', fin); c.on('error', fin);
       const watch = () => { const pc = c.peerConnection; if (!pc) return setTimeout(watch, 300); pc.addEventListener('iceconnectionstatechange', () => { if (['failed', 'closed'].includes(pc.iceConnectionState)) fin(); }); };
       watch();
       return C;
     };
-    const T = { id: null, _on: null, onCall(f) { this._on = f; }, call: (id, s) => wrap(peer.call(id, s)), close: () => { try { peer.destroy(); } catch {} } };
+    const T = { id: null, _on: null, onCall(f) { this._on = f; }, call: (id, s) => wrap(peer.call(id, s, SDP_OPTS)), close: () => { try { peer.destroy(); } catch {} } };
     peer.on('open', (id) => { if (done) return; done = true; clearTimeout(to); T.id = id; res(T); });
     peer.on('call', (c) => { if (T._on) T._on(wrap(c)); else c.close(); });
     peer.on('error', (e) => { if (!done) { done = true; clearTimeout(to); rej(e); } });
@@ -63,7 +87,7 @@ function localTransport(code) {
     call(remote, stream) {
       const ent = make(remote);
       for (const t of stream.getTracks()) ent.pc.addTrack(t, stream);
-      (async () => { try { const o = await ent.pc.createOffer(); await ent.pc.setLocalDescription(o); post(remote, 'offer', { type: o.type, sdp: o.sdp }); } catch { ent.C._fin(); } })();
+      (async () => { try { const o = await ent.pc.createOffer(); const sdp = opusSdp(o.sdp); await ent.pc.setLocalDescription({ type: o.type, sdp }); post(remote, 'offer', { type: o.type, sdp }); } catch { ent.C._fin(); } })();
       return ent.C;
     },
     close() { for (const [r, e] of pcs) { post(r, 'hang'); e.C._fin(); } try { bc.close(); } catch {} } };
@@ -78,7 +102,7 @@ function localTransport(code) {
           try {
             await e2.pc.setRemoteDescription(m.data); await flush(e2); // remote first, so our track reuses the offered transceiver
             if (stream) for (const t of stream.getTracks()) e2.pc.addTrack(t, stream);
-            const a = await e2.pc.createAnswer(); await e2.pc.setLocalDescription(a); post(m.from, 'answer', { type: a.type, sdp: a.sdp });
+            const a = await e2.pc.createAnswer(); const sdp = opusSdp(a.sdp); await e2.pc.setLocalDescription({ type: a.type, sdp }); post(m.from, 'answer', { type: a.type, sdp });
           } catch { e2.C._fin(); }
         };
         if (T._on) T._on(e2.C); else e2.C.close();
@@ -186,8 +210,10 @@ class Voice {
     // the permission prompt needs the user gesture: getUserMedia is the very first thing that runs in the tap
     const micP = o.listen ? null : (o.micP || getMic());
     const sess = this.d.session(); this.sess = sess; this.state = 'starting'; this.err = ''; this.errName = ''; this.listenOnly = false; this.changed();
-    const AC = window.AudioContext || window.webkitAudioContext;
-    try { this.ac = AC ? new AC() : null; if (this.ac && this.ac.state === 'suspended') this.ac.resume().catch(() => {}); } catch { this.ac = null; }
+    // AU 15.0: no second AudioContext (two contexts on iOS in play-and-record crackle): meters and remote voices use
+    // the game's context. getCtx() here runs inside the tap, so it may resume.
+    try { this.ac = getCtx(); } catch { this.ac = null; }
+    holdContext(true); this.held = true;
     let mic = null;
     if (!micP) { this.listenOnly = true; this.errName = 'Listen'; }
     else try { mic = await micP; }
@@ -199,8 +225,9 @@ class Voice {
     this.watchPerm();
     if (this.d.session() !== sess || this.state !== 'starting') { if (mic) mic.getTracks().forEach((t) => t.stop()); return; }
     if (mic) { this.mic = mic; for (const t of mic.getAudioTracks()) { t.enabled = false; t.onended = () => { if (this.state === 'on') { this.listenOnly = true; this.err = 'Microphone disconnected. You can still listen.'; this.d.toast(this.err); this.changed(); } }; } }
+    this.syncMode(); // AU: mic live -> audio.js rebuilds the game context for play-and-record (rate, latency, light DSP)
     this.out = this.mic || this.silent();
-    if (this.ac && this.mic) { try { const src = this.ac.createMediaStreamSource(this.mic); this.myAn = this.ac.createAnalyser(); this.myAn.fftSize = 512; src.connect(this.myAn); } catch {} }
+    this.meterMine();
     try { this.T = await (useLocal() ? localTransport(sess.code) : peerTransport()); }
     catch { this.d.toast('Voice could not connect. The match is not affected.'); this.stop(true); return; }
     if (this.d.session() !== sess || this.state !== 'starting') { try { this.T.close(); } catch {} return; }
@@ -220,7 +247,7 @@ class Voice {
     this.mic = mic; this.listenOnly = false; this.err = ''; this.errName = '';
     const track = mic.getAudioTracks()[0];
     for (const t of mic.getAudioTracks()) { t.enabled = false; t.onended = () => { if (this.state === 'on') { this.listenOnly = true; this.err = 'Microphone disconnected. You can still listen.'; this.d.toast(this.err); this.changed(); } }; }
-    if (this.ac) { try { const src = this.ac.createMediaStreamSource(mic); this.myAn = this.ac.createAnalyser(); this.myAn.fftSize = 512; src.connect(this.myAn); } catch {} }
+    this.syncMode(); this.meterMine();
     const old = this.out; this.out = mic;
     for (const ent of this.calls.values()) {
       const pc = ent.C && (ent.C.peerConnection || (ent.C.raw && ent.C.raw.peerConnection));
@@ -235,14 +262,47 @@ class Voice {
     try { if (this.ac) { const d = this.ac.createMediaStreamDestination(); return d.stream; } } catch {}
     return new MediaStream();
   }
+  // ---- AU 15.0 audio path: one shared AudioContext (audio.js), voice mode while a mic is live, re-wire on swaps
+  syncMode() { setVoiceMode(!!((this.mic && this.state !== 'off') || (this.test && this.test.stream))); }
+  meterMine() {
+    try { this.mySrc && this.mySrc.disconnect(); } catch {} this.mySrc = null; this.myAn = null;
+    if (!this.ac || !this.mic) return;
+    try { this.mySrc = this.ac.createMediaStreamSource(this.mic); this.myAn = this.ac.createAnalyser(); this.myAn.fftSize = 512; this.mySrc.connect(this.myAn); } catch {}
+  }
+  remoteNodes(ent) { // remote voice -> analyser + per-player gain -> audio.js voiceOut (limiter -> speakers)
+    try { ent.src && ent.src.disconnect(); ent.gain && ent.gain.disconnect(); } catch {}
+    ent.src = ent.gain = ent.an = null;
+    const out = this.ac && voiceOut();
+    if (!out || !ent.stream) { if (ent.el) ent.el.muted = false; return; }
+    try {
+      // Chrome only pulls remote WebRTC audio into Web Audio when the stream is also attached to a media element;
+      // the element stays muted so the voice is heard once (through Web Audio), never twice
+      if (ent.el) ent.el.muted = true;
+      ent.src = this.ac.createMediaStreamSource(ent.stream); ent.gain = this.ac.createGain(); ent.an = this.ac.createAnalyser(); ent.an.fftSize = 512;
+      ent.src.connect(ent.an); ent.src.connect(ent.gain); ent.gain.connect(out);
+    } catch { if (ent.el) ent.el.muted = false; ent.gain = null; }
+  }
+  rewire(ac) { // audio.js rebuilt the context: move meters and remote voices onto the new one
+    if (this.state === 'off') return;
+    this.ac = ac; this.meterMine();
+    for (const ent of this.calls.values()) if (ent.stream) { this.remoteNodes(ent); this.applyVol(ent.pid); }
+    if (this.test && this.test.stream) this.meterTest(this.test);
+  }
+  meterTest(T) {
+    try { T.src && T.src.disconnect(); } catch {} T.src = null; T.an = null;
+    const ac = getCtx(true); if (!ac || !T.stream) return;
+    try { T.src = ac.createMediaStreamSource(T.stream); T.an = ac.createAnalyser(); T.an.fftSize = 512; T.src.connect(T.an); } catch {}
+  }
   stop(quiet) {
     if (this.state === 'off') return;
     if (!quiet) this.send({ a: 'leave' });
     this.state = 'off'; this.ptt = false; this.open = false;
     for (const vid of [...this.calls.keys()]) this.drop(vid, true);
     try { this.T && this.T.close(); } catch {} this.T = null;
-    if (this.mic) { this.mic.getTracks().forEach((t) => t.stop()); setSession('playback'); resumeAudio(); } this.mic = null; this.out = null; this.myAn = null;
-    try { this.ac && this.ac.close(); } catch {} this.ac = null;
+    if (this.mic) { this.mic.getTracks().forEach((t) => t.stop()); if (!this.test) setSession('playback'); resumeAudio(); } this.mic = null; this.out = null; this.myAn = null;
+    try { this.mySrc && this.mySrc.disconnect(); } catch {} this.mySrc = null;
+    this.ac = null; this.syncMode(); // the shared context stays (it is the game's); voice mode ends once the mic is gone
+    if (this.held) { this.held = false; holdContext(false); }
     this.myVid = null; this.flag.clear(); this.unduck(); this.sess = null; this.tries = {}; this.myOn = false;
     this.speaking.clear(); this.changed();
   }
@@ -287,14 +347,7 @@ class Voice {
     const a = el('audio'); a.autoplay = true; a.setAttribute('playsinline', ''); a.srcObject = stream; a.className = 'vc-audio';
     (this.box || (this.box = document.body.appendChild(Object.assign(el('div'), { hidden: true, id: 'vc-audio' })))).appendChild(a);
     ent.el = a;
-    if (this.ac) {
-      try {
-        // Chrome only pulls remote WebRTC audio into Web Audio when the stream is also attached to a media element
-        a.muted = true;
-        const src = this.ac.createMediaStreamSource(stream); ent.gain = this.ac.createGain(); ent.an = this.ac.createAnalyser(); ent.an.fftSize = 512;
-        src.connect(ent.an); src.connect(ent.gain); ent.gain.connect(this.ac.destination);
-      } catch { a.muted = false; ent.gain = null; }
-    }
+    this.remoteNodes(ent);
     this.applyVol(ent.pid);
     a.play().catch(() => {});
     this.changed();
@@ -303,7 +356,7 @@ class Voice {
     const ent = this.calls.get(vid); if (!ent) return;
     this.calls.delete(vid);
     if (!quiet) try { ent.C.close(); } catch {}
-    try { ent.gain && ent.gain.disconnect(); } catch {}
+    try { ent.gain && ent.gain.disconnect(); ent.src && ent.src.disconnect(); } catch {}
     if (ent.el) { ent.el.srcObject = null; ent.el.remove(); }
     this.speaking.delete(ent.pid);
   }
@@ -556,13 +609,11 @@ class Voice {
     // in voice already: measure a clone of the live track, so nothing is sent to the room
     const live = this.mic && this.state === 'on' && this.mic.getAudioTracks()[0];
     const micP = live ? Promise.resolve(new MediaStream([live.clone()])) : getMic();
-    const AC = window.AudioContext || window.webkitAudioContext;
-    let ac = null; try { ac = AC ? new AC() : null; if (ac && ac.state === 'suspended') ac.resume().catch(() => {}); } catch {}
-    const T = (this.test = { ac, peak: 0, at: Date.now() }); this.renderMicRow(); this.meterNote('Starting...');
+    try { getCtx(); } catch {} // AU 15.0: the meter uses the game's context (resumed here, inside the tap)
+    const T = (this.test = { ac: null, peak: 0, at: Date.now() }); this.renderMicRow(); this.meterNote('Starting...');
     micP.then((stream) => {
-      if (this.test !== T) { this.releaseTest(stream); try { ac && ac.close(); } catch {} return; }
-      T.stream = stream;
-      try { const src = ac.createMediaStreamSource(stream); T.an = ac.createAnalyser(); T.an.fftSize = 512; src.connect(T.an); } catch {}
+      if (this.test !== T) { this.releaseTest(stream); return; }
+      T.stream = stream; this.syncMode(); this.meterTest(T);
       this.meterNote('Say something: the bar should move.');
       T.iv = setInterval(() => {
         const lv = this.level(T.an); T.peak = Math.max(T.peak, lv);
@@ -571,11 +622,11 @@ class Voice {
         if (Date.now() - T.at > 12000 || (set && set.classList.contains('hidden'))) this.endTest();
       }, 60);
       this.watchPerm();
-    }, (e) => { if (this.test === T) { this.test = null; try { ac && ac.close(); } catch {} } this.d.toast(micShort(e)); this.meterNote(micShort(e)); this.watchPerm(); });
+    }, (e) => { if (this.test === T) this.test = null; this.d.toast(micShort(e)); this.meterNote(micShort(e)); this.watchPerm(); });
   }
   endTest() {
     const T = this.test; if (!T) return; this.test = null;
-    clearInterval(T.iv); if (T.stream) this.releaseTest(T.stream); try { T.ac && T.ac.close(); } catch {}
+    clearInterval(T.iv); try { T.src && T.src.disconnect(); } catch {} if (T.stream) this.releaseTest(T.stream); this.syncMode();
     this.meterNote(!T.stream ? '' : T.peak > 0.015 ? 'Your microphone works.' : 'No sound reached the game. Check the mic is not muted or covered.');
     const bar = document.querySelector('#mic-meter i'); if (bar) bar.style.width = '0%';
     this.renderMicRow();
@@ -667,3 +718,4 @@ function micHelp(e) {
 }
 
 export const voice = new Voice();
+onCtxSwap((ac) => voice.rewire(ac)); // AU 15.0

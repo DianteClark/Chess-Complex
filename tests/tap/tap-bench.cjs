@@ -30,6 +30,10 @@ const TRIALS = +(args.trials || 40);
 const VPS = String(args.vp || '390x844@3,360x740@2,844x390@3').split(',').map((s) => { const m = /(\d+)x(\d+)@?([\d.]*)/.exec(s); return { w: +m[1], h: +m[2], dpr: +(m[3] || 2), id: s }; });
 const MODES = String(args.modes || 'solo,online').split(',');
 const PHASES = String(args.phases || 'clean,jitter,motion').split(',');
+// Q 15.0: --zoom min,default,fit  (min = fully zoomed out as in 10.2; default = the 15.0 8x8 view centred on my piece; fit = whole board)
+const ZOOMS = String(args.zoom || 'min').split(',');
+let ZOOM = ZOOMS[0];
+const ZSET = (zoom) => { const r = window.__cc.game.r, g = window.__cc.game; const z = zoom === 'fit' ? r.fitZoom : zoom === 'default' ? r.defaultZoom() : r.minZ; r.cam.z = r.cam.tz = z; r.cam.vx = r.cam.vy = r.cam.vz = 0; if (zoom === 'default' && g.me) { r.cam.x = r.cam.tx = g.me.x + 0.5; r.cam.y = r.cam.ty = g.me.y + 0.5; } return z; };
 const TAG = args.tag || new Date().toISOString().slice(11, 16).replace(':', '');
 const OUT = path.join(require('os').tmpdir(), 'cc-tap'); fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -91,7 +95,7 @@ async function setupQueen(host, pid) {
 }
 
 async function zoomOut(p) {
-  await p.evaluate(() => { const r = window.__cc.game.r; r.zoomBy(0.01); r.cam.z = r.cam.tz = r.minZ; r.cam.vx = r.cam.vy = r.cam.vz = 0; r.follow = false; });
+  await p.evaluate(([zs, zoom]) => { const r = window.__cc.game.r; r.zoomBy(0.01); r.follow = false; (0, eval)('(' + zs + ')')(zoom); }, [ZSET.toString(), ZOOM]);
   await sleep(500);
 }
 
@@ -104,11 +108,11 @@ async function trial(p, cdp, phase) {
     g.mode = 'move'; g.preview = null; if (g.clearPending) g.clearPending(true); g.refresh && g.refresh();
     document.querySelector('#h-inspect') && document.querySelector('#h-inspect').classList.add('hidden');
     if (phase === 'motion') { // camera springing: offset target, zoom settling back to min
-      r.cam.tz = r.minZ; r.cam.z = r.minZ * 1.35; r.cam.vz = 0;
+      const z0 = (0, eval)('(' + rr[2] + ')')(rr[3]); r.cam.tz = z0; r.cam.z = z0 * 1.35; r.cam.vz = 0;
       const a = rr[0] * Math.PI * 2, d = 1.5 + rr[1] * 1.5; r.cam.tx = r.cam.x; r.cam.ty = r.cam.y; r.cam.x += Math.cos(a) * d; r.cam.y += Math.sin(a) * d;
     }
     return { ok: true };
-  }, [phase, [rnd(), rnd()]]);
+  }, [phase, [rnd(), rnd(), ZSET.toString(), ZOOM]]);
   if (setup.skip) return { skip: setup.skip };
   if (phase === 'motion') await sleep(R(40, 160));
   const legalPick = rnd() < 0.7;
@@ -219,11 +223,12 @@ async function runConfig(browser, vp, mode) {
     await p.waitForFunction(() => window.__cc.game.me && window.__cc.game.me.piece === 'queen', null, { timeout: 5000 });
     const cdp = await ctx.newCDPSession(p);
     const res = {};
-    for (const ph of PHASES) {
+    for (const zoom of ZOOMS) for (const ph0 of PHASES) {
+      ZOOM = zoom; const ph = ph0; const key = ZOOMS.length > 1 || zoom !== 'min' ? ph0 + '@' + zoom : ph0;
       await zoomOut(p);
       const r = { n: 0, correct: 0, wrong: 0, none: 0, misprev: 0, taps: 0, covered: 0, legalN: 0, legalCorrect: 0, drift: 0, noDown: 0, skips: 0, samples: [] };
       for (let i = 0; i < TRIALS * 6 && r.n < TRIALS; i++) {
-        if (ph !== 'motion') { await p.evaluate(() => { const r = window.__cc.game.r; r.cam.z = r.cam.tz = r.minZ; r.cam.vz = 0; }); }
+        if (ph !== 'motion') { await p.evaluate(([zs, zoom]) => { (0, eval)('(' + zs + ')')(zoom); }, [ZSET.toString(), ZOOM]); }
         const t = await trial(p, cdp, ph);
         if (t.skip) { r.skips++; if (r.skips > 20) break; await sleep(200); continue; }
         if (t.covered) { r.covered++; continue; }
@@ -234,7 +239,7 @@ async function runConfig(browser, vp, mode) {
         r.tilePx = +t.tilePx.toFixed(1);
         if (ph === 'motion') await sleep(450);
       }
-      res[ph] = r;
+      res[key] = r;
     }
     return { vp: vp.id, mode, res, errors };
   } finally { await ctx.close().catch(() => {}); }
