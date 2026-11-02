@@ -192,7 +192,7 @@ function rimAnim(ctx, K) {
   }
   // crystal veins pulsing under the island
   const oy1 = b.y1 + 0.7, p = K.reduced ? 0.5 : 0.5 + 0.5 * Math.sin(T * 1.1);
-  ctx.globalAlpha = 0.15 + p * 0.2; ctx.drawImage(K.glow(CYAN), b.x0 + 1, oy1, b.x1 - b.x0 - 2, 4);
+  ctx.globalAlpha = 0.15 + p * 0.2; K.blitExact(ctx, K.glow(CYAN), b.x0 + 1, oy1, b.x1 - b.x0 - 2, 4); // R2 15.0.1: 1:1 at rest
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 }
 

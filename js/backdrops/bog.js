@@ -169,7 +169,7 @@ function fogBands(ctx, K, bands, alpha) {
   const f = FOG(K), w = K.x1 - K.x0;
   for (const [y, h, sp, len, ph] of bands) {
     const span = w + len, x = K.x0 - len + ((((K.T * sp + ph) % span) + span) % span);
-    ctx.globalAlpha = alpha; ctx.drawImage(f, x, y - h / 2, len, h); ctx.drawImage(f, x - span, y - h / 2, len, h);
+    ctx.globalAlpha = alpha; K.blitExact(ctx, f, x, y - h / 2, len, h); K.blitExact(ctx, f, x - span, y - h / 2, len, h); // R2 15.0.1: 1:1 at rest
   }
   ctx.globalAlpha = 1;
 }

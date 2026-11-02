@@ -72,3 +72,4 @@ body.reduced .net-banner .nb-spin { animation: none; }
 .t-st.st-burn { background: rgba(255,106,31,.2); } .t-st.st-poison { background: rgba(166,255,77,.15); } .t-st.st-freeze { background: rgba(127,224,255,.18); } .t-st.st-stun { background: rgba(255,224,77,.16); }
 .t-st.st-slow { background: rgba(120,140,255,.18); } .t-st.st-shield { background: rgba(157,243,255,.14); } .t-st.st-haste { background: rgba(92,255,157,.14); }
 .cx-asc { border-left: 2px solid var(--gold2); padding-left: 8px; }
+#emote-menu.qc .qc-tog.on::after { font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px; }

@@ -17,9 +17,9 @@ export const PIECES = {
   king:   { ult: 'divineRight', name: 'King',   tier: 5, hp: 0,   atk: 0,  def: 0,  spd: 0,  attack: 'royalStrike', sig: 'royalGuard', equips: [],
             moveDesc: 'Steps 1 tile. Wears the Crown.' },
   // 15.0 pawn line (C): pawn-shaped, single steps, keep the Pawn's equipped ability (equipFrom). cost overrides EVOLVE_COST.
-  veteran:  { ult: 'warcry', name: 'Veteran',  tier: 2, cost: 3, hp: 100, atk: 15, def: 9, spd: 10, attack: 'halberd', sig: 'shieldWall', equips: [], equipFrom: 'pawn', line: 'pawn',
+  veteran:  { ult: 'warcry', name: 'Veteran',  tier: 2, cost: 3, hp: 92, atk: 14, def: 9, spd: 10, attack: 'halberd', sig: 'shieldWall', equips: [], equipFrom: 'pawn', line: 'pawn',
             moveDesc: 'Steps 1 tile in any direction. A Pawn that refused to change.' },
-  champion: { ult: 'valor',  name: 'Champion', tier: 3, cost: 5, hp: 114, atk: 18, def: 11, spd: 10, attack: 'sweep',   sig: 'heroicLeap', equips: [], equipFrom: 'pawn', line: 'pawn',
+  champion: { ult: 'valor',  name: 'Champion', tier: 3, cost: 6, hp: 104, atk: 17, def: 10, spd: 10, attack: 'sweep',   sig: 'heroicLeap', equips: [], equipFrom: 'pawn', line: 'pawn',
             moveDesc: 'Steps 1 tile in any direction. Heroic Leap covers the distance.' },
 };
 

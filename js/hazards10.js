@@ -14,6 +14,41 @@ const rng = (seed) => { let s = (seed * 2654435761) >>> 0 || 1; return () => { s
 const hex = (c) => { if (!c || c[0] !== '#') return [255, 210, 77]; let h = c.slice(1); if (h.length === 3) h = h.split('').map((q) => q + q).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 const rgba = (c, a) => { const [r, g, b] = hex(c); return `rgba(${r},${g},${b},${a})`; };
 
+// ---------- R2 15.0.1: exact-size copies of big sprites (re-exported by world.js) ----------
+// A scaled drawImage is the costliest thing the 2D canvas does on CPU raster (5-10x a 1:1 copy, ~10x under 'lighter').
+// Props, fog banks, glows and caustics are drawn at a handful of fixed sizes, so once a size has been asked for two
+// frames running a copy at exactly that device size is cached and copied 1:1 on whole pixels (the < 0.5 px snap does not
+// show). Rotated transforms, tiny sprites and sizes that change every frame (zooms, pulses) draw scaled as before.
+const EX = new Set(); let exFrame = 0, exPx = 0, exOn = true; // entries live in img.__ex (Map size -> entry)
+const EX_MIN = 40 * 40, EX_MAX = 900 * 600, EX_BUDGET = 3.5e6;
+const exDrop = (e) => { EX.delete(e); if (e.c) exPx -= e.c.width * e.c.height; e.m.delete(e.k); };
+// once per frame; stable = false while the zoom animates (every size is new then: skip the bookkeeping)
+export function exactTick(stable = true) { exFrame++; exOn = stable; if ((exFrame & 63) === 0) for (const e of EX) if (!e.c && exFrame - e.f > 2) exDrop(e); }
+export function exactRelease() { for (const e of EX) e.m.delete(e.k); EX.clear(); exPx = 0; }
+export function blitExact(ctx, img, x, y, w, h) {
+  if (!exOn) { ctx.drawImage(img, x, y, w, h); return; }
+  const m = ctx.getTransform();
+  if (m.b || m.c || m.a <= 0 || m.d <= 0) { ctx.drawImage(img, x, y, w, h); return; }
+  const dw = Math.round(w * m.a), dh = Math.round(h * m.d);
+  if (dw * dh < EX_MIN || dw * dh > EX_MAX) { ctx.drawImage(img, x, y, w, h); return; }
+  const map = img.__ex || (img.__ex = new Map()), k = dw * 8192 + dh;
+  let e = map.get(k);
+  if (!e) { map.set(k, (e = { c: null, f: exFrame, f0: exFrame, m: map, k })); EX.add(e); ctx.drawImage(img, x, y, w, h); return; }
+  if (!e.c) {
+    if (e.f0 === exFrame || exFrame - e.f > 1) { if (exFrame - e.f > 1) e.f0 = exFrame; e.f = exFrame; ctx.drawImage(img, x, y, w, h); return; } // a size not held since last frame: transient
+    while (exPx + dw * dh > EX_BUDGET) { // evict the least recently used copy, never one still in use (that would thrash)
+      let old = null; for (const o of EX) if (o.c && (!old || o.f < old.f)) old = o;
+      if (!old || old.f >= exFrame - 1) { e.f = exFrame; ctx.drawImage(img, x, y, w, h); return; }
+      exDrop(old);
+    }
+    e.c = mkC(dw, dh); e.c.getContext('2d').drawImage(img, 0, 0, dw, dh); exPx += dw * dh;
+  }
+  e.f = exFrame;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(e.c, Math.round(m.a * x + m.e), Math.round(m.d * y + m.f));
+  ctx.setTransform(m.a, 0, 0, m.d, m.e, m.f); // numbers: setTransform(DOMMatrix) costs ~4 us more per call
+}
+
 // ---------- sprite cache: paint(g) draws in tile units, origin at the tile's top-left ----------
 const PX = 128;
 const SPR = new Map();
@@ -23,7 +58,7 @@ function sprite(key, w, h, ox, oy, paint) {
   g.setTransform(PX, 0, 0, PX, ox * PX, oy * PX); paint(g);
   p = { c, w, h, ox, oy }; SPR.set(key, p); return p;
 }
-const blit = (ctx, p, x, y) => ctx.drawImage(p.c, x - p.ox, y - p.oy, p.w, p.h);
+const blit = (ctx, p, x, y) => blitExact(ctx, p.c, x - p.ox, y - p.oy, p.w, p.h); // R2 15.0.1: 1:1 at rest
 const GLOW = new Map();
 function glow(col) { // soft additive dot
   let c = GLOW.get(col); if (c) return c;
@@ -42,7 +77,7 @@ function puff() { // steam cloud blob
   }
   PUFF = c; return c;
 }
-const dot = (ctx, col, x, y, rad, a) => { ctx.globalAlpha = a; ctx.drawImage(glow(col), x - rad, y - rad, rad * 2, rad * 2); };
+const dot = (ctx, col, x, y, rad, a) => { ctx.globalAlpha = a; blitExact(ctx, glow(col), x - rad, y - rad, rad * 2, rad * 2); };
 const rr = (g, x, y, w, h, q) => { g.beginPath(); g.moveTo(x + q, y); g.arcTo(x + w, y, x + w, y + h, q); g.arcTo(x + w, y + h, x, y + h, q); g.arcTo(x, y + h, x, y, q); g.arcTo(x, y, x + w, y, q); g.closePath(); };
 function lg(g, x0, y0, x1, y1, stops) { const gr = g.createLinearGradient(x0, y0, x1, y1); for (const [k, c] of stops) gr.addColorStop(k, c); return gr; }
 

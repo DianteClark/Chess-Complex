@@ -546,7 +546,7 @@ export const harmed = (u) => !!(u && u.status && u.status.some((q) => STATUS[q.k
 export const ascended = (u) => !!(u && u.kind === 'player' && ASCEND[u.piece] && ((u.hone && u.hone[u.piece]) || 0) >= MAX_HONE);
 // Boss King tuning (tools/sim15.mjs sweeps these). converge/focus: how hard bots gang up on it.
 // Tuned with 300-game sweeps for ~40% King wins in 8-bot Royale (15.0). HP pool = (piece HP x hp + 5) x (1 + hpPer per rival beyond 1).
-export const KING_T = { hp: 0.93, hpPer: 0.035, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
+export const KING_T = { hp: 0.88, hpPer: 0.03, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
 export function addStatus(s, u, k, ev, o = {}) {
   if (!u || !u.alive || s.over || !STATUS[k]) return false;
   let t = Math.max(1, Math.round(o.t ?? STATUS[k].t));

@@ -504,7 +504,7 @@ function testPieces() {
     if (!o.includes('veteran')) return pending(G, 'pawn veteran/champion', 'promoteOptions(pawn) has no veteran: ' + o.join(','));
     const v = E.promoteOptions(u).find((x) => x.to === 'veteran'); check(G, 'veteran costs 3', v.cost === 3, v.cost);
     E.applyAction(s, u.pid, { type: 'promote', to: 'veteran' }); const rep = u.piece; const o2 = E.promoteOptions(u).find((x) => x.to === 'champion');
-    check(G, 'veteran -> champion offered for 5', o2 && o2.cost === 5, JSON.stringify(E.promoteOptions(u)));
+    check(G, 'veteran -> champion offered at its data cost', o2 && o2.cost === D.evolveCost('champion'), JSON.stringify(E.promoteOptions(u)));
     if (o2) E.applyAction(s, u.pid, { type: 'promote', to: 'champion' });
     check(G, 'pawn line still single-steps', E.legalMoves(s, u).every((m) => cheb(m, u) === 1), u.piece);
     check(G, 'champion has its own signature + ultimate', !!(D.PIECES[u.piece] && D.PIECES[u.piece].sig && D.PIECES[u.piece].ult && D.PIECES[u.piece].sig !== D.PIECES.pawn.sig), u.piece + ' ' + JSON.stringify(D.PIECES[u.piece] && { sig: D.PIECES[u.piece].sig, ult: D.PIECES[u.piece].ult }));

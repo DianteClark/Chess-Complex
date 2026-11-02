@@ -445,3 +445,10 @@ img.lz.in { opacity: 1; }
   .rp-top h3 { font-size: 20px; margin: 0 0 2px; } .rp-top p { font-size: 12px; margin-bottom: 6px; } .rp-crown.big { display: none; }
   .rp-acts .btn.big { padding-top: 10px; padding-bottom: 10px; }
 }
+
+/* 15.1: 11px text floor for Season 4 additions (Royal Pass labels, ability tags, World Tour badges) */
+.rp-tx span, .rp-strip span, .pl-cell .pt-tx span, .ab-pc, .ab-tags i, .cc-tour { font-size: 11px; }
+.ab-tags i { letter-spacing: .05em; }
+.cc-tour { letter-spacing: .14em; }
+.sc-wish { min-width: 44px; min-height: 44px; }
+.rp-it em { font-size: 11px; }

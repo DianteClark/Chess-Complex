@@ -6,6 +6,7 @@ import { SIZE } from './data.js';
 import { ringOf, unitById, HILL } from './engine.js';
 import { hiSprite } from './fx.js';
 import * as HZ from './hazards10.js'; // B4 10.1: baked hazard tile art + hazard lights
+import { blitExact } from './hazards10.js'; // R2 15.0.1
 
 export const FPAD = 0.7;
 const TAU = Math.PI * 2;
@@ -41,6 +42,14 @@ export function lookOf(id, th) {
     ambC: th.bg ? th.bg[1] : '#05030a',
   };
 }
+
+// ---------- R2 15.0.1: exact-size copies of big soft sprites ----------
+// A scaled drawImage is the costliest thing the 2D canvas does on CPU raster (5-10x a 1:1 copy, ~10x under 'lighter').
+// Fog banks, glows and caustics are drawn at a handful of fixed sizes, so once a size has been asked for two frames
+// running a copy at exactly that device size is cached and copied 1:1 on whole pixels (soft art: the < 0.5 px snap does
+// not show). Rotated transforms, small sprites and sizes that change every frame (zooms, pulses) draw scaled as before.
+// (implementation in hazards10.js, which has no imports from here, so backdrop.js / hazards can use it without a cycle)
+export { blitExact, exactTick, exactRelease } from './hazards10.js';
 
 // ---------- soft sprites ----------
 const SOFT = new Map();
@@ -194,6 +203,13 @@ function tileTexture(L, th, par, v) {
 // ---------- static board (cached by Renderer.floorCache) ----------
 export const isSolidT = (t) => t === 'wall' || t === 'rubble' || t === 'crate' || t === 'chest';
 export function solidsKey(s) { let h = 0; for (let i = 0; i < s.tiles.length; i++) { const t = s.tiles[i].t; if (isSolidT(t) || (t === 'shrine' && s.tiles[i].cd === 0)) h = (Math.imul(h, 31) + i * 7 + t.length) | 0; else if (t === 'pit' || t === 'crumble') h = (Math.imul(h, 31) + HZ.bakeKey(s.tiles[i], i)) | 0; else if (t === 'lava' || t === 'ice' || t === 'poison') h = (Math.imul(h, 31) + i * 3 + t.length) | 0; } return h; } // R 15.0: + tiles a location event can create mid-match (their light cuts are baked)
+// R2 15.0.1: per-tile form of solidsKey (same tile features), so the floor bake can repaint only the patch that changed
+const SIGC = { wall: 1, rubble: 2, crate: 3, chest: 4, shrine: 5, lava: 6, ice: 7, poison: 8 };
+export function bakeSig(s) {
+  const a = new Int32Array(s.tiles.length);
+  for (let i = 0; i < s.tiles.length; i++) { const T = s.tiles[i], t = T.t; a[i] = isSolidT(t) || t === 'lava' || t === 'ice' || t === 'poison' ? SIGC[t] : t === 'shrine' ? (T.cd === 0 ? SIGC.shrine : 0) : t === 'pit' || t === 'crumble' ? 100 + (HZ.bakeKey(T, i) | 0) : 0; }
+  return a;
+}
 export function paintBoard(r, ctx, live) {
   const s = r.state, th = r.theme, L = r.lookOf();
   const FB = r.bounds || { x0: 0, y0: 0, x1: SIZE - 1, y1: SIZE - 1 };
@@ -274,7 +290,7 @@ function propCanvas(key, w, h, ox, oy, paint) {
   if (PROP.size > 90) PROP.clear();
   p = { c, w, h, ox, oy }; PROP.set(key, p); return p;
 }
-export function blitProp(ctx, p, x, y) { ctx.drawImage(p.c, x - p.ox, y - p.oy, p.w, p.h); }
+export function blitProp(ctx, p, x, y) { blitExact(ctx, p.c, x - p.ox, y - p.oy, p.w, p.h); } // R2 15.0.1: 1:1 at rest (walls/crates are ~75 blits a frame)
 export const WALL_H = 0.46;
 export function wallProp(r, v) {
   const th = r.theme, L = r.lookOf();
@@ -490,9 +506,9 @@ export function drawLighting(r, ctx, T) {
   r.litVg = false;
   // per-frame lights are additive glows on the floor (static lights are baked into the floor cache)
   ctx.globalCompositeOperation = 'lighter';
-  for (const l of r.lights) { const k = 1 - l.t / l.life; if (k > 0) { ctx.globalAlpha = k * k * l.a * 0.55; ctx.drawImage(softSprite(l.col), l.x - l.rad, l.y - l.rad, l.rad * 2, l.rad * 2); } }
+  for (const l of r.lights) { const k = 1 - l.t / l.life; if (k > 0) { ctx.globalAlpha = k * k * l.a * 0.55; blitExact(ctx, softSprite(l.col), l.x - l.rad, l.y - l.rad, l.rad * 2, l.rad * 2); } }
   if (!r.lowQ) {
-    const glow = (x, y, rad, col, a) => { ctx.globalAlpha = a; ctx.drawImage(softSprite(col, 0.3), x - rad, y - rad, rad * 2, rad * 2); };
+    const glow = (x, y, rad, col, a) => { ctx.globalAlpha = a; blitExact(ctx, softSprite(col, 0.3), x - rad, y - rad, rad * 2, rad * 2); };
     for (const u of s.units) {
       if (!u.alive) continue; const d = r.disp.get(u.id); if (!d || (d.drop && r.time < d.drop.t0)) continue;
       const x = d.x + 0.5, y = d.y + 0.7;
@@ -552,7 +568,7 @@ export function drawGroundFog(r, ctx, T) {
   const n = r.lowQ ? 4 : 8;
   for (let i = 0; i < n; i++) {
     const w = 5 + (i % 3) * 1.5, x = ((i * 4.7 + T * (0.12 + (i % 3) * 0.04)) % (SIZE + w + 2)) - w - 1, y = (i * 5.3) % SIZE - 0.5 + Math.sin(T * 0.2 + i) * 0.5;
-    ctx.globalAlpha = Math.min(0.6, a * 2.2); ctx.drawImage(sp, x, y, w, w * 0.6);
+    ctx.globalAlpha = Math.min(0.6, a * 2.2); blitExact(ctx, sp, x, y, w, w * 0.6); // R2 15.0.1: 1:1 copy at rest
   }
   ctx.globalAlpha = 1;
 }
@@ -575,7 +591,7 @@ export class Weather {
     else if (kind === 'sand') { m.vx = 6 + R() * 5; m.vy = 0.4 * (R() - 0.3); if (!any) { m.x = x0 - 0.5; m.y = y0 + R() * h; } }
     else if (kind === 'leaves' || kind === 'petals') { m.vy = 0.45 + R() * 0.35; m.vx = 0.35 + R() * 0.3; if (!any && R() < 0.5) { m.x = x0 - 0.5; m.y = y0 + R() * h; } }
     else if (kind === 'embers' || kind === 'void' || kind === 'bubbles' || kind === 'dust') { m.vy = -(0.12 + R() * (kind === 'embers' ? 0.7 : 0.25)); m.vx = 0; if (!any) m.y = y1 + 0.5; }
-    else if (kind === 'fog') { m.vx = 0.15 + R() * 0.15; m.vy = 0; m.w = 4 + R() * 3; if (!any) { m.x = x0 - m.w - 0.5; m.y = y0 + R() * h; } }
+    else if (kind === 'fog') { m.vx = 0.15 + R() * 0.15; m.vy = 0; m.w = 4 + Math.round(R() * 6) / 2; if (!any) { m.x = x0 - m.w - 0.5; m.y = y0 + R() * h; } }
     else { m.vx = 0; m.vy = 0; }
     return m;
   }
@@ -634,7 +650,7 @@ export class Weather {
         const gust = 0.5 + 0.5 * Math.sin(T * 0.7);
         ctx.strokeStyle = `rgba(235,205,150,${0.18 + gust * 0.2})`; ctx.lineWidth = 0.015; ctx.beginPath();
         for (const m of P) { ctx.moveTo(m.x, m.y); ctx.lineTo(m.x - 0.25 - m.s * 0.3, m.y - m.vy * 0.05); } ctx.stroke();
-        ctx.globalAlpha = 0.08 + gust * 0.1; ctx.drawImage(cloudSprite('#d9b980'), x0 + ((T * 3) % (x1 - x0 + 8)) - 6, y0 + (y1 - y0) * 0.3 + Math.sin(T * 0.4) * 2, 7, 4);
+        ctx.globalAlpha = 0.08 + gust * 0.1; blitExact(ctx, cloudSprite('#d9b980'), x0 + ((T * 3) % (x1 - x0 + 8)) - 6, y0 + (y1 - y0) * 0.3 + Math.sin(T * 0.4) * 2, 7, 4);
         break;
       }
       case 'leaves': case 'petals': {
@@ -694,7 +710,7 @@ export class Weather {
       }
       case 'fog': {
         const sp1 = cloudSprite('#dfe8f2');
-        for (const m of P) { ctx.globalAlpha = 0.16 + 0.06 * Math.sin(m.p * 0.3 + m.s * 5); ctx.drawImage(sp1, m.x, m.y - m.w * 0.3, m.w, m.w * 0.6); }
+        for (const m of P) { ctx.globalAlpha = 0.16 + 0.06 * Math.sin(m.p * 0.3 + m.s * 5); blitExact(ctx, sp1, m.x, m.y - m.w * 0.3, m.w, m.w * 0.6); } // R2 15.0.1: 7 widths (0.5 steps) so each has an exact-size copy
         break;
       }
       default: { // dust motes
@@ -717,6 +733,9 @@ function auroraStrip() {
 function drawAurora(r, ctx, T) {
   const sp = auroraStrip(), [x0, y0, x1] = [r.weather.view[0], r.weather.view[1], r.weather.view[2]];
   ctx.globalCompositeOperation = 'lighter';
+  // R2 15.0.1: nearest-neighbour sampling: the strip is a smooth vertical ramp drawn at ~0.1 alpha (steps < 1/4 colour
+  // level), and filtered 'lighter' blits cost ~2.5x as much on CPU raster (72 of them a frame)
+  const sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false;
   for (let band = 0; band < 2; band++) {
     const yb = y0 + 1.2 + band * 2.4, n = 36, w = (x1 - x0) / n;
     for (let i = 0; i < n; i++) {
@@ -726,6 +745,7 @@ function drawAurora(r, ctx, T) {
       ctx.drawImage(sp, x, y - h, w + 0.02, h);
     }
   }
+  ctx.imageSmoothingEnabled = sm;
   ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
 }
 

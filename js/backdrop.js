@@ -49,6 +49,8 @@
 // localStorage cc_bd). prepareBackdrop(id, view) bakes synchronously (otherwise one layer bakes per frame, then fades in).
 // ---------------------------------------------------------------------------------------------------------------------
 
+import { blitExact } from './world.js'; // R2 15.0.1: 1:1 copies of the big caustic glows
+
 export const BACKDROP_IDS = ['citadel', 'forge', 'temple', 'gardens', 'ruins', 'works', 'rift', 'bog'];
 const MODS = new Map(); // id -> module default | null (missing) | 'loading'
 let FORCE = null;
@@ -95,7 +97,7 @@ export function glow(col) {
 }
 const SPR = new Map();
 function sprite(key, w, h, fn) { let c = SPR.get(key); if (c) return c; c = mkC(w, h); fn(c.getContext('2d'), c.width, c.height); if (SPR.size > 160) SPR.clear(); SPR.set(key, c); return c; }
-const KIT = { rng, mix, rgba, shade, lin, rad, ridge, fillRidge, glow, sprite };
+const KIT = { rng, mix, rgba, shade, lin, rad, ridge, fillRidge, glow, sprite, blitExact }; // R2 15.0.1: K.blitExact(ctx, img, x, y, w, h) = drawImage, 1:1 copy at rest (static images only)
 
 // ---------- view ----------
 // Everything the backdrop needs from the renderer for one frame (ox/oy = this frame's screen shake).
@@ -185,7 +187,39 @@ function blitOut(ctx, o, x, y, hb, K) {
   const R = hb ? [[vx0, vy0, vx1, Math.min(vy1, hb.y0)], [vx0, Math.max(vy0, hb.y1), vx1, vy1], [vx0, Math.max(vy0, hb.y0), Math.min(vx1, hb.x0), Math.min(vy1, hb.y1)], [Math.max(vx0, hb.x1), Math.max(vy0, hb.y0), vx1, Math.min(vy1, hb.y1)]] : [[vx0, vy0, vx1, vy1]];
   for (const [a, b, e, f] of R) { if (e - a < 0.02 || f - b < 0.02) continue; ctx.drawImage(c, (a - x) * sx, (b - y) * sy, (e - a) * sx, (f - b) * sy, a, b, e - a, f - b); }
 }
-export const stats = { ms: 0, n: 0 };
+export const stats = { ms: 0, n: 0, snap: 0, built: 0 };
+// R2 15.0.1 (perf): the layer bakes are drawn scaled every frame (resampling costs 5-10x a 1:1 copy), so while the camera
+// holds still (most of a match: waiting for a move) each run of layers up to the next anim is copied once, at screen
+// resolution, into "snap" canvases covering only what shows outside the board, and later frames blit those 1:1 (same
+// pixels, same back-to-front order with the anims in between). Any camera move, shake, zoom or fade uses the live path.
+const SNAP_STILL = 3, SNAP_MAXPX = 4.5e6;
+function visRects(hole, PW, PH) {
+  const R = hole ? [[0, 0, PW, hole[1]], [0, hole[3], PW, PH], [0, hole[1], hole[0], hole[3]], [hole[2], hole[1], PW, hole[3]]] : [[0, 0, PW, PH]];
+  const out = [];
+  for (const [a, b, c, d] of R) { const x0 = Math.max(0, a), y0 = Math.max(0, b), x1 = Math.min(PW, c), y1 = Math.min(PH, d); if (x1 - x0 >= 1 && y1 - y0 >= 1) out.push([x0, y0, x1, y1]); }
+  return out;
+}
+function groupsOf(M) { // runs of layers that end at a layer with an anim (or the last layer)
+  if (M._groups) return M._groups;
+  const G = []; let cur = [];
+  M.layers.forEach((L, i) => { cur.push(i); if (L.anim || i === M.layers.length - 1) { G.push(cur); cur = []; } });
+  return (M._groups = G);
+}
+function snapBuild(E, M, xf, rects) {
+  const S = E.snap || (E.snap = { canv: [] }), G = groupsOf(M);
+  G.forEach((grp, gi) => {
+    const row = S.canv[gi] || (S.canv[gi] = []);
+    rects.forEach(([x0, y0, x1, y1], ri) => {
+      let c = row[ri]; const w = x1 - x0, h = y1 - y0;
+      if (!c) c = row[ri] = mkC(w, h);
+      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } else c.getContext('2d').clearRect(0, 0, w, h);
+      const g = c.getContext('2d');
+      for (const i of grp) { const [dx, dy, s] = xf[i]; blit(g, E.layers[i].c, dx - x0, dy - y0, s, null, w, h); }
+    });
+    row.length = rects.length;
+  });
+  S.canv.length = G.length; S.rects = rects; stats.built++;
+}
 export function drawBackdrop(ctx, id, v, T) {
   const M = mod(id); if (!M || !v || !M.layers || !M.layers.length) return false;
   const t0 = performance.now();
@@ -208,12 +242,31 @@ export function drawBackdrop(ctx, id, v, T) {
   const Tm = v.reduced ? T * 0.3 : T;
   const K = { ...KIT, b: { x0: b.x0, y0: b.y0, x1: b.x1 + 1, y1: b.y1 + 1 }, W: v.W, H: v.H, wide: v.W > v.H * 1.15, hz: horizon(v), lowQ: v.lowQ, reduced: v.reduced, T: Tm,
     n: (c) => Math.max(1, Math.round(c * (v.lowQ ? 0.5 : 1) * (v.reduced ? 0.6 : 1))) };
+  // per-layer device transform (dx, dy, s) and the snap key of this frame (1/8 px)
+  const XF = E.xf || (E.xf = []); let key = PW + ',' + PH + ',' + (hole ? hole.join(',') : '-');
   for (let i = 0; i < M.layers.length; i++) {
-    const L = M.layers[i], C = E.layers[i], X = layerXf(L, v);
-    const s = (dpr * X.zL) / C.k, dx = dpr * (X.sx + (C.x0 - X.ax) * X.zL), dy = dpr * (X.sy + (C.y0 - X.ay) * X.zL);
+    const C = E.layers[i], X = layerXf(M.layers[i], v), s = (dpr * X.zL) / C.k;
+    const xf = XF[i] || (XF[i] = [0, 0, 0, null]);
+    xf[0] = dpr * (X.sx + (C.x0 - X.ax) * X.zL); xf[1] = dpr * (X.sy + (C.y0 - X.ay) * X.zL); xf[2] = s; xf[3] = X;
+    key += '|' + Math.round(xf[0] * 8) + ',' + Math.round(xf[1] * 8) + ',' + Math.round(s * 1e5);
+  }
+  E.still = key === E.lastKey ? (E.still || 0) + 1 : 0; E.lastKey = key;
+  let snap = null;
+  if (fade >= 1 && E.still >= SNAP_STILL) {
+    if (E.snap && E.snap.key === key) snap = E.snap;
+    else if (!E.snap || E.snap.key !== key) {
+      const rects = visRects(hole, PW, PH); let px = 0; for (const [a, b, c, d] of rects) px += (c - a) * (d - b);
+      if (px * groupsOf(M).length <= SNAP_MAXPX) { snapBuild(E, M, XF, rects); E.snap.key = key; snap = E.snap; }
+    }
+  }
+  if (snap) stats.snap++;
+  const G = snap && groupsOf(M);
+  for (let i = 0; i < M.layers.length; i++) {
+    const L = M.layers[i], C = E.layers[i], X = XF[i][3];
     ctx.globalAlpha = fade;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    blit(ctx, C.c, dx, dy, s, hole, PW, PH);
+    if (!snap) blit(ctx, C.c, XF[i][0], XF[i][1], XF[i][2], hole, PW, PH);
+    else { const gi = G.findIndex((g) => g[g.length - 1] === i); if (gi >= 0) snap.rects.forEach(([x0, y0], ri) => ctx.drawImage(snap.canv[gi][ri], x0, y0)); }
     if (L.anim) {
       const zz = dpr * X.zL;
       ctx.setTransform(zz, 0, 0, zz, dpr * (X.sx - X.ax * X.zL), dpr * (X.sy - X.ay * X.zL));
@@ -245,22 +298,51 @@ export function drawBackdropFront(ctx, id, r, T) {
   const gk = id + '|' + x0 + y0 + x1 + y1;
   if (G.k !== gk) {
     const L = M.light || {}, tc = L.tint ? (Array.isArray(L.tint) ? L.tint : [L.tint, L.tint]) : null;
-    G.k = gk; G.tint = tc && lin(ctx, 0, y0, 0, y1, [[0, tc[0]], [1, tc[1]]]);
-    G.glow = null;
-    if (L.glow) {
-      const [side, col, a] = L.glow, d = 7;
-      const g = side === 't' ? [0, y0, 0, y0 + d] : side === 'b' ? [0, y1, 0, y1 - d] : side === 'l' ? [x0, 0, x0 + d, 0] : [x1, 0, x1 - d, 0];
-      G.glow = lin(ctx, ...g, [[0, rgba(col, a)], [0.5, rgba(col, a * 0.25)], [1, rgba(col, 0)]]);
+    G.k = gk; G.tint = null; G.glow = null;
+    if (tc) { // band colours, built once (steps under 1/2 colour level)
+      const A = hex(tc[0]), B = hex(tc[1]), diff = Math.max(1, ...A.map((v, i) => Math.abs(B[i] - v))), n = Math.min(160, Math.max(1, Math.ceil(diff * 2.5)));
+      G.tint = Array.from({ length: n }, (_, k) => { const t = (k + 0.5) / n; return `rgb(${A[0] + (B[0] - A[0]) * t},${A[1] + (B[1] - A[1]) * t},${A[2] + (B[2] - A[2]) * t})`; });
+    }
+    if (L.glow) { // alpha a at the edge, a/4 half way, 0 at 7 tiles in (the 15.0 gradient's stops), 56 bands
+      const [side, col, a] = L.glow, rgb = hex(col).join(',');
+      G.glow = { side, n: 56, st: Array.from({ length: 56 }, (_, k) => { const t = (k + 0.5) / 56; return `rgba(${rgb},${t < 0.5 ? a * (1 - 1.5 * t) : a * 0.5 * (1 - t)})`; }) };
     }
   }
+  // R2 15.0.1 (perf): gradient fills under multiply / lighter cost 3-6x a solid fill, and the rect used to cover the whole
+  // board even off screen. Same light, drawn as solid bands in device pixels (steps under 1/2 colour level), visible part only.
+  const m = ctx.getTransform(), PW = ctx.canvas.width, PH = ctx.canvas.height;
+  const X0 = m.a * x0 + m.e, X1 = m.a * x1 + m.e, Y0 = m.d * y0 + m.f, Y1 = m.d * y1 + m.f;
+  const vx0 = Math.max(0, X0), vx1 = Math.min(PW, X1), vy0 = Math.max(0, Y0), vy1 = Math.min(PH, Y1);
   ctx.save();
   ctx.globalAlpha = fade;
-  if (G.tint) { ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = G.tint; ctx.fillRect(x0, y0, x1 - x0, y1 - y0); }
-  if (G.glow && !r.lowQ) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = G.glow; ctx.fillRect(x0, y0, x1 - x0, y1 - y0); }
+  if (vx1 > vx0 && vy1 > vy0) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (G.tint) {
+      ctx.globalCompositeOperation = 'multiply';
+      const n = G.tint.length, bh = (Y1 - Y0) / n;
+      for (let k = Math.max(0, Math.floor((vy0 - Y0) / bh)); k < n; k++) {
+        const ya = Math.max(vy0, k ? Math.round(Y0 + k * bh) : Y0), yb = Math.min(vy1, k < n - 1 ? Math.round(Y0 + (k + 1) * bh) : Y1); if (ya >= vy1) break; if (yb <= ya) continue;
+        ctx.fillStyle = G.tint[k]; ctx.fillRect(vx0, ya, vx1 - vx0, yb - ya);
+      }
+    }
+    if (G.glow && !r.lowQ) {
+      ctx.globalCompositeOperation = 'lighter';
+      const { side, n, st } = G.glow, vert = side === 't' || side === 'b', sc = vert ? m.d : m.a, d = 7 * sc;
+      const S = side === 't' ? Y0 : side === 'b' ? Y1 : side === 'l' ? X0 : X1, dir = side === 't' || side === 'l' ? 1 : -1;
+      const lo = vert ? vy0 : vx0, hi = vert ? vy1 : vx1;
+      for (let k = 0; k < n; k++) {
+        let p0 = k ? Math.round(S + dir * d * k / n) : S, p1 = Math.round(S + dir * d * (k + 1) / n); if (dir < 0) [p0, p1] = [p1, p0];
+        p0 = Math.max(lo, p0); p1 = Math.min(hi, p1); if (p1 <= p0) continue;
+        ctx.fillStyle = st[k];
+        if (vert) ctx.fillRect(vx0, p0, vx1 - vx0, p1 - p0); else ctx.fillRect(p0, vy0, p1 - p0, vy1 - vy0);
+      }
+    }
+    ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+  }
   const cc = M.light && M.light.caustic;
   if (cc && !r.lowQ) { // drifting pools of light (water caustics, leaf dapple): a handful of soft additive blits
     ctx.globalCompositeOperation = 'lighter'; const sp = glow(cc), Tm = r.reduced ? T * 0.3 : T, w = x1 - x0, h = y1 - y0;
-    for (let i = 0; i < 9; i++) { const u = (Math.sin(Tm * 0.07 + i * 2.4) * 0.5 + 0.5), q = ((Tm * 0.025 + i * 0.137) % 1), s = 2.2 + (i % 3); ctx.globalAlpha = fade * (0.07 + 0.04 * Math.sin(Tm * 0.9 + i)); ctx.drawImage(sp, x0 + u * w - s / 2, y0 + q * (h + s) - s, s, s * 0.7); }
+    for (let i = 0; i < 9; i++) { const u = (Math.sin(Tm * 0.07 + i * 2.4) * 0.5 + 0.5), q = ((Tm * 0.025 + i * 0.137) % 1), s = 2.2 + (i % 3); ctx.globalAlpha = fade * (0.07 + 0.04 * Math.sin(Tm * 0.9 + i)); blitExact(ctx, sp, x0 + u * w - s / 2, y0 + q * (h + s) - s, s, s * 0.7); }
   }
   ctx.restore();
   if (M.front) { ctx.save(); try { M.front(ctx, { ...KIT, b: { x0: b.x0, y0: b.y0, x1: b.x1 + 1, y1: b.y1 + 1 }, T: r.reduced ? T * 0.3 : T, lowQ: !!r.lowQ, reduced: !!r.reduced, n: (c) => Math.max(1, Math.round(c * (r.lowQ ? 0.5 : 1))) }); } catch {} ctx.restore(); }

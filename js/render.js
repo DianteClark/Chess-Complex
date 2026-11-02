@@ -1,6 +1,6 @@
 // Board renderer: themed tiles, pieces, telegraphs, sequenced combat VFX, camera juice.
 import { SIZE, BOARDS, ABILITIES, TRAILS } from './data.js';
-import { drawPiece, skinOf, PIECE_TOP, pieceKind, isAnimatedSkin, drawPieceAura, hasAura } from './pieces.js';
+import { drawPiece, skinOf, PIECE_TOP, pieceKind, isAnimatedSkin, drawPieceAura, hasAura, warmNow } from './pieces.js';
 import { hiSprite } from './fx.js';
 import { ringOf, stats, unitById, previewDamage } from './engine.js';
 import { FX } from './fx.js';
@@ -233,10 +233,10 @@ export class Renderer {
   // game.enter) restores the canvas size, and every cache rebuilds lazily on the next match.
   sleep() {
     if (this.asleep) return; this.asleep = true;
-    this.reset(); this.bgCache = null; this.fcache = this.fcache2 = null; this.fcMemo = null; this.redVg = null; this.look = null; this.locId = null;
+    this.reset(); this.bgCache = null; this.fcache = this.fcache2 = null; this.frs = null; this.fcMemo = null; this.redVg = null; this.look = null; this.locId = null;
     if (this.nameC) this.nameC.clear(); if (this.tintC) this.tintC.clear(); this.labels = []; this.nLabels = 0; this.drawPool = []; this.drawList = []; this.lights = [];
     this.weather = new W10.Weather(); this.loupe = null;
-    try { if (BD.releaseBackdrops) BD.releaseBackdrops(); } catch {}
+    try { if (BD.releaseBackdrops) BD.releaseBackdrops(); W10.exactRelease(); } catch {}
     this.c.width = this.c.height = 1; // ~5 MB of canvas memory on a phone; resize() puts it back
   }
   overview() { this.setZoomLevel('board'); }
@@ -767,7 +767,31 @@ export class Renderer {
     for (const [id, f] of this.hitFlash) { const v = f - dt * 6; if (v <= 0) this.hitFlash.delete(id); else this.hitFlash.set(id, v); }
     this.floats = this.floats.filter((p) => (p.t += dt) < p.life);
     for (const m of this.motes) { m.y -= m.v * realDt; m.p += realDt; if (m.y < -0.5) { m.y = SIZE + 0.5; m.x = Math.random() * SIZE; } }
+    if (this.underWheel()) return;
     this.draw();
+  }
+  // R2 15.0.1: the World Tour wheel (F/E2's #loc-wheel: opaque, full screen, ~4 s at every match start) hides the board,
+  // which used to be drawn underneath at full cost (with the location being baked at the same time, 50-130 ms frames,
+  // enough to push auto quality down for the whole match). Once its fade-in is done the board is not drawn; the floor and
+  // backdrop bakes are done then instead, and frames are idle (piece sprites warm up). Drops still landing keep drawing.
+  underWheel() {
+    if (typeof document === 'undefined') return false;
+    // the contender reveal (2.7 s, a dim veil over the board) is when the location, floor and first piece sprites bake:
+    // auto quality ignores those frames too, so a one-off start-up cost does not cost the whole match its resolution
+    const ct = document.getElementById('contenders'); if (ct && !ct.classList.contains('hidden') && this.aq) this.aq.warm = Math.max(this.aq.warm, 0.6);
+    const w = document.getElementById('loc-wheel');
+    if (!w || w.classList.contains('out') || !this.state) { this.wheelAt = 0; return false; }
+    const now = performance.now(); if (!this.wheelAt) this.wheelAt = now;
+    if (now - this.wheelAt < 400) return false;
+    for (const d of this.disp.values()) if (d.drop) return false;
+    if (!this.wheelWarm) this.wheelWarm = { s: null };
+    if (this.wheelWarm.s !== this.state) { // once per state: what the first frames after the wheel need
+      this.wheelWarm.s = this.state;
+      try { if (!this.intro || this.intro.t >= 1.6) this.floorCache(); const id = BD.backdropId(this.state); if (id) BD.prepareBackdrop(id, BD.viewOf(this, 0, 0)); } catch {}
+    }
+    if (this.aq) this.aq.warm = Math.max(this.aq.warm, 0.6); // auto quality: these frames say nothing about the board's cost
+    try { warmNow(this.lowQ ? 3 : 5); } catch {} // piece G-buffers / queued sprites now, not in background slices mid-match
+    return true;
   }
 
   tileVisible(x, y) {
@@ -780,6 +804,7 @@ export class Renderer {
     const { x: ctx, W, H, dpr } = this;
     const s = this.state, th = this.theme;
     SV = this.fx.st instanceof Map ? this.fx.st : null; // R 15.0: statuses as shown (see hasSt)
+    { const zs = Math.abs(this.z - (this.exZ || 0)) < this.z * 3e-4; this.exZ = this.z; W10.exactTick(zs); } // R2 15.0.1: frame counter for the exact-size sprite copies (off while zooming)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const bk =W + 'x' + H + th.name + this.CY + 'x' + dpr;
     if (!this.bgCache || this.bgCache.k !== bk) { // pre-rendered 1:1 so each frame is a plain blit, not a gradient fill
@@ -806,10 +831,15 @@ export class Renderer {
       const fc = this.floorCache(), k = fc.c.width / (SIZE + FPAD * 2);
       const [ax, ay] = this.toWorld(-sh, -sh), [bx, by] = this.toWorld(W + sh, H + sh);
       const x0 = Math.max(-FPAD, Math.floor(ax)), y0 = Math.max(-FPAD, Math.floor(ay)), x1 = Math.min(SIZE + FPAD, Math.ceil(bx)), y1 = Math.min(SIZE + FPAD, Math.ceil(by));
-      if (Math.abs((z * dpr) / k - 1) < 0.002) { // B3 10.1: baked at the on-screen scale: copy 1:1 on whole device pixels, no resampling
-        const offX = Math.round(dpr * ((this.CX ?? W / 2) + ox) - k * (this.cam.x + FPAD)), offY = Math.round(dpr * (this.CY + oy) - k * (this.cam.y + FPAD));
-        const sx = Math.max(0, -offX), sy = Math.max(0, -offY), sw = Math.min(fc.c.width, this.c.width - offX) - sx, sh2 = Math.min(fc.c.height, this.c.height - offY) - sy;
-        if (sw > 0 && sh2 > 0) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(fc.c, sx, sy, sw, sh2, sx + offX, sy + offY, sw, sh2); ctx.restore(); }
+      // R2 15.0.1: the camera often rests at a framing zoom a few % off the bake (4-5 ms a frame to resample a phone-sized
+      // board): once it has held still, the bake is resampled once to exactly that scale and copied 1:1 from then on
+      const one = Math.abs((z * dpr) / k - 1) < 0.002 ? { c: fc.c, k } : this.floorResample(fc, z * dpr);
+      if (this.frs) { if (one && one.c === this.frs.c) this.frsIdle = 0; else if ((this.frsIdle = (this.frsIdle || 0) + 1) > 600) this.frs = null; } // unused ~10 s: free it
+      if (one) { // B3 10.1: baked at the on-screen scale: copy 1:1 on whole device pixels, no resampling
+        const oc = one.c, kk = one.k;
+        const offX = Math.round(dpr * ((this.CX ?? W / 2) + ox) - kk * (this.cam.x + FPAD)), offY = Math.round(dpr * (this.CY + oy) - kk * (this.cam.y + FPAD));
+        const sx = Math.max(0, -offX), sy = Math.max(0, -offY), sw = Math.min(oc.width, this.c.width - offX) - sx, sh2 = Math.min(oc.height, this.c.height - offY) - sy;
+        if (sw > 0 && sh2 > 0) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(oc, sx, sy, sw, sh2, sx + offX, sy + offY, sw, sh2); ctx.restore(); }
       } else if (x1 > x0 && y1 > y0) ctx.drawImage(fc.c, (x0 + FPAD) * k, (y0 + FPAD) * k, (x1 - x0) * k, (y1 - y0) * k, x0, y0, x1 - x0, y1 - y0);
     }
     W10.drawStormVoid(this, ctx, T); // swirling nebula in the collapsed ring + glowing storm seam
@@ -1081,6 +1111,19 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
   // ---------- static board cache: frame + floor + void base + grid ----------
+  // R2 15.0.1: a copy of the floor bake resampled to exactly `want` device px per tile (same pixels the per-frame scaled
+  // blit produced, made once): only after the zoom has held for ~12 frames, so glides and quick beats never pay for it
+  floorResample(fc, want) {
+    const rs = this.frs, span = SIZE + FPAD * 2;
+    if (rs && rs.src === fc.c && rs.key === fc.key && Math.abs(want / rs.k - 1) < 0.002) return rs;
+    const st = this.frsHold || (this.frsHold = { w: 0, n: 0 });
+    if (Math.abs(want / (st.w || 1) - 1) < 0.0005) st.n++; else { st.w = want; st.n = 0; }
+    const n = Math.round(span * want);
+    if (st.n < 12 || Math.abs(this.cam.z - this.cam.tz) > this.cam.tz * 0.001 || n > 4096 || n < 16) return null;
+    const c = rs ? rs.c : document.createElement('canvas'); c.width = n; c.height = n;
+    c.getContext('2d').drawImage(fc.c, 0, 0, n, n);
+    return (this.frs = { c, k: n / span, src: fc.c, key: fc.key });
+  }
   floorCache() {
     const s = this.state, th = this.theme, want = this.z * this.dpr;
     // geometric zoom buckets (~12% apart) so the blit is close to 1:1; capped for memory
@@ -1095,6 +1138,7 @@ export class Renderer {
       let oh = 0; for (let i = 0; i < s.tiles.length; i++) if (s.tiles[i].t === 'out') oh = (oh * 31 + i) | 0;
       mk.s = s; mk.ring = s.storm.ring; mk.th = th; mk.B = B;
       mk.pre = th.name + '|' + this.lookOf().mat + '|' + s.storm.ring + '|'; mk.post = '|' + oh + '|' + W10.solidsKey(s) + '|' + (B ? B.x0 + ',' + B.y0 + ',' + B.x1 + ',' + B.y1 : '');
+      mk.ob = oh + '|' + (B ? B.x0 + ',' + B.y0 + ',' + B.x1 + ',' + B.y1 : ''); mk.sig = null;
     }
     const key = mk.pre + px + mk.post;
     let fc = this.fcache;
@@ -1107,6 +1151,21 @@ export class Renderer {
     // 15-50 ms, and camera shots used to cost two of them); a zoom back near rest still rebakes for the exact 1:1 copy
     if (fc && fc.kNoPx === kNoPx && fc.px && px !== Math.round(span * rest) / span && want / fc.px > 0.8 && want / fc.px < 1.25) return fc;
     const n = Math.round(span * px);
+    // R2 15.0.1: only baked tile features changed (a crate broke, rubble went up, lava spread): a full bake of the zoomed
+    // board is 50-75 ms on a phone-class CPU, so repaint just the changed tiles +-3 (shadows, light cuts) on whole pixels
+    const sig = mk.sig || (mk.sig = W10.bakeSig(s));
+    if (fc && fc.px === px && fc.pre === mk.pre && fc.ob === mk.ob && fc.sig && fc.c.width === n) {
+      let x0 = SIZE, y0 = SIZE, x1 = -1, y1 = -1;
+      for (let i = 0; i < sig.length; i++) if (sig[i] !== fc.sig[i]) { const x = i % SIZE, y = (i / SIZE) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      if (x1 >= 0 && (x1 - x0 + 7) * (y1 - y0 + 7) <= 120) {
+        const M = 3, X0 = Math.max(0, Math.floor((x0 - M + FPAD) * px)), Y0 = Math.max(0, Math.floor((y0 - M + FPAD) * px)), X1 = Math.min(n, Math.ceil((x1 + 1 + M + FPAD) * px)), Y1 = Math.min(n, Math.ceil((y1 + 1 + M + FPAD) * px));
+        const g = fc.c.getContext('2d'); g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.beginPath(); g.rect(X0, Y0, X1 - X0, Y1 - Y0); g.clip(); g.clearRect(X0, Y0, X1 - X0, Y1 - Y0);
+        g.setTransform(px, 0, 0, px, FPAD * px, FPAD * px);
+        const save = this.x; this.x = g; this.drawStatic(g, false); this.x = save; g.restore();
+        fc.key = key; fc.kNoPx = kNoPx; fc.sig = sig; this.patchBuilds = (this.patchBuilds || 0) + 1;
+        return fc;
+      }
+    }
     if (fc && fc.kNoPx === kNoPx && fc.px && Math.abs(fc.px / px - 1) > 0.25) { // a different zoom level: keep this bake as the spare
       const spare = this.fcache2; this.fcache2 = fc; fc = this.fcache = spare && spare.kNoPx !== kNoPx ? spare : { c: document.createElement('canvas') };
     } else if (this.fcache2 && this.fcache2.kNoPx !== kNoPx) this.fcache2 = null; // board changed: the spare is stale
@@ -1115,7 +1174,7 @@ export class Renderer {
     const g = fc.c.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, n, n);
     g.setTransform(px, 0, 0, px, FPAD * px, FPAD * px);
     const save = this.x; this.x = g; this.drawStatic(g, false); this.x = save;
-    fc.key = key; fc.kNoPx = kNoPx; fc.px = px; this.cacheBuilds = (this.cacheBuilds || 0) + 1;
+    fc.key = key; fc.kNoPx = kNoPx; fc.px = px; fc.pre = mk.pre; fc.ob = mk.ob; fc.sig = sig; this.cacheBuilds = (this.cacheBuilds || 0) + 1;
     return fc;
   }
   drawStatic(ctx, live) {
@@ -1396,7 +1455,7 @@ export class Renderer {
     C.set(key, { c, src: w, w: w.width }); return c;
   }
   badge(x, y, text, col = '#5fd8ff') { this.x.drawImage(badgeSprite(text, col), x - 0.135, y - 0.135, 0.27, 0.27); }
-  glowDot(x, y, r, color, a = 1) { const ctx = this.x, pa = ctx.globalAlpha; ctx.globalAlpha = pa * a; ctx.drawImage(glowSprite(color), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = pa; }
+  glowDot(x, y, r, color, a = 1) { const ctx = this.x, pa = ctx.globalAlpha; ctx.globalAlpha = pa * a; W10.blitExact(ctx, glowSprite(color), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = pa; } // R2 15.0.1: 1:1 copy at rest
 
   drawUnit(u, d, T) {
     const ctx = this.x, s = this.state;

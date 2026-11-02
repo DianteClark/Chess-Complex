@@ -1427,7 +1427,10 @@ function schedule(prio) {
   if (!idlePosted) {
     idlePosted = true;
     const ric = window.requestIdleCallback;
-    if (ric) ric((d) => { idlePosted = false; runSlice(MN(SLICE_MS + 3, MX(3, d.timeRemaining() - 1)), 0); }, { timeout: 1200 });
+    // R2 15.0.1: speculative warm-up (WARM, no sprite waiting on it) only runs in real idle time: the 1.2 s timeout forced
+    // a 3-8 ms slice into a busy match every second (frames already near budget dropped to 30 fps). Queued jobs keep it.
+    // An idle slice never runs past the idle period (the old 3 ms floor overran it and pushed the next frame past vsync).
+    if (ric) ric((d) => { idlePosted = false; const left = d.timeRemaining(); if (d.didTimeout) runSlice(MN(SLICE_MS + 3, MX(3, left - 1)), 0); else if (left >= 3) runSlice(MN(SLICE_MS + 3, left - 1.5), 0); else schedule(0); }, JOBS.size ? { timeout: 1200 } : undefined);
     else setTimeout(() => { idlePosted = false; runSlice(SLICE_MS, 0); }, 60);
   }
 }
@@ -1686,6 +1689,14 @@ const WARM = [];
 export function warmPieces(list = ['pawn', 'knight', 'bishop', 'rook', 'queen', 'king', 'hollow'], resList = [192, 96]) {
   for (const r of resList) for (const p of list) if (!WARM.some((q) => q[0] === p && q[1] === r)) WARM.push([p, r]);
   schedule(0);
+}
+// R2 15.0.1: spend `ms` now on queued sprite jobs, then on the warm-up list (render.js calls this while the location wheel
+// hides the board, so the G-buffers are ready before the match instead of building in background slices mid-match)
+export function warmNow(ms = 4) {
+  if (typeof window === 'undefined') return false;
+  const t0 = now();
+  while (now() - t0 < ms) { const nx = pick(); if (nx) { if (work(nx.j, ms - (now() - t0))) { for (const f of READY_CB) f(); } } else if (!warmStep(ms - (now() - t0))) break; }
+  return WARM.length > 0 || JOBS.size > 0;
 }
 function warmStep(ms) {
   while (WARM.length) { const g = GB.get(gbKey(WARM[0][0], WARM[0][1])); if (g && g.done) WARM.shift(); else break; }
