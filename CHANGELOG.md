@@ -1,5 +1,8 @@
 # Changelog
 
+## 10.2.1 (November 2026)
+- **Voice chat microphone (owner report: "Join Voice says no mic"):** every microphone failure used to show "No microphone found". Now `getMic()` asks with voice-tuned settings, then falls back to a plain audio request (some phones reject the processing hints or report the mic busy), keeps the more telling error, and checks for a secure page. Errors are explained per platform: blocked permission (iPhone Safari aA > Website Settings, home-screen app via Settings > Safari > Microphone, Android site and app permissions, desktop), mic busy in another app, in-app browsers that cannot use the mic, or no mic at all. A new Turn On Mic button asks again from a tap and swaps the live mic into open calls without reconnecting.
+
 ## 10.2 (November 2026)
 First sprint of the standing team (docs/TEAM.md), from the owner's online match with a friend.
 - **Tap accuracy (Input & UX):** seven causes fixed: a 600 ms touch cut-off dropped taps on busy frames; the lift point (not touch-down) picked the tile; the camera moved under the finger; landscape resize read the board mid-transition (taps up to 15 px off); piece sprites taller than their tile; hint/inspect cards swallowed taps; stale pointers turned taps into pinches. New `js/input.js`: touch-down resolution with a frozen camera, target assist, DPR-scaled pan threshold, preview-then-confirm with a loupe when tiles are under 30 px. Zoomed out on phones: 22-27% to 97-100% correct, 0 wrong actions; online client 70% to 100%.

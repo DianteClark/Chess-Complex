@@ -178,13 +178,11 @@ class Voice {
     const AC = window.AudioContext || window.webkitAudioContext;
     try { this.ac = AC ? new AC() : null; if (this.ac && this.ac.state === 'suspended') this.ac.resume().catch(() => {}); } catch { this.ac = null; }
     let mic = null;
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('unsupported'), { name: 'NotSupportedError' });
-      mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }, video: false });
-    } catch (e) {
-      this.listenOnly = true;
-      this.err = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') ? 'Microphone blocked. You can listen; allow the microphone in your browser settings to talk.' : 'No microphone found. You can listen to others.';
-      this.d.toast(this.err);
+    try { mic = await getMic(); }
+    catch (e) {
+      this.listenOnly = true; this.errName = (e && e.name) || 'Error';
+      this.err = micHelp(e);
+      this.d.toast(micShort(e));
     }
     if (this.d.session() !== sess || this.state !== 'starting') { if (mic) mic.getTracks().forEach((t) => t.stop()); return; }
     if (mic) { this.mic = mic; for (const t of mic.getAudioTracks()) { t.enabled = false; t.onended = () => { if (this.state === 'on') { this.listenOnly = true; this.err = 'Microphone disconnected. You can still listen.'; this.d.toast(this.err); this.changed(); } }; } }
@@ -197,6 +195,28 @@ class Voice {
     this.myVid = this.T.id; this.state = 'on'; this.open = false; this.ptt = false;
     this.send({ a: 'join', vid: this.myVid });
     this.changed(); this.d.sfx && this.d.sfx.select && this.d.sfx.select();
+  }
+  // Ask again from a tap (the browser shows its permission prompt only in response to a user gesture), then swap the
+  // live mic into every open call without reconnecting.
+  async retryMic() {
+    if (this.state !== 'on' || !this.listenOnly) return;
+    let mic;
+    try { mic = await getMic(); }
+    catch (e) { this.errName = (e && e.name) || 'Error'; this.err = micHelp(e); this.d.toast(micShort(e)); this.changed(); return; }
+    if (this.state !== 'on') { mic.getTracks().forEach((t) => t.stop()); return; }
+    this.mic = mic; this.listenOnly = false; this.err = '';
+    const track = mic.getAudioTracks()[0];
+    for (const t of mic.getAudioTracks()) { t.enabled = false; t.onended = () => { if (this.state === 'on') { this.listenOnly = true; this.err = 'Microphone disconnected. You can still listen.'; this.d.toast(this.err); this.changed(); } }; }
+    if (this.ac) { try { const src = this.ac.createMediaStreamSource(mic); this.myAn = this.ac.createAnalyser(); this.myAn.fftSize = 512; src.connect(this.myAn); } catch {} }
+    const old = this.out; this.out = mic;
+    for (const ent of this.calls.values()) {
+      const pc = ent.C && (ent.C.peerConnection || (ent.C.raw && ent.C.raw.peerConnection));
+      let swapped = false;
+      if (pc && pc.getSenders) for (const snd of pc.getSenders()) if (!snd.track || snd.track.kind === 'audio') { try { snd.replaceTrack(track); swapped = true; } catch {} }
+      if (!swapped) this.drop(ent.vid, true); // no sender to swap: redial with the mic
+    }
+    if (old && old !== mic) try { old.getTracks().forEach((t) => t.stop()); } catch {}
+    this.reconcile(); this.d.toast('Microphone on. Hold Talk to speak.'); this.d.sfx && this.d.sfx.select && this.d.sfx.select(); this.changed();
   }
   silent() {
     try { if (this.ac) { const d = this.ac.createMediaStreamDestination(); return d.stream; } } catch {}
@@ -378,6 +398,7 @@ class Voice {
     }
     head.appendChild(st); w.appendChild(head);
     if (this.err && this.state === 'on') w.appendChild(el('p', 'vc-err', this.err));
+    if (this.state === 'on' && this.listenOnly && this.errName !== 'NotSupportedError') { const m = el('button', 'btn small gold vc-allow', 'Turn On Mic'); m.dataset.vc = 'mic'; w.appendChild(m); }
     if (lobby && this.state === 'on' && !this.listenOnly && !this.open) { const h = el('button', 'btn wide vc-hold', 'Hold to Talk'); this.bindHold(h); w.appendChild(h); }
     if (list && this.roster.size) {
       const ul = el('ul', 'vc-list'); const N = this.names(), me = this.sess ? this.sess.myPid : (this.d.session() || {}).myPid;
@@ -408,7 +429,49 @@ class Voice {
     if (act === 'join') { s && s.tap && s.tap(); this.start(); }
     else if (act === 'leave') { s && s.tap && s.tap(); this.stop(); }
     else if (act === 'open') this.setOpen(!this.open);
+    else if (act === 'mic') { s && s.tap && s.tap(); this.retryMic(); }
     else if (act === 'mute' && pid) { this.toggleMute(pid); s && s.tap && s.tap(); }
   }
 }
+
+// ---- microphone access ----
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const ANDROID = /Android/.test(navigator.userAgent);
+const STANDALONE = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const INAPP = /FBAN|FBAV|Instagram|Line\/|Snapchat|Twitter|Discord|GSA\/|; wv\)/.test(navigator.userAgent);
+const named = (name, msg = name) => Object.assign(new Error(msg), { name });
+// Must be called straight from a tap. Tries the voice-tuned constraints first, then plain audio (some phones reject
+// the processing hints or report the mic as unavailable with them).
+export async function getMic() {
+  const md = navigator.mediaDevices;
+  if (!window.isSecureContext) throw named('SecureContextError');
+  if (!md || !md.getUserMedia) throw named('NotSupportedError');
+  try { return await md.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
+  catch (e) {
+    if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw e;
+    try { return await md.getUserMedia({ audio: true }); }
+    catch (e2) { throw e2 && e2.name && !['NotSupportedError', 'TypeError', 'OverconstrainedError'].includes(e2.name) ? e2 : e; } // keep the more telling error
+  }
+}
+function micShort(e) {
+  const n = e && e.name;
+  if (n === 'NotAllowedError' || n === 'SecurityError') return 'Microphone permission is off. See Voice Chat for how to turn it on.';
+  if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError') return 'Your microphone is busy in another app.';
+  if (n === 'NotSupportedError' || n === 'SecureContextError') return 'This browser cannot share the microphone.';
+  return 'No microphone was found. You can still listen.';
+}
+function micHelp(e) {
+  const n = e && e.name;
+  if (n === 'NotAllowedError' || n === 'SecurityError') {
+    if (IOS && STANDALONE) return 'Microphone is off for the home-screen app. On iPhone: Settings > Safari > Microphone > Ask or Allow, then reopen the game and tap Turn On Mic. You can still listen.';
+    if (IOS) return 'Microphone is blocked. In Safari tap the aA button in the address bar > Website Settings > Microphone > Allow, then tap Turn On Mic (reload the page if no prompt appears). You can still listen.';
+    if (ANDROID) return 'Microphone is blocked. Tap the icon left of the address bar > Permissions > Microphone > Allow (and check Android Settings > Apps > your browser > Permissions), then tap Turn On Mic. You can still listen.';
+    return 'Microphone is blocked. Click the icon left of the address bar, allow the microphone for this site, then press Turn On Mic. You can still listen.';
+  }
+  if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError') return 'Another app is using the microphone (a call, a voice memo or another browser tab). Close it, then tap Turn On Mic. You can still listen.';
+  if (n === 'SecureContextError') return 'Voice needs the secure site. Open https://dianteclark.github.io/Chess-Complex/ and try again.';
+  if (n === 'NotSupportedError') return INAPP ? 'This in-app browser cannot use the microphone. Open the game in Safari or Chrome (use the menu > Open in browser), then join voice again. You can still listen.' : 'This browser cannot share the microphone. Try Safari on iPhone or Chrome on Android. You can still listen.';
+  return 'No microphone was found on this device. You can still listen to others.';
+}
+
 export const voice = new Voice();

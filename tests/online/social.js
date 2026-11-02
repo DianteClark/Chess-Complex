@@ -270,7 +270,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
       const s = await vstate(c);
       run.note(`denied mic: ${JSON.stringify(s)}`);
       run.check(s.state === 'on' && s.listen && /Microphone|microphone/.test(s.err), `c1: denied mic not handled as listen-only ${JSON.stringify(s)}`);
-      run.check(await c.evaluate(() => /Microphone blocked|No microphone/.test(document.querySelector('#vc-join').innerText)), 'c1: no clear message in the lobby panel');
+      run.check(await c.evaluate(() => /Microphone is blocked|Microphone is off|No microphone|cannot use the microphone|cannot share the microphone|using the microphone/.test(document.querySelector('#vc-join').innerText)), 'c1: no clear message in the lobby panel');
       await run.shot('c1', 'voice-denied');
       // the data connection and the game are unaffected
       await L.startMatch(run, host, { bots: 1, clients: [c] });
