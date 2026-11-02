@@ -478,6 +478,9 @@ S['S9-siege-coop'] = async (run) => {
   await rewardsOnce(run, 'host'); await rewardsOnce(run, 'c1');
 };
 
+// 10.2 (N): quick chat (C1-C6) and voice (V1-V2) scenarios live in social.js
+require('./social')(S, { L, match, sleep, tap, autoplay });
+
 // ---------- runner ----------
 (async () => {
   const args = process.argv.slice(2); const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };

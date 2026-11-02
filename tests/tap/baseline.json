@@ -1,0 +1,1907 @@
+{
+ "tag": "baseline",
+ "at": "2026-11-02T01:09:03.235Z",
+ "trials": 30,
+ "sum": {
+  "clean": {
+   "n": 166,
+   "correct": 162,
+   "wrong": 0,
+   "none": 4,
+   "misprev": 0,
+   "legalN": 143,
+   "legalCorrect": 139
+  },
+  "jitter": {
+   "n": 180,
+   "correct": 89,
+   "wrong": 7,
+   "none": 84,
+   "misprev": 0,
+   "legalN": 123,
+   "legalCorrect": 32
+  },
+  "motion": {
+   "n": 180,
+   "correct": 82,
+   "wrong": 38,
+   "none": 60,
+   "misprev": 0,
+   "legalN": 124,
+   "legalCorrect": 29
+  }
+ },
+ "runs": [
+  {
+   "vp": "390x844@3",
+   "mode": "solo",
+   "res": {
+    "clean": {
+     "n": 30,
+     "correct": 30,
+     "wrong": 0,
+     "none": 0,
+     "misprev": 0,
+     "taps": 24,
+     "covered": 0,
+     "legalN": 24,
+     "legalCorrect": 24,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [],
+     "starved": 29,
+     "tilePx": 20.4
+    },
+    "jitter": {
+     "n": 30,
+     "correct": 11,
+     "wrong": 1,
+     "none": 18,
+     "misprev": 0,
+     "taps": 3,
+     "covered": 0,
+     "legalN": 22,
+     "legalCorrect": 3,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":9,\"y\":7}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 8,
+        "y": 7
+       },
+       "aimed": {
+        "x": 8,
+        "y": 7
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":5,\"y\":9}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 6,
+        "y": 9
+       },
+       "aimed": {
+        "x": 6,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 13
+       },
+       "aimed": {
+        "x": 7,
+        "y": 13
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 8
+       },
+       "aimed": {
+        "x": 9,
+        "y": 8
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 11
+       },
+       "aimed": {
+        "x": 7,
+        "y": 11
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":9,\"y\":5}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 6
+       },
+       "aimed": {
+        "x": 9,
+        "y": 6
+       },
+       "acts": [],
+       "tilePx": 20.4
+      }
+     ],
+     "tilePx": 20.4,
+     "starved": 2
+    },
+    "motion": {
+     "n": 30,
+     "correct": 11,
+     "wrong": 9,
+     "none": 10,
+     "misprev": 0,
+     "taps": 4,
+     "covered": 1,
+     "legalN": 22,
+     "legalCorrect": 4,
+     "drift": 4,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":6,\"y\":7}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 7,
+        "y": 7
+       },
+       "aimed": {
+        "x": 7,
+        "y": 7
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 6,
+         "y": 7
+        }
+       ],
+       "tilePx": 25.8
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":9,\"y\":7}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 8,
+        "y": 8
+       },
+       "aimed": {
+        "x": 8,
+        "y": 8
+       },
+       "acts": [],
+       "tilePx": 26.1
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":9,\"y\":9}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 8,
+        "y": 9
+       },
+       "aimed": {
+        "x": 8,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 25.2
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":11,\"y\":8}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 8
+       },
+       "aimed": {
+        "x": 9,
+        "y": 8
+       },
+       "acts": [],
+       "tilePx": 27
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":7,\"y\":15}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 13
+       },
+       "aimed": {
+        "x": 7,
+        "y": 13
+       },
+       "acts": [],
+       "tilePx": 25.8
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":7,\"y\":4}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 6
+       },
+       "aimed": {
+        "x": 7,
+        "y": 6
+       },
+       "acts": [],
+       "tilePx": 27
+      }
+     ],
+     "tilePx": 27.5,
+     "starved": 4
+    }
+   },
+   "errors": []
+  },
+  {
+   "vp": "390x844@3",
+   "mode": "online",
+   "res": {
+    "clean": {
+     "n": 16,
+     "correct": 16,
+     "wrong": 0,
+     "none": 0,
+     "misprev": 0,
+     "taps": 14,
+     "covered": 0,
+     "legalN": 14,
+     "legalCorrect": 14,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [],
+     "starved": 61,
+     "tilePx": 20.4
+    },
+    "jitter": {
+     "n": 30,
+     "correct": 17,
+     "wrong": 0,
+     "none": 13,
+     "misprev": 0,
+     "taps": 6,
+     "covered": 0,
+     "legalN": 19,
+     "legalCorrect": 6,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 5,
+        "y": 6
+       },
+       "aimed": {
+        "x": 5,
+        "y": 6
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 5,
+        "y": 10
+       },
+       "aimed": {
+        "x": 5,
+        "y": 10
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 4,
+        "y": 10
+       },
+       "aimed": {
+        "x": 4,
+        "y": 10
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 3,
+        "y": 11
+       },
+       "aimed": {
+        "x": 3,
+        "y": 11
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 0,
+        "y": 9
+       },
+       "aimed": {
+        "x": 0,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 3,
+        "y": 11
+       },
+       "aimed": {
+        "x": 3,
+        "y": 11
+       },
+       "acts": [],
+       "tilePx": 20.4
+      }
+     ],
+     "starved": 10,
+     "tilePx": 20.4
+    },
+    "motion": {
+     "n": 30,
+     "correct": 20,
+     "wrong": 4,
+     "none": 6,
+     "misprev": 0,
+     "taps": 8,
+     "covered": 2,
+     "legalN": 16,
+     "legalCorrect": 8,
+     "drift": 9,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":5,\"y\":7}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 6,
+        "y": 7
+       },
+       "aimed": {
+        "x": 6,
+        "y": 8
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 5,
+         "y": 7
+        }
+       ],
+       "tilePx": 25.8
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":7,\"y\":7}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 6,
+        "y": 8
+       },
+       "aimed": {
+        "x": 6,
+        "y": 8
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 7,
+         "y": 7
+        }
+       ],
+       "tilePx": 26.1
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":2,\"y\":10}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 2,
+        "y": 9
+       },
+       "aimed": {
+        "x": 2,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 25.5
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "null",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 2,
+        "y": 9
+       },
+       "aimed": {
+        "x": 2,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 27
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":6,\"y\":12}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 5,
+        "y": 12
+       },
+       "aimed": {
+        "x": 5,
+        "y": 12
+       },
+       "acts": [],
+       "tilePx": 25.5
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":4,\"y\":11}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 4,
+        "y": 10
+       },
+       "aimed": {
+        "x": 4,
+        "y": 10
+       },
+       "acts": [],
+       "tilePx": 26.1
+      }
+     ],
+     "starved": 51,
+     "tilePx": 24.6
+    }
+   },
+   "errors": []
+  },
+  {
+   "vp": "360x740@2",
+   "mode": "solo",
+   "res": {
+    "clean": {
+     "n": 30,
+     "correct": 30,
+     "wrong": 0,
+     "none": 0,
+     "misprev": 0,
+     "taps": 27,
+     "covered": 1,
+     "legalN": 27,
+     "legalCorrect": 27,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [],
+     "tilePx": 16,
+     "starved": 16
+    },
+    "jitter": {
+     "n": 30,
+     "correct": 11,
+     "wrong": 1,
+     "none": 18,
+     "misprev": 0,
+     "taps": 4,
+     "covered": 0,
+     "legalN": 23,
+     "legalCorrect": 4,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 8,
+        "y": 5
+       },
+       "aimed": {
+        "x": 8,
+        "y": 5
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 9
+       },
+       "aimed": {
+        "x": 9,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 8,
+        "y": 12
+       },
+       "aimed": {
+        "x": 8,
+        "y": 12
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 12,
+        "y": 6
+       },
+       "aimed": {
+        "x": 12,
+        "y": 6
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 10
+       },
+       "aimed": {
+        "x": 9,
+        "y": 10
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 3,
+        "y": 15
+       },
+       "aimed": {
+        "x": 3,
+        "y": 15
+       },
+       "acts": [],
+       "tilePx": 16
+      }
+     ],
+     "tilePx": 16
+    },
+    "motion": {
+     "n": 30,
+     "correct": 12,
+     "wrong": 7,
+     "none": 11,
+     "misprev": 0,
+     "taps": 5,
+     "covered": 0,
+     "legalN": 23,
+     "legalCorrect": 5,
+     "drift": 2,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":7,\"y\":9}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 7,
+        "y": 10
+       },
+       "aimed": {
+        "x": 7,
+        "y": 10
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 7,
+         "y": 9
+        }
+       ],
+       "tilePx": 21.1
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":5,\"y\":8}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 5,
+        "y": 7
+       },
+       "aimed": {
+        "x": 5,
+        "y": 7
+       },
+       "acts": [],
+       "tilePx": 19.5
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":2,\"y\":4}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 3,
+        "y": 5
+       },
+       "aimed": {
+        "x": 3,
+        "y": 5
+       },
+       "acts": [],
+       "tilePx": 19.2
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":8,\"y\":8}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 8,
+        "y": 9
+       },
+       "aimed": {
+        "x": 8,
+        "y": 9
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 8,
+         "y": 8
+        }
+       ],
+       "tilePx": 21.3
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":9,\"y\":8}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 9
+       },
+       "aimed": {
+        "x": 9,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 20.7
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":5,\"y\":15}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 5,
+        "y": 13
+       },
+       "aimed": {
+        "x": 5,
+        "y": 13
+       },
+       "acts": [],
+       "tilePx": 19.7
+      }
+     ],
+     "tilePx": 20.2,
+     "starved": 10
+    }
+   },
+   "errors": []
+  },
+  {
+   "vp": "360x740@2",
+   "mode": "online",
+   "res": {
+    "clean": {
+     "n": 30,
+     "correct": 29,
+     "wrong": 0,
+     "none": 1,
+     "misprev": 0,
+     "taps": 24,
+     "covered": 3,
+     "legalN": 25,
+     "legalCorrect": 24,
+     "drift": 0,
+     "noDown": 1,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 12
+       },
+       "aimed": {
+        "x": 9,
+        "y": 12
+       },
+       "acts": [],
+       "tilePx": 16
+      }
+     ],
+     "tilePx": 16,
+     "starved": 1
+    },
+    "jitter": {
+     "n": 30,
+     "correct": 12,
+     "wrong": 5,
+     "none": 13,
+     "misprev": 0,
+     "taps": 8,
+     "covered": 0,
+     "legalN": 26,
+     "legalCorrect": 8,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 15
+       },
+       "aimed": {
+        "x": 9,
+        "y": 15
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":11,\"y\":10}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 12,
+        "y": 10
+       },
+       "aimed": {
+        "x": 12,
+        "y": 10
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 11,
+         "y": 10
+        }
+       ],
+       "tilePx": 16
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 10,
+        "y": 10
+       },
+       "aimed": {
+        "x": 10,
+        "y": 10
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 7
+       },
+       "aimed": {
+        "x": 9,
+        "y": 7
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":5,\"y\":7}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 6,
+        "y": 7
+       },
+       "aimed": {
+        "x": 6,
+        "y": 7
+       },
+       "acts": [],
+       "tilePx": 16
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":15,\"y\":15}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 14,
+        "y": 15
+       },
+       "aimed": {
+        "x": 14,
+        "y": 15
+       },
+       "acts": [],
+       "tilePx": 16
+      }
+     ],
+     "tilePx": 16,
+     "starved": 5
+    },
+    "motion": {
+     "n": 30,
+     "correct": 17,
+     "wrong": 4,
+     "none": 9,
+     "misprev": 0,
+     "taps": 7,
+     "covered": 0,
+     "legalN": 20,
+     "legalCorrect": 7,
+     "drift": 4,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":10,\"y\":10}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 9,
+        "y": 9
+       },
+       "aimed": {
+        "x": 9,
+        "y": 9
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 10,
+         "y": 10
+        }
+       ],
+       "tilePx": 20.4
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":9,\"y\":9}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 9,
+        "y": 8
+       },
+       "aimed": {
+        "x": 9,
+        "y": 8
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 9,
+         "y": 9
+        }
+       ],
+       "tilePx": 19.5
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":9,\"y\":4}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 6
+       },
+       "aimed": {
+        "x": 9,
+        "y": 6
+       },
+       "acts": [],
+       "tilePx": 20.2
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":8,\"y\":8}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 8,
+        "y": 9
+       },
+       "aimed": {
+        "x": 8,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 20.7
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":13,\"y\":14}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 12,
+        "y": 13
+       },
+       "aimed": {
+        "x": 12,
+        "y": 13
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 13,
+         "y": 14
+        }
+       ],
+       "tilePx": 20.7
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":13,\"y\":10}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 12,
+        "y": 10
+       },
+       "aimed": {
+        "x": 12,
+        "y": 9
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 13,
+         "y": 10
+        }
+       ],
+       "tilePx": 19.7
+      }
+     ],
+     "tilePx": 20.4,
+     "starved": 4
+    }
+   },
+   "errors": []
+  },
+  {
+   "vp": "844x390@3",
+   "mode": "solo",
+   "res": {
+    "clean": {
+     "n": 30,
+     "correct": 28,
+     "wrong": 0,
+     "none": 2,
+     "misprev": 0,
+     "taps": 24,
+     "covered": 0,
+     "legalN": 26,
+     "legalCorrect": 24,
+     "drift": 0,
+     "noDown": 2,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 9
+       },
+       "aimed": {
+        "x": 7,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 9
+       },
+       "aimed": {
+        "x": 7,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 16.7
+      }
+     ],
+     "tilePx": 16.7
+    },
+    "jitter": {
+     "n": 30,
+     "correct": 22,
+     "wrong": 0,
+     "none": 8,
+     "misprev": 0,
+     "taps": 6,
+     "covered": 0,
+     "legalN": 14,
+     "legalCorrect": 6,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":5,\"y\":6}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 5,
+        "y": 5
+       },
+       "aimed": {
+        "x": 5,
+        "y": 5
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 7
+       },
+       "aimed": {
+        "x": 9,
+        "y": 7
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 2,
+        "y": 2
+       },
+       "aimed": {
+        "x": 2,
+        "y": 2
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 4
+       },
+       "aimed": {
+        "x": 7,
+        "y": 4
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 8,
+        "y": 6
+       },
+       "aimed": {
+        "x": 8,
+        "y": 6
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 11,
+        "y": 3
+       },
+       "aimed": {
+        "x": 11,
+        "y": 3
+       },
+       "acts": [],
+       "tilePx": 16.7
+      }
+     ],
+     "tilePx": 16.7
+    },
+    "motion": {
+     "n": 30,
+     "correct": 8,
+     "wrong": 10,
+     "none": 12,
+     "misprev": 0,
+     "taps": 2,
+     "covered": 0,
+     "legalN": 24,
+     "legalCorrect": 2,
+     "drift": 1,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":10,\"y\":5}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 7
+       },
+       "aimed": {
+        "x": 9,
+        "y": 7
+       },
+       "acts": [],
+       "tilePx": 21.6
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":7,\"y\":3}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 7,
+        "y": 5
+       },
+       "aimed": {
+        "x": 7,
+        "y": 5
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 7,
+         "y": 3
+        }
+       ],
+       "tilePx": 21.9
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":8,\"y\":8}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 8,
+        "y": 7
+       },
+       "aimed": {
+        "x": 8,
+        "y": 7
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 8,
+         "y": 8
+        }
+       ],
+       "tilePx": 21.9
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":7,\"y\":4}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 7,
+        "y": 3
+       },
+       "aimed": {
+        "x": 7,
+        "y": 3
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 7,
+         "y": 4
+        }
+       ],
+       "tilePx": 21.4
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":10,\"y\":9}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 9
+       },
+       "aimed": {
+        "x": 9,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 21.4
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":3,\"y\":3}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 4,
+        "y": 4
+       },
+       "aimed": {
+        "x": 4,
+        "y": 4
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 3,
+         "y": 3
+        }
+       ],
+       "tilePx": 20.9
+      }
+     ],
+     "tilePx": 22.3
+    }
+   },
+   "errors": []
+  },
+  {
+   "vp": "844x390@3",
+   "mode": "online",
+   "res": {
+    "clean": {
+     "n": 30,
+     "correct": 29,
+     "wrong": 0,
+     "none": 1,
+     "misprev": 0,
+     "taps": 26,
+     "covered": 2,
+     "legalN": 27,
+     "legalCorrect": 26,
+     "drift": 0,
+     "noDown": 1,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 13
+       },
+       "aimed": {
+        "x": 9,
+        "y": 13
+       },
+       "acts": [],
+       "tilePx": 16.7
+      }
+     ],
+     "tilePx": 16.7
+    },
+    "jitter": {
+     "n": 30,
+     "correct": 16,
+     "wrong": 0,
+     "none": 14,
+     "misprev": 0,
+     "taps": 5,
+     "covered": 0,
+     "legalN": 19,
+     "legalCorrect": 5,
+     "drift": 0,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 4,
+        "y": 10
+       },
+       "aimed": {
+        "x": 4,
+        "y": 10
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 9,
+        "y": 5
+       },
+       "aimed": {
+        "x": 9,
+        "y": 5
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":3,\"y\":6}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 2,
+        "y": 6
+       },
+       "aimed": {
+        "x": 2,
+        "y": 6
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 7
+       },
+       "aimed": {
+        "x": 7,
+        "y": 7
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [],
+       "out": "none",
+       "truth": {
+        "x": 7,
+        "y": 7
+       },
+       "aimed": {
+        "x": 7,
+        "y": 7
+       },
+       "acts": [],
+       "tilePx": 16.7
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":5,\"y\":9}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 4,
+        "y": 8
+       },
+       "aimed": {
+        "x": 4,
+        "y": 8
+       },
+       "acts": [],
+       "tilePx": 16.7
+      }
+     ],
+     "tilePx": 16.7
+    },
+    "motion": {
+     "n": 30,
+     "correct": 14,
+     "wrong": 4,
+     "none": 12,
+     "misprev": 0,
+     "taps": 3,
+     "covered": 0,
+     "legalN": 19,
+     "legalCorrect": 3,
+     "drift": 1,
+     "noDown": 0,
+     "skips": 0,
+     "samples": [
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":10,\"y\":4}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "wrong",
+       "truth": {
+        "x": 9,
+        "y": 5
+       },
+       "aimed": {
+        "x": 9,
+        "y": 5
+       },
+       "acts": [
+        {
+         "type": "move",
+         "x": 10,
+         "y": 4
+        }
+       ],
+       "tilePx": 21.1
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":6,\"y\":7}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 6,
+        "y": 8
+       },
+       "aimed": {
+        "x": 6,
+        "y": 8
+       },
+       "acts": [],
+       "tilePx": 19.7
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":11,\"y\":2}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 10,
+        "y": 4
+       },
+       "aimed": {
+        "x": 10,
+        "y": 4
+       },
+       "acts": [],
+       "tilePx": 21.6
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "null",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 0,
+        "y": 4
+       },
+       "aimed": {
+        "x": 0,
+        "y": 4
+       },
+       "acts": [],
+       "tilePx": 22.1
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":0,\"y\":10}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 1,
+        "y": 9
+       },
+       "aimed": {
+        "x": 1,
+        "y": 9
+       },
+       "acts": [],
+       "tilePx": 21.4
+      },
+      {
+       "calls": [
+        {
+         "k": "onTap",
+         "a": "{\"x\":6,\"y\":7}",
+         "turn": true,
+         "mode": "move",
+         "ov": true
+        }
+       ],
+       "out": "none",
+       "truth": {
+        "x": 6,
+        "y": 8
+       },
+       "aimed": {
+        "x": 6,
+        "y": 8
+       },
+       "acts": [],
+       "tilePx": 20.9
+      }
+     ],
+     "tilePx": 20.4,
+     "starved": 1
+    }
+   },
+   "errors": []
+  }
+ ]
+}

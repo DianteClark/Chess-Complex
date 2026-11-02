@@ -1,7 +1,7 @@
 // Network-first service worker with a short timeout; cached copy for offline solo play.
-const CACHE = 'cc-v10.1';
+const CACHE = 'cc-v10.2';
 const CORE = ['./', 'index.html', 'privacy.html', 'css/style.css', 'manifest.webmanifest',
-  'js/main.js', 'js/data.js', 'js/engine.js', 'js/render.js', 'js/world.js', 'js/fx.js', 'js/pieces.js', 'js/audio.js', 'js/music.js', 'js/net.js', 'js/tutorial.js', 'js/codex.js', 'js/progression.js', 'js/store.js', 'js/storeui.js', 'css/store10.css', 'js/menus.js', 'css/menus10.css', 'js/announcer.js', 'css/ui10.css', 'js/hazards10.js',
+  'js/main.js', 'js/data.js', 'js/engine.js', 'js/render.js', 'js/world.js', 'js/fx.js', 'js/pieces.js', 'js/audio.js', 'js/music.js', 'js/net.js', 'js/tutorial.js', 'js/codex.js', 'js/progression.js', 'js/store.js', 'js/storeui.js', 'css/store10.css', 'js/menus.js', 'css/menus10.css', 'js/announcer.js', 'css/ui10.css', 'js/input.js', 'js/hazards10.js', 'js/chat.js', 'js/voice.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });

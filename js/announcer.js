@@ -44,6 +44,8 @@ export class Director {
     addEventListener('resize', () => { this.layoutAt = 0; });
   }
   reduced() { return !!(this.opts && this.opts.reduced && this.opts.reduced()); }
+  // 10.2 (N): a module that owns its own small DOM lane (chat log) registers it so canvas floats avoid it
+  claim(el) { if (el && !(this.claims ||= []).includes(el)) { this.claims.push(el); this.occAt = 0; } }
   sound(n, lvl) { try { this.opts.sound && this.opts.sound(n, lvl); } catch {} }
 
   reset() {
@@ -139,6 +141,7 @@ export class Director {
       for (const d of this.feedEl ? this.feedEl.children : []) push(d); // includes rows still fading out
       if (this.hintCur && !this.hintEl.classList.contains('hidden')) { const r = this.hintEl.getBoundingClientRect(); o.push({ x: r.left - 6, y: r.top - 14, w: r.width + 12, h: r.height + 28 }); } // fading in counts as shown
       push(this.lethalEl);
+      for (const el of this.claims || []) push(el); // 10.2 (N): other HUD lanes, e.g. the chat log, registered with claim()
       this.occ = o;
     }
     return this.occ;

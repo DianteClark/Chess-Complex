@@ -648,3 +648,8 @@ button.chip { min-height: 40px; display: inline-flex; align-items: center; justi
   .lobby .pcard:has(button[data-kick]) .pc-av { width: 36px; height: 36px; border-radius: 10px; }
   .lobby .pcard:has(button[data-kick]) .pc-av img { width: 34px; height: 34px; }
 }
+
+/* 10.2: the last settings section (Chat and Voice) must clear the sticky Done bar */
+#m-settings .modal-box { padding-bottom: 24px; }
+#m-settings .modal-box > .btn.wide:last-child { margin-top: 18px; }
+#m-settings .modal-box > :nth-last-child(2) { margin-bottom: 72px; }

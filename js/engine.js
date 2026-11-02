@@ -395,7 +395,7 @@ export function abilityOptions(s, u, slot) {
       else if (canStand(s, u.mark.x, u.mark.y)) opt(pt(u.mark.x, u.mark.y), [pt(u.mark.x, u.mark.y)], 0, { kind: 'teleport', util: 2 });
       break;
     case 'rampart':
-      for (const [dx, dy] of ORTH) { const x = u.x + dx, y = u.y + dy; if (canStand(s, x, y) && tileAt(s, x, y).t === 'floor') opt(pt(x, y), [pt(x, y)], 0, { kind: 'wall', util: 2 }); } break;
+      for (const [dx, dy] of ORTH) { const x = u.x + dx, y = u.y + dy; if (canStand(s, x, y) && tileAt(s, x, y).t === 'floor' && !isVoid(s, x, y)) opt(pt(x, y), [pt(x, y)], 0, { kind: 'wall', util: 2 }); } break;
     case 'siege':
       for (const [dx, dy] of ORTH) { const tl = lineTiles(s, u, dx, dy, 6, { stopAtUnit: true }); if (tl.length) opt(tl[tl.length - 1], tl, 1.2, { kind: 'shot' }); } break;
     case 'dominion': {
@@ -1101,6 +1101,16 @@ function startTurn(s, u, ev) {
   }
 }
 
+// 10.2: the void swallows everything on the collapsed rings. Walls, rubble, crates, chests, pits and hazard tiles there
+// become bare floor, so pieces caught in the storm can move freely through it (the renderers already draw the void as
+// empty). Arena 'out' tiles stay solid. Pieces in the void just take the storm burn at the start of their turn.
+export function swallowVoid(s) {
+  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
+    if (ringOf(x, y) >= s.storm.ring) continue;
+    const t = s.tiles[y * SIZE + x];
+    if (t.t !== 'floor' && t.t !== 'out') s.tiles[y * SIZE + x] = { t: 'floor' };
+  }
+}
 function freeTiles(s, minRing) {
   const out = [];
   for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (ringOf(x, y) >= Math.max(minRing, s.storm.ring + 1) && !isSolid(s, x, y) && !unitAt(s, x, y) && !s.items.some((i) => i.x === x && i.y === y)) out.push(pt(x, y));
@@ -1261,6 +1271,7 @@ function onRound(s, ev) {
     ev.push({ e: 'storm', phase: 'crack', ring: s.storm.ring });
   } else if (s.storm.crack && (R.every === 1 || (r - R.first) % R.every === 1)) {
     s.storm.crack = false; s.storm.ring++;
+    swallowVoid(s);
     s.items = s.items.filter((i) => i.k === 'crown' || !isVoid(s, i.x, i.y));
     for (const it of s.items) if (it.k === 'crown' && isVoid(s, it.x, it.y)) {
       const ft = freeTiles(s, s.storm.ring + 2); let c = ft.length ? ft[ri(s, ft.length)] : null;
@@ -1413,7 +1424,7 @@ export function planBot(s, u) {
 
   const posScore = (x, y) => {
     let sc = 0;
-    if (isVoid(s, x, y)) sc -= 60; else if (ringOf(x, y) < safeRing) sc -= 25;
+    if (isVoid(s, x, y)) sc -= 60 + (s.storm.ring - ringOf(x, y)) * 14; else if (ringOf(x, y) < safeRing) sc -= 25; // deeper void scores worse, so bots climb out
     if (ringOf(x, y) < safeRing + 1 && s.round >= s.rules.first - 1) sc -= 4;
     for (const it of shardItems) {
       const d = Math.max(Math.abs(it.x - x), Math.abs(it.y - y));

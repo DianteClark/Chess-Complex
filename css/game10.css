@@ -14,3 +14,6 @@
 @keyframes b3glow { 50% { opacity: 1; } }
 body.reduced #s-title .new-player::after { animation: none; }
 #s-title:not(.active) .new-player::after { animation-play-state: paused; }
+/* U 10.2 input: informational cards over the board never swallow a board tap; the board handler dismisses them
+   (js/main.js passThrough) and treats that touch as a preview only. */
+#s-game #gm-tip, #s-game #h-inspect, #s-game #h-inspect * { pointer-events: none; }

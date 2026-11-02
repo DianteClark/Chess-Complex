@@ -7,7 +7,7 @@ const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const makeCode = () => Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 const useLocal = () => new URLSearchParams(location.search).get('net') === 'local';
 
-const PEER_OPTS = {
+export const PEER_OPTS = {
   debug: 0,
   // STUN for direct connections, plus a public TURN relay as a fallback for strict networks.
   // For a commercial launch, replace the relay with your own (Cloudflare Calls or coturn); see docs/ROADMAP.md.

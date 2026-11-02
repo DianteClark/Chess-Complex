@@ -109,7 +109,7 @@
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v10.1</div>
+    <div class="version">v10.2</div>
   </section>
 
   <!-- LOADOUT -->
@@ -318,7 +318,7 @@
       <div class="panel"><h3>Hazards</h3><p>Most boards roll a hazard theme: lava, ice, portals, geyser vents that erupt every third round, conveyor tracks that carry pieces, cracked floor that collapses on the second step, or a rift storm that swaps two players. Chaos stacks two at once.</p></div>
       <div class="panel"><h3>Ten ways to play</h3><p>Battle Royale: the full game. Blitz: 15-second turns and a faster storm. Duel: one on one in a 10 by 10 arena. Squads: teams of two who can revive each other. Siege: co-op against eight waves of Hollows. Daily Challenge: one map and build for everyone, new each day. King of the Hill: start your turn on the golden Throne to score, first to 10. Chaos: two hazards and a world event every round. Gauntlet: a co-op boss rush that ends with the Regent Ascendant and a Colossus together. Mirror Match: everyone gets the same random build.</p></div>
       <div class="panel"><h3>The board</h3><p>Walls block movement and shots. Rubble and crates break when hit. Brambles stop slides and cost initiative. Shrines heal 40% once, then recharge. Hollows guard shard caches.</p></div>
-      <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later, and the storm closes in again every 3 rounds. Standing in the void burns 20% of your max HP every turn. Once the board is fully closed, everyone burns 6% a turn.</p></div>
+      <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later, and the storm closes in again every 3 rounds. The void burns 20% of your max HP at the start of each of your turns there. You can still move and act, so get out fast. Once the board is fully closed, everyone burns 6% a turn.</p></div>
       <div class="panel"><h3>The Crown</h3><p>On round 7 the Crown appears on a random safe tile. Whoever takes it becomes the King: more HP and healing every turn, but slow single steps, and everyone will hunt you. Kill the King and the Crown shatters into 4 shards.</p></div>
       <div class="panel"><h3>Controls</h3><p>Tap a highlighted tile to move. Pick an ability, tap a target to preview the damage, tap again to confirm. Hold an action button to see what it does. Drag to pan, pinch or scroll to zoom. On a keyboard: 1-4 for actions, P to promote, Space or E to end your turn, Esc to cancel.</p></div>
     </div>
@@ -475,6 +475,11 @@
     <div class="setting"><span>Graphics</span><div class="seg small" id="set-quality"><button data-q="auto">Auto</button><button data-q="high">High</button><button data-q="low">Low</button></div></div>
     <label class="setting toggle"><span>Colorblind Colors</span><input type="checkbox" id="set-cb"><i></i></label>
     <label class="setting toggle"><span>Larger Text</span><input type="checkbox" id="set-bigtext"><i></i></label>
+    <div class="set-sec">Chat and Voice</div>
+    <button class="btn small wide" id="btn-chat-custom">Customise Quick Chat</button>
+    <label class="setting toggle"><span>Preset Chat Only<small>Hide phrases other players typed themselves</small></span><input type="checkbox" data-chatset="chatPresetOnly"><i></i></label>
+    <label class="setting toggle"><span>Hide Chat From Others<small>No bubbles or log from other players</small></span><input type="checkbox" data-chatset="chatOff"><i></i></label>
+    <p class="set-note vc-privacy" id="vc-privacy"><b>Voice chat privacy.</b> Voice is off until you tap Join Voice in an online lobby or match, and it is never turned on for you. Audio goes directly to the players in your room (peer to peer, sometimes through a relay server) and is never recorded or stored. Your microphone is only live while you hold the Talk button, or while Open Mic is on. You can mute or turn down any player.</p>
     <div class="set-sec">Profile</div>
     <div class="row2"><button class="btn small" data-act="export-profile">Copy Backup Code</button><button class="btn small" data-act="import-profile">Restore Backup</button></div>
     <div class="set-links"><a href="privacy.html" target="_blank" rel="noopener">Privacy</a><a href="#" data-act="credits">Credits</a><a href="#" data-act="whatsnew">What's New</a></div>

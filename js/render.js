@@ -128,7 +128,9 @@ export class Renderer {
   resize() {
     const full = Math.min(2, devicePixelRatio || 1), dpr = this.lowQ ? 1 : this.quality === 'auto' && this.aq && this.aq.tier === 1 ? Math.min(full, 1.5) : full;
     if (this.aq) this.aq.warm = Math.max(this.aq.warm, 0.6);
-    const r = this.c.getBoundingClientRect();
+    // U 10.2: layout size, not getBoundingClientRect: a resize during a screen transition (scale .94-.99) used to bake the
+    // shrunken size in, so the bitmap was stretched and taps landed up to a tile off until the next resize
+    const r = this.c.clientWidth ? { width: this.c.clientWidth, height: this.c.clientHeight } : this.c.getBoundingClientRect();
     this.W = r.width || innerWidth; this.H = r.height || innerHeight; this.dpr = dpr;
     this.c.width = Math.round(this.W * dpr); this.c.height = Math.round(this.H * dpr);
     this.pad = this.pad || { t: 0, b: 0, r: 0 };
@@ -144,7 +146,16 @@ export class Renderer {
   setBounds(b) { this.bounds = b; this.zoomSet = false; this.resize(); if (b) { this.cam.x = this.cam.tx = (b.x0 + b.x1 + 1) / 2; this.cam.y = this.cam.ty = (b.y0 + b.y1 + 1) / 2; } }
   get z() { return this.cam.z * (1 + this.punch); }
   toScreen(wx, wy) { return [(wx - this.cam.x) * this.z + (this.CX ?? this.W / 2), (wy - this.cam.y) * this.z + this.CY]; }
-  toWorld(sx, sy) { return [(sx - (this.CX ?? this.W / 2)) / this.z + this.cam.x, (sy - this.CY) / this.z + this.cam.y]; }
+  toWorld(sx, sy, v) { if (v) return [(sx - v.cx) / v.z + v.x, (sy - v.cy) / v.z + v.y]; return [(sx - (this.CX ?? this.W / 2)) / this.z + this.cam.x, (sy - this.CY) / this.z + this.cam.y]; }
+  // U 10.2: the screen->world mapping as drawn right now (punch zoom included; shake is a zero-mean jitter and left out).
+  // Input freezes one of these at touch-down so a tap maps to the tile the player saw, even while the camera moves.
+  view() { return { cx: this.CX ?? this.W / 2, cy: this.CY, z: this.z, x: this.cam.x, y: this.cam.y }; }
+  // U 10.2: a finger on the board stops any camera glide (follow, focus, cinematic shot) where it is, like touching a
+  // flung map, so the board holds still under a tap and its confirm. Not during the intro fly-over.
+  hold() {
+    const c = this.cam; if (this.intro && this.intro.fly && this.intro.t < 1.7) return;
+    c.tx = c.x; c.ty = c.y; c.tz = c.z; c.vx = c.vy = c.vz = 0; if (this.shotEnd) { this.shotEnd = null; this.shotPrevZ = null; }
+  }
   tileAtScreen(sx, sy) { const [wx, wy] = this.toWorld(sx, sy); const x = Math.floor(wx), y = Math.floor(wy); return x >= 0 && y >= 0 && x < SIZE && y < SIZE ? { x, y } : null; }
   focus(x, y) { this.cam.tx = x + 0.5; this.cam.ty = y + 0.5; }
   zoomBy(f, sx = this.CX ?? this.W / 2, sy = this.CY) {

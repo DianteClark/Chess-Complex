@@ -7,6 +7,7 @@ import { renderCodex, diagram } from './codex.js';
 import { KINDS, ensureStore, item, listKind, featured, bundleInfo, grant, equip, activeEmotes, makePreview, drawPreview } from './store.js';
 import * as SUI from './storeui.js';
 import { Renderer } from './render.js';
+import * as TAP from './input.js'; // U 10.2: tap resolution, target assist, confirm loupe
 import { pieceIcon, drawPiece } from './pieces.js';
 import { FX } from './fx.js';
 import { sfx, playNamed, unlockAudio, settings, saveSettings, haptic } from './audio.js';
@@ -15,6 +16,8 @@ import { music } from './music.js';
 import { director } from './announcer.js';
 import { initScene, sequelReveal, showroom, modeArt, newsFrom } from './menus.js';
 import { GameHost, openServer, openClient, makeCode } from './net.js';
+import { chat, hostCheck as chatHostCheck, BOT_LINES } from './chat.js';
+import { voice } from './voice.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -345,7 +348,7 @@ function startLesson(id) {
   const state = createTutorial(me());
   sess.host = new GameHost([], (m) => { game.onMsg(m); if (tutorial && session === sess) tutorial.onState(m.ev); }, { state, noTimer: true });
   sess.send = (a) => sess.host.act('me', a);
-  sess.emote = (k) => hostEmote(sess, 'me', k);
+  sess.emote = (k) => hostEmote(sess, 'me', k); sess.chat = (m) => hostChat(sess, 'me', m);
   game.enter();
   $('#s-game').classList.add('tut');
   game.r.setBounds(ARENA);
@@ -391,6 +394,7 @@ function endSession() {
   try { session.host && session.host.stop(); } catch {}
   try { session.server && session.server.close(); } catch {}
   try { session.client && session.client.close(); } catch {}
+  try { voice.stop(true); chat.clearMatch(); } catch {}
   session = null;
 }
 // Hidden traps stay hidden: each friend only receives traps owned by their own side.
@@ -405,20 +409,26 @@ function hostEmit(sess, m) {
   }
   game.onMsg(m);
 }
-function hostEmote(sess, pid, k) {
-  if (!own(EMOTES, k) || !sess.host) return;
-  const u = sess.host.s.units.find((v) => v.pid === pid && v.alive); if (!u) return;
-  const now = Date.now(); sess.emoteAt = sess.emoteAt || {};
-  if (now - (sess.emoteAt[pid] || 0) < 1500) return;
-  sess.emoteAt[pid] = now;
-  hostEmit(sess, { t: 'emote', id: u.id, k });
+// 10.2 (N): quick chat. Everything a client sends is validated, cleaned and rate-limited here (js/chat.js hostCheck);
+// team-only lines are routed to the sender's team; a throttled sender is told to slow down.
+function hostChat(sess, pid, raw) {
+  if (!sess || !sess.host) return;
+  const r = chatHostCheck((sess.chatRL ||= {}), pid, raw, sess.host.s); if (!r) return;
+  if (r.slow) { if (pid === sess.myPid) chat.slow(); else { const c = sess.conns && sess.conns.get(pid); if (c) c.send({ t: 'chat', a: 'slow' }); } return; }
+  const out = r.out, team = out.team; delete out.team;
+  const teamOf = (p) => { const u = sess.host.s.units.find((v) => v.pid === p && v.kind === 'player'); return u ? u.team : undefined; };
+  for (const c of sess.conns ? sess.conns.values() : []) if (team == null || teamOf(c.pid) === team) c.send(out);
+  if (team == null || teamOf(sess.myPid) === team) game.onMsg(out);
 }
+function hostEmote(sess, pid, k) { hostChat(sess, pid, { k }); }
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
 function botChatter(sess, m) {
   if (!m.ev || !sess.host) return;
   for (const e of m.ev) {
-    if (e.e !== 'death' || !e.by) continue;
-    const k = sess.host.s.units.find((v) => v.id === e.by);
-    if (k && k.bot && Math.random() < 0.45) setTimeout(() => session === sess && hostEmote(sess, k.pid, ['check', 'gg', 'come', 'nice'][Math.floor(Math.random() * 4)]), 900);
+    if (e.e !== 'death') continue;
+    const k = e.by != null && sess.host.s.units.find((v) => v.id === e.by), d = sess.host.s.units.find((v) => v.id === e.id);
+    if (k && k.bot && Math.random() < 0.4) setTimeout(() => session === sess && hostChat(sess, k.pid, { k: pick(BOT_LINES.kill) }), 900);
+    else if (d && d.bot && d.kind === 'player' && Math.random() < 0.3) setTimeout(() => session === sess && hostChat(sess, d.pid, { k: pick(BOT_LINES.win) }), 1300);
   }
 }
 
@@ -441,7 +451,7 @@ function startSolo(bots = null, modeArg = null) {
   session = sess;
   sess.host = new GameHost(players, (m) => { game.onMsg(m); botChatter(sess, m); }, { mode, seed, noTimer: mode !== 'blitz' });
   sess.send = (a) => sess.host.act('me', a);
-  sess.emote = (k) => hostEmote(sess, 'me', k);
+  sess.emote = (k) => hostEmote(sess, 'me', k); sess.chat = (m) => hostChat(sess, 'me', m);
   game.enter();
   sess.host.start();
 }
@@ -450,7 +460,7 @@ function startSolo(bots = null, modeArg = null) {
 function lobbyHTML(players, host, gm = 'royale', maxP = 0) {
   const M = MODES[gm] || {}, T = M.teams;
   const col = (i) => (T ? TEAM_COLORS[Math.floor(i / T) % 4] : (settings.cb ? CB_COLORS : PLAYER_COLORS)[i % 8]);
-  const cards = players.map((p, i) => `<li class="pcard ${p.pid === 'me' ? 'host' : ''} ${p.isBot ? 'bot' : ''}" style="--c:${col(i)};animation-delay:${i * 0.04}s">${T ? `<span class="team-tag">Team ${Math.floor(i / T) + 1}</span>` : M.siege || gm === 'siege' ? '<span class="team-tag">Ally</span>' : ''}<span class="pc-av"><img src="${pieceIcon('pawn', p.skin, null, 44)}" alt=""></span><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${p.pid === 'me' ? '<svg><use href="#m-crown"/></svg>Host' : p.isBot ? '<svg><use href="#m-bot"/></svg>Bot' : 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}" aria-label="Remove ${esc(p.name)}" title="Remove">&times;</button>` : ''}</li>`).join('');
+  const cards = players.map((p, i) => `<li class="pcard ${p.pid === 'me' ? 'host' : ''} ${p.isBot ? 'bot' : ''}" data-pid="${esc(p.pid)}" style="--c:${col(i)};animation-delay:${i * 0.04}s">${T ? `<span class="team-tag">Team ${Math.floor(i / T) + 1}</span>` : M.siege || gm === 'siege' ? '<span class="team-tag">Ally</span>' : ''}<span class="pc-av"><img src="${pieceIcon('pawn', p.skin, null, 44)}" alt=""></span><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${p.pid === 'me' ? '<svg><use href="#m-crown"/></svg>Host' : p.isBot ? '<svg><use href="#m-bot"/></svg>Bot' : 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}" aria-label="Remove ${esc(p.name)}" title="Remove">&times;</button>` : ''}</li>`).join('');
   const open = Math.max(0, Math.min(8, maxP) - players.length);
   return cards + Array.from({ length: open }, (_, j) => { const i = players.length + j; return `<div class="pcard open" style="--c:${col(i)}"${T ? ` data-team="Team ${Math.floor(i / T) + 1}"` : ''}><span class="pc-av"><svg><use href="#m-plus"/></svg></span><b>Open seat</b><em>${host ? 'Waiting' : ''}</em></div>`; }).join('');
 }
@@ -470,9 +480,10 @@ function startHostLobby() {
     $('#btn-start-host').disabled = sess.players.length < Math.max(2, MODES[sess.gameMode].players[0]);
     const pub = sess.players.map(({ pid, name, skin, isBot, title }) => ({ pid, name, skin, isBot, title }));
     for (const c of sess.conns.values()) c.send({ t: 'lobby', players: pub, code, mode: sess.gameMode });
+    voice.hostSync(sess); voice.changed();
   };
   sess.renderLobby = renderLobby;
-  sess.emote = (k) => hostEmote(sess, 'me', k);
+  sess.emote = (k) => hostEmote(sess, 'me', k); sess.chat = (m) => hostChat(sess, 'me', m);
   sess.server = openServer(code, {
     onReady: () => { if (session !== sess) return; $('#host-status').textContent = 'Room open. Share the code with friends.'; sfx.select(); },
     onError: (t) => {
@@ -489,7 +500,7 @@ function startHostLobby() {
           const back = tok && Object.entries(sess.tokens || {}).find(([pid, t]) => t === tok && !sess.conns.has(pid) && sess.players.some((p) => p.pid === pid));
           if (back) {
             const pid = back[0]; conn.pid = pid; sess.conns.set(pid, conn);
-            conn.send({ t: 'welcome', pid });
+            conn.send({ t: 'welcome', pid }); voice.hostSync(sess);
             if (sess.started && sess.host) { const u = sess.host.s.units.find((v) => v.pid === pid); if (u) u.bot = false; conn.send({ t: 'start', pid }); sess.host.publish([]); sess.host.schedule(); if (u) game.feed(`<b>${esc(u.name)}</b> reconnected`); }
             else renderLobby();
             return;
@@ -505,11 +516,13 @@ function startHostLobby() {
           sfx.select(); renderLobby();
         } else if (m.t === 'act' && sess.host && conn.pid && m.a && typeof m.a === 'object') { try { sess.host.act(conn.pid, m.a); } catch (err) { console.warn('bad action', err); } }
         else if (m.t === 'emote' && conn.pid) hostEmote(sess, conn.pid, m.k);
+        else if (m.t === 'chat' && conn.pid) hostChat(sess, conn.pid, m);
+        else if (m.t === 'vc' && conn.pid) voice.hostMsg(sess, conn.pid, m);
         else if (m.t === 'leave' && conn.pid && sess.host) { conn.left = true; sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u) game.feed(`<b>${esc(u.name)}</b> forfeited - a bot takes over`); }
       });
       conn.onClose(() => {
         if (!conn.pid) return;
-        sess.conns.delete(conn.pid);
+        sess.conns.delete(conn.pid); voice.hostDrop(sess, conn.pid);
         if (!sess.started) { sess.players = sess.players.filter((p) => p.pid !== conn.pid); renderLobby(); }
         else if (sess.host && !conn.left) { sess.host.setBot(conn.pid); const u = sess.host.s.units.find((v) => v.pid === conn.pid); if (u && u.alive && !sess.host.s.over) game.feed(`<b>${esc(u.name)}</b> disconnected - a bot takes over`); }
       });
@@ -554,10 +567,11 @@ function joinGame() {
     onData: (m) => {
       if (session !== sess) return;
       if (m.t === 'welcome') { sess.myPid = m.pid; st.textContent = 'In the lobby.'; sfx.select(); }
-      else if (m.t === 'lobby') { $('#join-lobby-panel').classList.remove('hidden'); $('#join-lobby').innerHTML = lobbyHTML(m.players, false, m.mode, ((MODES[m.mode] || MODES.royale).players || [2, 8])[1]); $('#join-lobby-panel .lbl').textContent = `Lobby - ${(MODES[m.mode] || MODES.royale).name}`; }
+      else if (m.t === 'lobby') { sess.lobby = Array.isArray(m.players) ? m.players : []; voice.changed(); $('#join-lobby-panel').classList.remove('hidden'); $('#join-lobby').innerHTML = lobbyHTML(m.players, false, m.mode, ((MODES[m.mode] || MODES.royale).players || [2, 8])[1]); $('#join-lobby-panel .lbl').textContent = `Lobby - ${(MODES[m.mode] || MODES.royale).name}`; }
       else if (m.t === 'full' || m.t === 'bye') { sess.byeReason = m.reason || 'full'; st.textContent = { full: 'That lobby is full.', started: 'That match has already started.', kicked: 'The host removed you from the lobby.', ended: 'The host ended the match.' }[sess.byeReason] || 'Disconnected.'; st.classList.add('err'); $('#join-lobby-panel').classList.add('hidden'); $('#join-lobby').innerHTML = ''; if (screen === 'game') { toast(st.textContent); game.showResults(true, 'hostleft'); } }
       else if (m.t === 'start') { sess.myPid = m.pid; matchKey = 'm' + Date.now(); game.enter(); }
-      else if (m.t === 'state' || m.t === 'emote') game.onMsg(m);
+      else if (m.t === 'state' || m.t === 'emote' || m.t === 'chat') game.onMsg(m);
+      else if (m.t === 'vc') voice.onMsg(m);
     },
     onClose: () => {
       if (session !== sess) return;
@@ -571,7 +585,7 @@ function joinGame() {
     },
   });
   sess.send = (a) => sess.client.send({ t: 'act', a });
-  sess.emote = (k) => sess.client.send({ t: 'emote', k });
+  sess.emote = (k) => sess.client.send({ t: 'chat', k }); sess.chat = (m) => sess.client.send({ ...m, t: 'chat' });
 }
 
 // ---------- game UI ----------
@@ -598,7 +612,7 @@ const game = {
     const loop = (now) => { requestAnimationFrame(loop); try { loopBody(now); } catch (err) { console.error(err); } };
     const loopBody = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
-      if (screen === 'game') { director.tick(); if (this.potmOn && this.potmR) this.potmR.frame(dt); else this.r.frame(dt); this.tickTimer(); this.heartbeat(dt); }
+      if (screen === 'game') { director.tick(); if (this.potmOn && this.potmR) this.potmR.frame(dt); else { this.r.frame(dt); if (this.r.loupe) TAP.drawLoupe(this.r); } this.tickTimer(); this.heartbeat(dt); }
       SUI.frame(dt);
 
     };
@@ -619,11 +633,13 @@ const game = {
       const b = e.target.closest('.popt'); if (!b || b.disabled) return;
       session.send({ type: 'promote', to: b.dataset.to }); $('#m-promote').classList.add('hidden');
     });
-    this.renderEmotes = () => { $('#emote-menu').innerHTML = Object.entries(activeEmotes(profile)).map(([k, t]) => `<button data-emote="${k}">${t}</button>`).join(''); };
-    this.renderEmotes();
+    // 10.2 (N): quick chat picker (js/chat.js) owns #emote-menu; voice (js/voice.js) adds the Talk button and lobby panels
+    const names = () => { const n = {}; for (const p of (session && (session.players || session.lobby)) || []) n[p.pid] = p.name; if (this.s) for (const u of this.s.units) if (u.kind === 'player') n[u.pid] = u.name; return n; };
+    chat.mount({ profile: () => profile, save, settings, saveSettings, activeEmotes, game: this, session: () => session, toast, sfx, director, voice });
+    voice.mount({ session: () => session, toast, game: this, sfx, screen: () => screen, names, onChange: () => { if (!$('#emote-menu').classList.contains('hidden') && chat.tab === 'players') chat.render(); } });
+    this.renderEmotes = () => chat.render();
     $('#h-portrait').parentElement.addEventListener('click', () => { const u = this.me; if (u) { this.r.closeup(); this.r.follow = false; this.r.focus(u.x, u.y); sfx.tap(); } });
     $('#ult-btn').addEventListener('click', () => { if (this.suppress) { this.suppress = false; return; } this.onAction('ult'); });
-    $('#emote-menu').addEventListener('click', (e) => { const b = e.target.closest('[data-emote]'); if (!b || !session || !session.emote) return; session.emote(b.dataset.emote); $('#emote-menu').classList.add('hidden'); sfx.tap(); });
   },
   after(fn, ms) { const g = this.gen; return setTimeout(() => { if (g === this.gen) fn(); }, ms); },
   enter() {
@@ -637,7 +653,7 @@ const game = {
     this.r.reset(); this.r.setBounds(null); this.r.setTheme(profile.board); this.turnVault = false;
     $('#coach').classList.add('hidden'); $('#abinfo').classList.add('hidden'); this.r.shakeOn = settings.shake; this.r.resize();
     $$('#s-game .modal').forEach((m) => m.classList.add('hidden'));
-    $('#h-feed').innerHTML = ''; $('#emote-menu').classList.add('hidden');
+    $('#h-feed').innerHTML = ''; $('#emote-menu').classList.add('hidden'); chat.resetSession(session && (session.code || session)); chat.clearMatch(); voice.changed();
     director.reset(); this.juice = {}; this.hillWarned = {};
     go('game');
     music.newMatch();
@@ -658,7 +674,8 @@ const game = {
   myTurn() { const m = this.me; return !!(m && m.alive && this.s.active === m.id && !this.s.over); },
   onMsg(m) {
     if (!session) return;
-    if (m.t === 'emote') { const u = this.s && unitById(this.s, m.id); if (u) { this.r.emote(m.id, EMOTES[m.k]); sfx.emote(); } return; }
+    if (m.t === 'chat') { chat.receive(m); return; }
+    if (m.t === 'emote') { const u = this.s && unitById(this.s, m.id); if (u && own(EMOTES, m.k)) chat.receive({ t: 'chat', id: m.id, pid: u.pid, k: m.k }); return; }
     if (m.t !== 'state') return;
     const first = !this.s;
     const prevS = this.s;
@@ -1019,6 +1036,7 @@ const game = {
       if (this.mode === 'move') this.r.overlay = canMove(s, u) ? { moves: legalMoves(s, u), from: { x: u.x, y: u.y } } : null;
       else { const opts = this.options(); if (this.preview) this.preview = opts.find((o) => o.anchor.x === this.preview.anchor.x && o.anchor.y === this.preview.anchor.y) || null; this.r.overlay = { opts, preview: this.preview }; }
     } else this.r.overlay = null;
+    this.syncPending();
     this.updateHud();
   },
   updateHud() {
@@ -1145,6 +1163,55 @@ const game = {
     let o = opts.find((q) => q.anchor.x === t.x && q.anchor.y === t.y);
     if (!o) { const c = opts.filter((q) => q.tiles.some((p) => p.x === t.x && p.y === t.y)); if (c.length === 1) o = c[0]; }
     return o;
+  },
+  // U 10.2: a board tap at canvas point (px, py) with the camera mapping frozen at touch-down (G.view). See js/input.js.
+  tapAt(px, py, G) {
+    unlockAudio();
+    if (!$('#emote-menu').classList.contains('hidden')) { if (chat.close) chat.close(); else $('#emote-menu').classList.add('hidden'); }
+    if (!this.s) return;
+    const r = this.r, mode = this.mode;
+    let wx, wy, z = G.view.z;
+    const lw = !G.mouse && r.loupe && TAP.loupeWorld(r, px, py); // taps inside the loupe resolve at loupe precision
+    if (lw) { wx = lw.wx; wy = lw.wy; z = lw.z; } else [wx, wy] = r.toWorld(px, py, G.view);
+    const pend = this.tapPending || (mode !== 'move' && this.preview ? { x: this.preview.anchor.x, y: this.preview.anchor.y, mode } : null);
+    const res = TAP.pick(this, wx, wy, z, pend && pend.mode === mode ? pend : null);
+    if (!res.tile) { if (pend) this.clearPending(); return; }
+    if (this.myTurn() && res.cand) {
+      const c = res.cand;
+      const confirm = !G.mouse && !settings.onetap && (mode !== 'move' || G.view.z < TAP.SMALL || G.force);
+      if (!confirm || (pend && pend.mode === mode && pend.x === c.x && pend.y === c.y)) { this.clearPending(true); if (mode === 'move') { sfx.tap(); session.send({ type: 'move', x: c.x, y: c.y }); } else this.exec(c.opt); return; }
+      this.setPending(c, G.view.z < TAP.SMALL); return;
+    }
+    if (pend) { this.clearPending(); if (res.how !== 'unit') return; }
+    this.inspect(res.tile);
+  },
+  setPending(c, loupe) {
+    const mode = this.mode;
+    this.tapPending = { x: c.x, y: c.y, mode };
+    if (mode !== 'move') this.preview = c.opt;
+    const hurt = c.opt && c.opt.mult > 0;
+    TAP.setLoupe(this.r, loupe ? c : null, mode === 'move' ? 'Tap again to move' : 'Tap again to confirm', mode === 'move' ? '#7fe0ff' : hurt ? '#ff8a7a' : '#c9a6ff');
+    sfx.tap(); haptic(8); this.refresh();
+  },
+  clearPending(quiet) { this.tapPending = null; this.r.loupe = null; if (this.mode !== 'move') this.preview = null; if (!quiet) this.refresh(); },
+  // keep the pending target, the move-path preview and the loupe in step with the overlay (turn, mode or state changed)
+  syncPending() {
+    const p = this.tapPending, ov = this.r.overlay;
+    const ok = p && ov && p.mode === this.mode && (this.mode === 'move' ? (ov.moves || []).some((m) => m.x === p.x && m.y === p.y) : this.preview && this.preview.anchor.x === p.x && this.preview.anchor.y === p.y);
+    if (!ok) { this.tapPending = null; this.r.loupe = null; return; }
+    if (this.mode === 'move') ov.hover = ov.moves.find((m) => m.x === p.x && m.y === p.y);
+  },
+  // a touch on an informational card over the board (hint, inspect) dismisses it and still reaches the board,
+  // but only as a preview: it never commits on its own
+  passThrough(x, y) {
+    let hit = false;
+    for (const el of [$('#gm-tip'), $('#h-inspect')]) {
+      if (!el || el.classList.contains('hidden')) continue;
+      const b = el.getBoundingClientRect();
+      if (x < b.left || x > b.right || y < b.top || y > b.bottom || getComputedStyle(el).visibility === 'hidden') continue;
+      hit = true; if (el.id === 'gm-tip') director.dismissHint(); else { clearTimeout(this.inspT); el.classList.add('hidden'); }
+    }
+    return hit;
   },
   onTap(t, mouse) {
     unlockAudio();
@@ -1323,38 +1390,52 @@ const game = {
   },
   bindInput() {
     const c = $('#board');
-    const pts = new Map(); let drag = false, start = null, pinch = null;
+    // A click listener makes the canvas a tap target, so Chrome's touch adjustment stops moving board taps onto nearby buttons (chat, ULT).
+    c.addEventListener('click', () => {});
+    // U 10.2: one gesture per first finger. A tap resolves at its touch-down point with the camera mapping frozen at
+    // touch-down; the finger may wander up to a DPR-scaled slop before the gesture becomes a pan; a second finger turns
+    // it into a pinch and nothing in it can tap; a new first finger drops any pointer whose up was never delivered.
+    const pts = new Map(); let g = null, pinch = null;
+    const local = (x, y) => { const b = c.getBoundingClientRect(); return [(x - b.left) * (b.width ? this.r.W / b.width : 1), (y - b.top) * (b.height ? this.r.H / b.height : 1)]; };
     c.addEventListener('pointerdown', (e) => {
-      c.setPointerCapture(e.pointerId);
+      if (e.isPrimary || !pts.size) { pts.clear(); pinch = null; g = null; }
+      try { c.setPointerCapture(e.pointerId); } catch {}
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pts.size === 1) { drag = false; start = { x: e.clientX, y: e.clientY, t: performance.now() }; }
-      if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) }; drag = true; }
+      if (pts.size === 1) {
+        const [px, py] = local(e.clientX, e.clientY);
+        if (e.pointerType !== 'mouse') this.r.hold();
+        g = { id: e.pointerId, x0: e.clientX, y0: e.clientY, px, py, t: e.timeStamp, view: this.r.view(), mouse: e.pointerType === 'mouse', slop: TAP.slopFor(e.pointerType), drag: false, force: this.passThrough(e.clientX, e.clientY) };
+      } else {
+        if (g) g.drag = true;
+        const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+      }
     });
     c.addEventListener('pointermove', (e) => {
-      const rect = c.getBoundingClientRect();
-      if (e.pointerType === 'mouse' && !pts.size) { this.onHover(this.r.tileAtScreen(e.clientX - rect.left, e.clientY - rect.top)); return; }
+      if (e.pointerType === 'mouse' && !pts.size) { const [px, py] = local(e.clientX, e.clientY); this.onHover(this.r.tileAtScreen(px, py)); return; }
       const p = pts.get(e.pointerId); if (!p) return;
-      if (pts.size === 2 && pinch) {
+      if (pts.size >= 2 && pinch) {
         p.x = e.clientX; p.y = e.clientY;
-        const [a, b] = [...pts.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y);
-        this.r.zoomBy(d / pinch.d, (a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top); pinch.d = d; return;
+        const [a, b] = [...pts.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        const [mx, my] = local((a.x + b.x) / 2, (a.y + b.y) / 2);
+        this.r.zoomBy(d / pinch.d, mx, my); pinch.d = d; return;
       }
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
-      if (!drag && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 9) drag = true;
-      if (drag) this.r.pan(dx, dy);
+      if (g && !g.drag && Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > g.slop) g.drag = true;
+      if (!g || g.drag) this.r.pan(dx, dy);
       p.x = e.clientX; p.y = e.clientY;
     });
     const up = (e) => {
-      const had = pts.has(e.pointerId);
-      pts.delete(e.pointerId);
+      const had = pts.delete(e.pointerId);
       if (pts.size < 2) pinch = null;
-      if (had && !drag && pts.size === 0 && start && performance.now() - start.t < 600) {
-        const rect = c.getBoundingClientRect();
-        this.onTap(this.r.tileAtScreen(e.clientX - rect.left, e.clientY - rect.top), e.pointerType === 'mouse');
-      }
+      if (!had || !g || pts.size) return;
+      const G = g; g = null;
+      // no time limit: the old 600 ms cut-off dropped slow presses and taps delivered late by a janky frame
+      if (!G.drag && G.id === e.pointerId) this.tapAt(G.px, G.py, G);
     };
-    c.addEventListener('pointerup', up); c.addEventListener('pointercancel', (e) => { pts.delete(e.pointerId); drag = true; });
-    c.addEventListener('wheel', (e) => { e.preventDefault(); const rect = c.getBoundingClientRect(); this.r.zoomBy(e.deltaY < 0 ? 1.12 : 0.89, e.clientX - rect.left, e.clientY - rect.top); }, { passive: false });
+    const cancel = (e) => { if (pts.delete(e.pointerId) && g) g.drag = true; if (pts.size < 2) pinch = null; if (!pts.size) g = null; };
+    c.addEventListener('pointerup', up); c.addEventListener('pointercancel', cancel); c.addEventListener('lostpointercapture', cancel);
+    c.addEventListener('contextmenu', (e) => e.preventDefault()); // a long press must not open a menu or cancel the gesture
+    c.addEventListener('wheel', (e) => { e.preventDefault(); const [px, py] = local(e.clientX, e.clientY); this.r.zoomBy(e.deltaY < 0 ? 1.12 : 0.89, px, py); }, { passive: false });
     addEventListener('keydown', (e) => {
       if (screen !== 'game' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
@@ -1406,7 +1487,7 @@ $('#set-bigtext').addEventListener('change', (e) => { settings.bigtext = e.targe
 $('#set-quality').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); game.r.setQuality(settings.quality); $$('#set-quality button').forEach((x) => x.classList.toggle('on', x === b)); sfx.tap(); });
 function sig(str) { let h1 = 0x811c9dc5, h2 = 0x1b873593; for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 ^ (c + i), 2246822519); } return ((h1 >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 12); }
 function info(title, html) { $('#info-title').textContent = title; $('#info-body').innerHTML = html; $('#m-info').classList.remove('hidden'); }
-const WHATS_NEW = `<h4>10.1</h4><ul><li><b>Smoother</b>: the title screen, store and matches run much faster on phones, and auto quality reacts sooner.</li><li><b>New hazard art</b>: a royal Throne dais, erupting geysers, industrial conveyors, collapsing floors and Rift Storm tears.</li><li><b>Tidier screens</b>: every label at least 11px, every button at least 40px, and layout fixes on small phones and in landscape.</li><li><b>Lesson Complete</b> now shows your progress and what the next lesson covers.</li><li><b>Accurate text everywhere</b>: tutorials, Codex, How to Play and ability descriptions match the rules. The bounty world event is now called Royal Bounty.</li><li>Fixed: clipped emote names in Collections, the Lessons button spacing, and the tutorial saying the Crown appears at the centre.</li></ul><h4>10.0</h4><ul><li><b>Four new modes</b>: King of the Hill, Chaos, Gauntlet (co-op boss rush) and Mirror Match.</li><li><b>A living world</b>: rebuilt boards with real materials, dynamic lighting, shadows, new weather (rain, ash, aurora, sandstorms, fog) and a cinematic camera.</li><li><b>All-new piece art</b>: every piece re-sculpted and lit in 3D, with real materials and animated premium sets.</li><li><b>New effects</b>: every ability rebuilt, plus 11 new finishers.</li><li><b>The Director</b>: callouts, banners, tips and ultimate cinematics take turns in fixed lanes, so nothing stacks.</li><li><b>New soundtrack and sound</b>: an adaptive score with a theme for every mode, and a layered sound for every ability and finisher, with an announcer voice.</li><li><b>New Siege enemies</b> (Stalker, Hexer, Splitter, Brute) and a new boss, the Wraith Regent.</li><li><b>New world events and hazards</b>: Eclipse, Earthquake, Mana Surge, Royal Bounty, War Drums, Restless Dead, geysers, conveyors, a crumbling floor and Rift Storms.</li><li><b>Six new abilities and two new base abilities</b> (Bastion and Predator).</li><li><b>A rebuilt Store</b>: Mythic rarity, 25 piece sets, 13 boards, 14 trails, Collections, try-on previews and a wishlist.</li><li><b>Season 3: The Endgame</b>: a free 40-tier Crown Path.</li><li><b>Daily login streaks, a Profile screen and 26 new trophies</b>.</li><li><b>A whole new look</b>: new menus, title screen, loadout showroom and cinematic results.</li></ul><h4>5.0</h4><ul><li><b>Squads</b>: teams of two, no friendly fire, a Bond DEF bonus when you stick together, and revives: step on a fallen teammate's soul to bring them back.</li><li><b>Siege</b>: co-op against eight waves of hunting Hollows, with a Colossus boss on waves 4 and 8. The first Colossus drops the Crown.</li><li><b>Map hazards</b>: Magma Rift, Frostbite and Warpgates. Most matches roll one.</li><li><b>Five new abilities</b> (Tripwire, Lance, Penance, Quake, Gambit) and two new base abilities (Lifesteal, Last Stand).</li><li><b>The Announcer</b>: First Blood, Double Take, Shutdown, Regicide, Final Two and more.</li><li><b>Play of the Match</b>: the best move of every game, replayed in slow motion on the results screen.</li><li><b>Piece Mastery</b>: level each piece to 10 for titles and Marks.</li><li><b>Season 2: The Middlegame</b>: a fresh Crown Path with the Warden and Colossus sets, the Riftgate board and the Soulfire finisher.</li><li>Dozens of rules fixes, faster rendering, bigger tap targets and a landscape title screen.</li></ul><h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
+const WHATS_NEW = `<h4>10.2</h4><ul><li><b>Accurate taps</b>: zoomed-out taps land where your finger first touched, snap to the nearest legal tile, and hold the camera still. On tiny tiles, the first tap previews with a magnifier and the second confirms (turn on One-Tap in Settings to skip).</li><li><b>Move in the storm</b>: collapsed ground is now open floor, so pieces caught in the storm can always move out. Moves into the storm show in red. It still burns 20% max HP each turn.</li><li><b>Quick Chat</b>: 87 phrases in six categories, favourites, recently used, up to 12 phrases of your own, and team-only callouts in Squads.</li><li><b>Safer chat</b>: custom phrases are cleaned and filtered, spam is rate-limited, and you can mute anyone or show only preset phrases.</li><li><b>Voice chat (beta)</b>: opt-in push-to-talk or open mic with friends online, per-player mute and volume, and speaking indicators.</li><li>Eliminated players can still chat and talk while spectating.</li></ul><h4>10.1</h4><ul><li><b>Smoother</b>: the title screen, store and matches run much faster on phones, and auto quality reacts sooner.</li><li><b>New hazard art</b>: a royal Throne dais, erupting geysers, industrial conveyors, collapsing floors and Rift Storm tears.</li><li><b>Tidier screens</b>: every label at least 11px, every button at least 40px, and layout fixes on small phones and in landscape.</li><li><b>Lesson Complete</b> now shows your progress and what the next lesson covers.</li><li><b>Accurate text everywhere</b>: tutorials, Codex, How to Play and ability descriptions match the rules. The bounty world event is now called Royal Bounty.</li><li>Fixed: clipped emote names in Collections, the Lessons button spacing, and the tutorial saying the Crown appears at the centre.</li></ul><h4>10.0</h4><ul><li><b>Four new modes</b>: King of the Hill, Chaos, Gauntlet (co-op boss rush) and Mirror Match.</li><li><b>A living world</b>: rebuilt boards with real materials, dynamic lighting, shadows, new weather (rain, ash, aurora, sandstorms, fog) and a cinematic camera.</li><li><b>All-new piece art</b>: every piece re-sculpted and lit in 3D, with real materials and animated premium sets.</li><li><b>New effects</b>: every ability rebuilt, plus 11 new finishers.</li><li><b>The Director</b>: callouts, banners, tips and ultimate cinematics take turns in fixed lanes, so nothing stacks.</li><li><b>New soundtrack and sound</b>: an adaptive score with a theme for every mode, and a layered sound for every ability and finisher, with an announcer voice.</li><li><b>New Siege enemies</b> (Stalker, Hexer, Splitter, Brute) and a new boss, the Wraith Regent.</li><li><b>New world events and hazards</b>: Eclipse, Earthquake, Mana Surge, Royal Bounty, War Drums, Restless Dead, geysers, conveyors, a crumbling floor and Rift Storms.</li><li><b>Six new abilities and two new base abilities</b> (Bastion and Predator).</li><li><b>A rebuilt Store</b>: Mythic rarity, 25 piece sets, 13 boards, 14 trails, Collections, try-on previews and a wishlist.</li><li><b>Season 3: The Endgame</b>: a free 40-tier Crown Path.</li><li><b>Daily login streaks, a Profile screen and 26 new trophies</b>.</li><li><b>A whole new look</b>: new menus, title screen, loadout showroom and cinematic results.</li></ul><h4>5.0</h4><ul><li><b>Squads</b>: teams of two, no friendly fire, a Bond DEF bonus when you stick together, and revives: step on a fallen teammate's soul to bring them back.</li><li><b>Siege</b>: co-op against eight waves of hunting Hollows, with a Colossus boss on waves 4 and 8. The first Colossus drops the Crown.</li><li><b>Map hazards</b>: Magma Rift, Frostbite and Warpgates. Most matches roll one.</li><li><b>Five new abilities</b> (Tripwire, Lance, Penance, Quake, Gambit) and two new base abilities (Lifesteal, Last Stand).</li><li><b>The Announcer</b>: First Blood, Double Take, Shutdown, Regicide, Final Two and more.</li><li><b>Play of the Match</b>: the best move of every game, replayed in slow motion on the results screen.</li><li><b>Piece Mastery</b>: level each piece to 10 for titles and Marks.</li><li><b>Season 2: The Middlegame</b>: a fresh Crown Path with the Warden and Colossus sets, the Riftgate board and the Soulfire finisher.</li><li>Dozens of rules fixes, faster rendering, bigger tap targets and a landscape title screen.</li></ul><h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
 <h4>2.0 Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
 <h4>Progression</h4><ul><li><b>Crown Path</b>: a free 30-tier season track with exclusive cosmetics and titles.</li><li><b>Trophies</b>: 21 achievements, each with Marks and a title.</li><li>Pick a title to show in lobbies and results.</li></ul>
 <h4>Balance</h4><ul><li>Heavy is the Head: the King no longer attunes, charges ultimates at half speed and takes 10% more damage. The Crown appears at a random safe spot.</li><li>Tank preset reworked. Regen scales with attunement.</li></ul>
@@ -1451,7 +1532,7 @@ document.addEventListener('click', (e) => {
     case 'menu': $('#m-menu').classList.remove('hidden'); sfx.tap(); break;
     case 'close-menu': $('#m-menu').classList.add('hidden'); break;
     case 'close-promote': $('#m-promote').classList.add('hidden'); break;
-    case 'emotes': game.renderEmotes(); $('#emote-menu').classList.toggle('hidden'); sfx.tap(); break;
+    case 'emotes': chat.toggle(); sfx.tap(); break;
     case 'forfeit': if (session && session.mode === 'tutorial') { $('#m-menu').classList.add('hidden'); endSession(); go('tutorial'); break; }
       $('#m-menu').classList.add('hidden'); game.showResults(!!(game.s && !game.s.over && game.me && game.me.alive)); break;
     case 'spectate': $('#m-dead').classList.add('hidden'); game.startSpectate(); break;
@@ -1524,7 +1605,7 @@ document.body.classList.toggle('bigtext', !!settings.bigtext); document.body.cla
 { const n = newsFrom(WHATS_NEW); if (n.ver) $('#nc-head').textContent = `Chess Complex ${n.ver}`; if (n.items.length) $('#nc-body').textContent = n.items.slice(0, 3).join(', ') + (n.items.length > 3 ? ` and ${n.items.length - 3} more` : ''); }
 const afterSplash = (showNew) => { if (!profile.seenReveal10 && (profile.games || profile.tutorial.length) && !q0.get('join')) { profile.seenReveal10 = true; save(); sequelReveal(showNew, { reduced: !!settings.motion, sfx }); } else showNew(); };
 const q0 = new URLSearchParams(location.search);
-setTimeout(() => { $('#splash').classList.add('out'); afterSplash(() => { if (profile.seenVersion !== '10.1' && (profile.games || profile.tutorial.length)) { info('What\'s New in 10.1', WHATS_NEW); } profile.seenVersion = '10.1'; save(); }); }, 700);
+setTimeout(() => { $('#splash').classList.add('out'); afterSplash(() => { if (profile.seenVersion !== '10.2' && (profile.games || profile.tutorial.length)) { info('What\'s New in 10.2', WHATS_NEW); } profile.seenVersion = '10.2'; save(); }); }, 700);
 const q = new URLSearchParams(location.search);
 if (q.get('join')) { go('join'); $('#in-code').value = q.get('join').toUpperCase().slice(0, 5); }
 window.__cc = { game, profile, get session() { return session; }, startSolo };

@@ -1,5 +1,13 @@
 # Changelog
 
+## 10.2 (November 2026)
+First sprint of the standing team (docs/TEAM.md), from the owner's online match with a friend.
+- **Tap accuracy (Input & UX):** seven causes fixed: a 600 ms touch cut-off dropped taps on busy frames; the lift point (not touch-down) picked the tile; the camera moved under the finger; landscape resize read the board mid-transition (taps up to 15 px off); piece sprites taller than their tile; hint/inspect cards swallowed taps; stale pointers turned taps into pinches. New `js/input.js`: touch-down resolution with a frozen camera, target assist, DPR-scaled pan threshold, preview-then-confirm with a loupe when tiles are under 30 px. Zoomed out on phones: 22-27% to 97-100% correct, 0 wrong actions; online client 70% to 100%.
+- **Storm movement (Gameplay):** collapsed rings kept their walls, crates and pits as invisible solid tiles, boxing pieces in the void. Collapse now turns void tiles into floor; void moves render red; bots climb out. Match lengths unchanged.
+- **Quick chat (Social & Network):** `js/chat.js` with 87 phrases, favourites, recent, 12 custom phrases (40 characters), team-only lines, chat bubbles and log routed through the Director. Host and receivers sanitize and filter custom text; rate limits and timeouts on the host; per-player mute; preset-only and hide-chat settings.
+- **Voice chat beta:** `js/voice.js`, opt-in push-to-talk or open mic over separate WebRTC calls, roster-checked, per-player mute and volume, speaking indicators, ducking, listen-only fallback when the mic is blocked. Needs real-device testing (iOS Safari, strict networks, Bluetooth).
+- Spectators keep chat and voice.
+
 ## 10.1 (November 2026)
 From the owner's playtest of 10.0, plus a four-handler polish round.
 - **Fixed (owner reports):** emote names in store Collections were clipped and off-centre; the Lesson Complete card's Lessons button sat flush with the card edge; the Board lesson said the Crown appears at the centre (it spawns on a random safe tile, and the Crown banner now names the area).

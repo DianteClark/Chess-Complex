@@ -808,6 +808,12 @@ export function drawOverlays(r, T) {
     ctx.strokeStyle = 'rgba(127,224,255,0.55)'; ctx.lineWidth = 0.025; ctx.stroke();
     for (const m of ov.moves) {
       const wave = 0.5 + 0.5 * Math.sin(T * 4 - (Math.abs(m.x - fx) + Math.abs(m.y - fy)) * 0.8);
+      if (ringOf(m.x, m.y) < s.storm.ring) { // G 10.2: legal moves in the storm void, tinted red as a burn warning
+        ctx.beginPath(); rrect(ctx, m.x + 0.07, m.y + 0.07, 0.86, 0.86, 0.14);
+        ctx.fillStyle = `rgba(255,70,70,${0.2 + wave * 0.16})`; ctx.fill(); ctx.strokeStyle = 'rgba(255,140,130,0.9)'; ctx.lineWidth = 0.03; ctx.stroke();
+        ctx.fillStyle = 'rgba(255,225,215,0.95)'; ctx.beginPath(); ctx.arc(m.x + 0.5, m.y + 0.5, 0.055 + wave * 0.03, 0, TAU); ctx.fill();
+        continue;
+      }
       ctx.fillStyle = `rgba(120,215,255,${0.06 + wave * 0.14})`; ctx.fillRect(m.x + 0.12, m.y + 0.12, 0.76, 0.76);
       ctx.fillStyle = 'rgba(210,245,255,0.9)'; ctx.beginPath(); ctx.arc(m.x + 0.5, m.y + 0.5, 0.055 + wave * 0.03, 0, TAU); ctx.fill();
       if (m.jump) { ctx.strokeStyle = 'rgba(210,245,255,0.6)'; ctx.lineWidth = 0.02; ctx.beginPath(); ctx.arc(m.x + 0.5, m.y + 0.5, 0.15, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
