@@ -228,7 +228,7 @@ class Voice {
     this.state = 'off'; this.ptt = false; this.open = false;
     for (const vid of [...this.calls.keys()]) this.drop(vid, true);
     try { this.T && this.T.close(); } catch {} this.T = null;
-    if (this.mic) this.mic.getTracks().forEach((t) => t.stop()); this.mic = null; this.out = null; this.myAn = null;
+    if (this.mic) { this.mic.getTracks().forEach((t) => t.stop()); setSession('playback'); resumeAudio(); } this.mic = null; this.out = null; this.myAn = null;
     try { this.ac && this.ac.close(); } catch {} this.ac = null;
     this.myVid = null; this.flag.clear(); this.unduck(); this.sess = null; this.tries = {}; this.myOn = false;
     this.speaking.clear(); this.changed();
@@ -446,13 +446,25 @@ export async function getMic() {
   const md = navigator.mediaDevices;
   if (!window.isSecureContext) throw named('SecureContextError');
   if (!md || !md.getUserMedia) throw named('NotSupportedError');
-  try { return await md.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
-  catch (e) {
-    if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw e;
-    try { return await md.getUserMedia({ audio: true }); }
-    catch (e2) { throw e2 && e2.name && !['NotSupportedError', 'TypeError', 'OverconstrainedError'].includes(e2.name) ? e2 : e; } // keep the more telling error
-  }
+  // iOS: the game's sound puts the audio session in 'playback' mode, which refuses microphone capture outright.
+  // Switch to 'play-and-record' before asking; restore 'playback' if we end up without a mic.
+  setSession('play-and-record');
+  try {
+    let mic;
+    try { mic = await md.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
+    catch (e) {
+      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw e;
+      try { mic = await md.getUserMedia({ audio: true }); }
+      catch (e2) { throw e2 && e2.name && !['NotSupportedError', 'TypeError', 'OverconstrainedError'].includes(e2.name) ? e2 : e; } // keep the more telling error
+    }
+    resumeAudio();
+    return mic;
+  } catch (e) { setSession('playback'); resumeAudio(); throw e; }
 }
+// navigator.audioSession exists on Safari 16.4+ only; elsewhere these are no-ops.
+function setSession(type) { try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch {} }
+// switching the session can interrupt running audio on iOS; nudge the game's audio back on
+function resumeAudio() { try { const b = buses && buses(); if (b && b.ac && b.ac.state !== 'running') b.ac.resume().catch(() => {}); } catch {} }
 function micShort(e) {
   const n = e && e.name;
   if (n === 'NotAllowedError' || n === 'SecurityError') return 'Microphone permission is off. See Voice Chat for how to turn it on.';

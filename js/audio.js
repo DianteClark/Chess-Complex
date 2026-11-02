@@ -101,7 +101,9 @@ export function getCtx(quiet) {
   if (!ac) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
-    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+    // 'playback' lets sound play through the iPhone silent switch, but it also blocks the microphone, so never
+    // override 'play-and-record' while voice chat holds the mic (voice.js switches it back when it lets go).
+    try { if (navigator.audioSession && navigator.audioSession.type !== 'play-and-record') navigator.audioSession.type = 'playback'; } catch {}
     try { ac = new AC({ latencyHint: 'interactive' }); } catch { ac = new AC(); }
     limiter = ac.createDynamicsCompressor(); limiter.threshold.value = -2.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.09;
     glue = ac.createDynamicsCompressor(); glue.threshold.value = -16; glue.knee.value = 8; glue.ratio.value = 3; glue.attack.value = 0.005; glue.release.value = 0.2;

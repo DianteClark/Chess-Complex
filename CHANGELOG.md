@@ -1,5 +1,8 @@
 # Changelog
 
+## 10.2.2 (November 2026)
+- **Voice chat on iPhone (owner report: app and Safari both said "no mic" even with the microphone allowed):** `audio.js` set `navigator.audioSession.type = 'playback'` (Safari 16.4+) so game sound plays through the silent switch. That session type refuses microphone capture. `getMic()` now switches to `'play-and-record'` before asking, restores `'playback'` on failure or when leaving voice, and resumes game audio after the switch; `audio.js` no longer overrides the session while voice holds the mic. Verified against a simulated Safari audio session (old code: NotReadableError, "No microphone found"; new: mic live).
+
 ## 10.2.1 (November 2026)
 - **Voice chat microphone (owner report: "Join Voice says no mic"):** every microphone failure used to show "No microphone found". Now `getMic()` asks with voice-tuned settings, then falls back to a plain audio request (some phones reject the processing hints or report the mic busy), keeps the more telling error, and checks for a secure page. Errors are explained per platform: blocked permission (iPhone Safari aA > Website Settings, home-screen app via Settings > Safari > Microphone, Android site and app permissions, desktop), mic busy in another app, in-app browsers that cannot use the mic, or no mic at all. A new Turn On Mic button asks again from a tap and swaps the live mic into open calls without reconnecting.
 
