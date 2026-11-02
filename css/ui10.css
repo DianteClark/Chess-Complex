@@ -288,3 +288,65 @@ body.reduced .vc-ring { animation: none; }
 /* 10.2.1: mic help reads as guidance, with a clear retry button */
 .vc-err { color: #ffc9c9; line-height: 1.45; background: rgba(255, 77, 109, .1); border: 1px solid rgba(255, 77, 109, .35); border-radius: 10px; padding: 8px 10px; }
 .vc-allow { margin-top: 8px; min-height: 40px; }
+
+/* N 10.3: chat strip (last 3 lines), chat history sheet, unread badge, microphone permission card and Settings row */
+.chat-log .cl-row { pointer-events: auto; cursor: pointer; max-width: 100%; box-sizing: border-box; animation: none; transition: opacity .25s; }
+.chat-log .cl-row.new { animation: clIn .2s ease-out both; }
+.chat-log .cl-row.a1 { opacity: .78; }
+.chat-log .cl-row.a2 { opacity: .55; }
+.chat-log.idle .cl-row { opacity: .62; } .chat-log.idle .cl-row.a1 { opacity: .48; } .chat-log.idle .cl-row.a2 { opacity: .34; }
+.chat-log .cl-row b { font-weight: 800; }
+@media (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
+  .chat-log { max-width: min(280px, calc(100vw - var(--sidew, 360px) - 96px)); }
+}
+.emote-btn { position: relative; }
+.qc-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border-radius: 9px; background: var(--red, #ff4d6d); color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px rgba(14,12,20,.95); pointer-events: none; }
+.chat-sheet { position: absolute; z-index: 9; left: calc(8px + env(safe-area-inset-left, 0px)); right: calc(8px + env(safe-area-inset-right, 0px)); bottom: calc(8px + var(--sb, 0px)); height: min(58vh, 460px); display: flex; flex-direction: column; background: rgba(14,12,20,.97); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 40px rgba(0,0,0,.6); overflow: hidden; animation: rise .22s both; }
+.chat-sheet.hidden { display: none; }
+body.reduced .chat-sheet { animation: none; }
+.cs-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.cs-head > b { font-size: 15px; letter-spacing: .04em; }
+.cs-n { flex: 1; font-size: 11px; color: var(--mute); }
+.cs-head button, .cs-foot button { min-height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); color: var(--ink); font-size: 12px; font-weight: 700; }
+.cs-head .cs-strip.on { border-color: rgba(214,176,92,.6); color: var(--gold2); }
+.cs-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 6px 12px; }
+.cs-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: 13px; line-height: 1.35; word-break: break-word; }
+.cs-row time { flex: none; min-width: 44px; font-size: 11px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.cs-row b { font-weight: 800; }
+.cs-row .qc-tm { margin-right: 0; }
+.cs-row.tm { background: linear-gradient(90deg, rgba(127,224,255,.08), transparent 70%); }
+.cs-row.sys .cs-t { color: var(--mute); font-style: italic; font-size: 12px; }
+.cs-t { min-width: 0; color: var(--ink); }
+.cs-new { position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%); min-height: 36px; padding: 0 14px; border-radius: 18px; border: 0; background: var(--gold); color: #1a1205; font-size: 12px; font-weight: 800; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+.cs-new.hidden { display: none; }
+.cs-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 6px 8px; border-top: 1px solid rgba(255,255,255,.08); }
+.cs-foot .cs-say { border-color: rgba(214,176,92,.6); color: var(--gold2); }
+@media (orientation: landscape) and (max-height: 520px) and (min-width: 560px) {
+  .chat-sheet { right: auto; top: calc(8px + var(--st, 0px)); bottom: calc(8px + var(--sb, 0px)); height: auto; width: min(380px, calc(100vw - var(--sidew, 360px) - 24px)); }
+}
+/* microphone: status line, pre-permission card, Settings row and level meter */
+.vc-perm { margin: 6px 0 0; font-size: 12px; color: var(--mute); }
+.vc-perm b { color: var(--ink); }
+.vc-perm.granted b { color: var(--green); } .vc-perm.denied b { color: #ff8a95; }
+.vc-err p { margin: 0; }
+.mic-steps { margin: 6px 0 0; padding-left: 20px; font-size: 12px; line-height: 1.45; }
+.mic-steps li + li { margin-top: 3px; }
+.mic-modal .modal-box { width: min(400px, 100%); text-align: center; display: flex; flex-direction: column; gap: 8px; }
+.mic-ic { width: 56px; height: 56px; margin: 0 auto; border-radius: 50%; display: grid; place-items: center; background: rgba(214,176,92,.14); border: 1px solid rgba(214,176,92,.45); }
+.mic-ic svg { width: 28px; height: 28px; fill: var(--gold2); }
+.mic-box h3 { margin: 4px 0 0; }
+.mic-lead { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink); }
+.mic-sub { margin: 0; font-size: 12px; line-height: 1.45; color: var(--mute); }
+.mic-deny { text-align: left; color: #ffc9c9; background: rgba(255,77,109,.1); border: 1px solid rgba(255,77,109,.35); border-radius: 10px; padding: 8px 10px; font-size: 12px; }
+.mic-deny p { margin: 0; }
+.mic-deny[hidden], .mic-meter[hidden], .mic-help[hidden], .mic-note[hidden], .mic-row [hidden], .mic-box [hidden] { display: none !important; }
+.mic-box .vc-perm { margin: 0; }
+.mic-later { min-height: 40px; background: transparent; border: 0; color: var(--mute); font-size: 13px; font-weight: 700; }
+.mic-row { flex-wrap: wrap; }
+.mic-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.mic-btns .btn { min-height: 40px; }
+.mic-btns .btn.on { border-color: var(--green); color: var(--green); }
+.mic-meter { height: 10px; margin: 4px 2px 2px; border-radius: 5px; background: rgba(255,255,255,.08); overflow: hidden; }
+.mic-meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--green), #d6ff5c 70%, #ffb36b); transition: width .06s linear; }
+.mic-help { margin: 6px 2px; }
+.chat-log.pass .cl-row { pointer-events: none; cursor: default; }

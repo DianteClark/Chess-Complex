@@ -119,7 +119,9 @@ class Voice {
     addEventListener('keyup', (e) => { if (e.key === 'v') this.setPtt(false); });
     addEventListener('blur', () => this.setPtt(false));
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.setPtt(false); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.watchPerm(); }); // back from the system Settings app
     this.loop = setInterval(() => this.tick(), 100);
+    this.buildCard(); this.bindMicRow(); this.watchPerm();
     this.renderLobby();
   }
   bindHold(b) {
@@ -162,6 +164,12 @@ class Voice {
     if (m.a === 'roster' && Array.isArray(m.list)) {
       const r = new Map();
       for (const e of m.list.slice(0, MAX_MEMBERS)) if (e && typeof e.pid === 'string' && e.pid.length <= 40 && typeof e.vid === 'string' && VID_RE.test(e.vid)) r.set(e.pid, e.vid);
+      // 10.3: joins and leaves go to the chat history as system lines (only shown during a match)
+      if (this.d && this.d.sys) {
+        const N = this.names(), me = (this.d.session() || {}).myPid, nm = (p) => (p === me ? 'You' : N[p] || 'A player');
+        for (const p of r.keys()) if (!this.roster.has(p)) this.d.sys(`${nm(p)} joined voice`);
+        for (const p of this.roster.keys()) if (!r.has(p)) this.d.sys(`${nm(p)} left voice`);
+      }
       this.roster = r; this.rosterSess = this.d && this.d.session();
       for (const pid of [...this.flag.keys()]) if (!r.has(pid)) this.flag.delete(pid);
       this.reconcile(); this.changed();
@@ -172,18 +180,23 @@ class Voice {
   }
 
   // ---- opting in
-  async start() {
-    if (this.state !== 'off' || !this.online()) return;
-    const sess = this.d.session(); this.sess = sess; this.state = 'starting'; this.err = ''; this.listenOnly = false; this.changed();
+  // o.micP: a getMic() promise already started inside the tap (pre-permission card); o.listen: join without a mic
+  async start(o = {}) {
+    if (this.state !== 'off' || !this.online()) { if (o.micP) o.micP.then((m) => m.getTracks().forEach((t) => t.stop()), () => {}); return; }
+    // the permission prompt needs the user gesture: getUserMedia is the very first thing that runs in the tap
+    const micP = o.listen ? null : (o.micP || getMic());
+    const sess = this.d.session(); this.sess = sess; this.state = 'starting'; this.err = ''; this.errName = ''; this.listenOnly = false; this.changed();
     const AC = window.AudioContext || window.webkitAudioContext;
     try { this.ac = AC ? new AC() : null; if (this.ac && this.ac.state === 'suspended') this.ac.resume().catch(() => {}); } catch { this.ac = null; }
     let mic = null;
-    try { mic = await getMic(); }
+    if (!micP) { this.listenOnly = true; this.errName = 'Listen'; }
+    else try { mic = await micP; }
     catch (e) {
       this.listenOnly = true; this.errName = (e && e.name) || 'Error';
       this.err = micHelp(e);
       this.d.toast(micShort(e));
     }
+    this.watchPerm();
     if (this.d.session() !== sess || this.state !== 'starting') { if (mic) mic.getTracks().forEach((t) => t.stop()); return; }
     if (mic) { this.mic = mic; for (const t of mic.getAudioTracks()) { t.enabled = false; t.onended = () => { if (this.state === 'on') { this.listenOnly = true; this.err = 'Microphone disconnected. You can still listen.'; this.d.toast(this.err); this.changed(); } }; } }
     this.out = this.mic || this.silent();
@@ -202,9 +215,9 @@ class Voice {
     if (this.state !== 'on' || !this.listenOnly) return;
     let mic;
     try { mic = await getMic(); }
-    catch (e) { this.errName = (e && e.name) || 'Error'; this.err = micHelp(e); this.d.toast(micShort(e)); this.changed(); return; }
+    catch (e) { this.errName = (e && e.name) || 'Error'; this.err = micHelp(e); this.d.toast(micShort(e)); this.watchPerm(); return; }
     if (this.state !== 'on') { mic.getTracks().forEach((t) => t.stop()); return; }
-    this.mic = mic; this.listenOnly = false; this.err = '';
+    this.mic = mic; this.listenOnly = false; this.err = ''; this.errName = '';
     const track = mic.getAudioTracks()[0];
     for (const t of mic.getAudioTracks()) { t.enabled = false; t.onended = () => { if (this.state === 'on') { this.listenOnly = true; this.err = 'Microphone disconnected. You can still listen.'; this.d.toast(this.err); this.changed(); } }; }
     if (this.ac) { try { const src = this.ac.createMediaStreamSource(mic); this.myAn = this.ac.createAnalyser(); this.myAn.fftSize = 512; src.connect(this.myAn); } catch {} }
@@ -397,7 +410,13 @@ class Voice {
       st.textContent = this.listenOnly ? 'Listening only' : this.open ? 'Open mic: everyone in voice hears you' : lobby ? 'Hold the button below to talk' : 'Hold the mic button to talk';
     }
     head.appendChild(st); w.appendChild(head);
-    if (this.err && this.state === 'on') w.appendChild(el('p', 'vc-err', this.err));
+    const ms = this.micStatus(); const pl = el('p', 'vc-perm ' + ms.key); pl.dataset.mic = ms.key;
+    pl.append(el('span', '', 'Microphone: '), el('b', '', ms.label)); if (ms.hint) pl.append(document.createTextNode(' ' + ms.hint)); w.appendChild(pl);
+    if (this.err && this.state === 'on') {
+      const e = el('div', 'vc-err'); e.appendChild(el('p', '', this.err));
+      if (this.errName === 'NotAllowedError' || this.errName === 'SecurityError') e.appendChild(stepsList());
+      w.appendChild(e);
+    }
     if (this.state === 'on' && this.listenOnly && this.errName !== 'NotSupportedError') { const m = el('button', 'btn small gold vc-allow', 'Turn On Mic'); m.dataset.vc = 'mic'; w.appendChild(m); }
     if (lobby && this.state === 'on' && !this.listenOnly && !this.open) { const h = el('button', 'btn wide vc-hold', 'Hold to Talk'); this.bindHold(h); w.appendChild(h); }
     if (list && this.roster.size) {
@@ -426,18 +445,148 @@ class Voice {
   }
   onControl(act, pid) {
     const s = this.d.sfx;
-    if (act === 'join') { s && s.tap && s.tap(); this.start(); }
+    if (act === 'join') { s && s.tap && s.tap(); this.join(); }
     else if (act === 'leave') { s && s.tap && s.tap(); this.stop(); }
     else if (act === 'open') this.setOpen(!this.open);
     else if (act === 'mic') { s && s.tap && s.tap(); this.retryMic(); }
     else if (act === 'mute' && pid) { this.toggleMute(pid); s && s.tap && s.tap(); }
   }
+
+  // ---- 10.3: explicit microphone permission flow
+  // Join Voice: permission already granted (or granted before on this device, e.g. an iPhone Home Screen app that asks
+  // again every launch) -> straight to the system prompt; otherwise the pre-permission card first.
+  join() {
+    if (this.state !== 'off' || !this.online()) return;
+    const p = this.perm, m = micMemo();
+    if (p === 'granted' || (p !== 'denied' && m && m.state === 'granted')) {
+      if (p !== 'granted' && micCtx() === 'ios-app') this.d.toast('iPhone asks for the microphone each time the Home Screen app opens. Tap Allow.');
+      this.start(); return;
+    }
+    this.openCard(p === 'denied' || !!(m && m.state === 'denied'));
+  }
+  async watchPerm() {
+    try {
+      if (!navigator.permissions || !navigator.permissions.query) throw 0;
+      const st = await navigator.permissions.query({ name: 'microphone' });
+      this.perm = st.state;
+      if (this.permObj !== st) { this.permObj = st; st.onchange = () => { this.perm = st.state; this.micChanged(); }; }
+    } catch { this.perm = 'unsupported'; }
+    this.micChanged();
+  }
+  micChanged() { this.renderMicRow(); this.renderCard(); this.changed(); }
+  // { key: granted | denied | prompt | na, label, hint }
+  micStatus() {
+    const md = navigator.mediaDevices;
+    if (!window.isSecureContext || !md || !md.getUserMedia) return { key: 'na', label: 'Not available in this browser' };
+    const p = this.perm, m = micMemo(), app = micCtx() === 'ios-app';
+    if (p === 'granted') return { key: 'granted', label: 'Allowed' };
+    if (p === 'denied') return { key: 'denied', label: 'Blocked' };
+    if (p === 'prompt') return { key: 'prompt', label: 'Will ask', hint: m && m.state === 'denied' ? 'Blocked last time.' : app && m && m.state === 'granted' ? 'iPhone asks again each time the Home Screen app opens.' : '' };
+    if (m && m.state === 'granted') return { key: 'granted', label: 'Allowed before', hint: app ? 'iPhone may ask again when the app opens.' : '' };
+    if (m && m.state === 'denied') return { key: 'denied', label: 'Blocked before' };
+    return { key: 'prompt', label: 'Will ask' };
+  }
+  // the pre-permission card
+  buildCard() {
+    if ($('#m-mic')) return;
+    const m = el('div', 'modal hidden global mic-modal'); m.id = 'm-mic'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-labelledby', 'mic-h');
+    m.innerHTML = `<div class="modal-box mic-box"><div class="mic-ic" aria-hidden="true">${MIC_SVG}</div><h3 id="mic-h"></h3>
+      <p class="mic-lead"></p><p class="mic-sub"></p><div class="mic-deny"></div><p class="vc-perm"></p>
+      <button class="btn wide gold" data-mc="allow" id="mic-allow"></button><button class="btn wide" data-mc="listen" id="mic-listen">Listen Only</button>
+      <button class="mic-later" data-mc="cancel">Not Now</button></div>`;
+    document.body.appendChild(m); this.card = m;
+    // Allow: getUserMedia runs synchronously inside this click (no awaits before it), so iOS shows its system prompt
+    m.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mc]'); if (!b) { if (e.target === m) this.closeCard(); return; }
+      const a = b.dataset.mc, sfx = this.d.sfx;
+      if (a === 'allow') { const micP = getMic(); this.closeCard(); this.start({ micP }); }
+      else if (a === 'listen') { this.closeCard(); this.start({ listen: true }); }
+      else this.closeCard();
+      sfx && sfx.tap && sfx.tap();
+    });
+    addEventListener('keydown', (e) => { if (e.key === 'Escape' && !m.classList.contains('hidden')) this.closeCard(); });
+  }
+  openCard(denied) { if (!this.card) return; this.cardDenied = !!denied; this.renderCard(); this.card.classList.remove('hidden'); setTimeout(() => { try { $('#mic-allow').focus({ preventScroll: true }); } catch {} }, 30); }
+  closeCard() { if (this.card) this.card.classList.add('hidden'); }
+  renderCard() {
+    const m = this.card; if (!m) return;
+    const ms = this.micStatus(), denied = this.cardDenied || ms.key === 'denied', ctx = micCtx();
+    $('#mic-h', m).textContent = denied ? 'Microphone is blocked' : 'Join Voice Chat';
+    $('.mic-lead', m).textContent = 'Voice chat needs your microphone. Your mic is only live while you hold Talk.';
+    $('.mic-sub', m).textContent = denied ? 'You can still join and listen.'
+      : ctx === 'ios-app' ? 'Your iPhone asks next: tap Allow. Home Screen apps can ask again each time you open them, which is normal.'
+      : ctx.startsWith('ios') ? 'Your iPhone asks next: tap Allow.' : 'Your browser asks next: choose Allow.';
+    const d = $('.mic-deny', m); d.textContent = ''; d.hidden = !denied;
+    if (denied) { d.appendChild(el('p', '', 'To turn it on:')); d.appendChild(stepsList()); }
+    const pl = $('.vc-perm', m); pl.textContent = ''; pl.className = 'vc-perm ' + ms.key; pl.append(el('span', '', 'Microphone: '), el('b', '', ms.label));
+    $('#mic-allow', m).textContent = denied ? 'Try Again' : 'Allow Microphone';
+    $('#mic-allow', m).hidden = ms.key === 'na';
+  }
+  // Settings > Chat and Voice > Microphone: state, Allow Microphone, Test Microphone with a live level meter
+  bindMicRow() {
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('[data-mic-act]'); if (!b) return;
+      const sfx = this.d && this.d.sfx; sfx && sfx.tap && sfx.tap();
+      if (b.dataset.micAct === 'allow') this.allowMic(); else if (b.dataset.micAct === 'test') this.testMic();
+    });
+    this.renderMicRow();
+    // re-read the permission each time Settings opens (Safari does not always fire permission change events)
+    const set = document.getElementById('m-settings');
+    if (set) new MutationObserver(() => { const open = !set.classList.contains('hidden'); if (open && !this.settingsShown) this.watchPerm(); this.settingsShown = open; }).observe(set, { attributes: true, attributeFilter: ['class'] });
+  }
+  renderMicRow() {
+    const row = document.getElementById('mic-row'); if (!row) return;
+    const ms = this.micStatus(); row.dataset.mic = ms.key;
+    const st = $('#mic-state', row); if (st) st.textContent = ms.label + (ms.hint ? '. ' + ms.hint : '');
+    const a = $('[data-mic-act="allow"]', row); if (a) { a.hidden = ms.key === 'granted' && ms.label === 'Allowed' || ms.key === 'na'; a.textContent = ms.key === 'denied' ? 'Try Again' : 'Allow Microphone'; }
+    const t = $('[data-mic-act="test"]', row); if (t) { t.textContent = this.test ? 'Stop Test' : 'Test Microphone'; t.hidden = ms.key === 'na'; t.classList.toggle('on', !!this.test); }
+    const h = document.getElementById('mic-help');
+    if (h) { h.textContent = ''; const show = ms.key === 'denied'; h.hidden = !show; if (show) { h.appendChild(el('p', '', 'The microphone is blocked for this game. To turn it on:')); h.appendChild(stepsList()); } }
+    const mt = document.getElementById('mic-meter'); if (mt) mt.hidden = !this.test;
+  }
+  releaseTest(stream) { try { stream.getTracks().forEach((t) => t.stop()); } catch {} if (!(this.mic && this.state === 'on')) { setSession('playback'); resumeAudio(); } }
+  allowMic() {
+    const p = getMic(); // straight from the tap
+    p.then((s) => { this.releaseTest(s); this.d.toast('Microphone allowed. Hold Talk in voice chat to speak.'); },
+      (e) => { this.d.toast(micShort(e)); })
+      .finally(() => this.watchPerm());
+  }
+  testMic() {
+    if (this.test) { this.endTest(); return; }
+    // in voice already: measure a clone of the live track, so nothing is sent to the room
+    const live = this.mic && this.state === 'on' && this.mic.getAudioTracks()[0];
+    const micP = live ? Promise.resolve(new MediaStream([live.clone()])) : getMic();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    let ac = null; try { ac = AC ? new AC() : null; if (ac && ac.state === 'suspended') ac.resume().catch(() => {}); } catch {}
+    const T = (this.test = { ac, peak: 0, at: Date.now() }); this.renderMicRow(); this.meterNote('Starting...');
+    micP.then((stream) => {
+      if (this.test !== T) { this.releaseTest(stream); try { ac && ac.close(); } catch {} return; }
+      T.stream = stream;
+      try { const src = ac.createMediaStreamSource(stream); T.an = ac.createAnalyser(); T.an.fftSize = 512; src.connect(T.an); } catch {}
+      this.meterNote('Say something: the bar should move.');
+      T.iv = setInterval(() => {
+        const lv = this.level(T.an); T.peak = Math.max(T.peak, lv);
+        const pct = Math.min(100, Math.round(Math.sqrt(lv) * 260)); const bar = document.querySelector('#mic-meter i'); if (bar) { bar.style.width = pct + '%'; bar.parentElement.setAttribute('aria-valuenow', pct); }
+        const set = document.getElementById('m-settings');
+        if (Date.now() - T.at > 12000 || (set && set.classList.contains('hidden'))) this.endTest();
+      }, 60);
+      this.watchPerm();
+    }, (e) => { if (this.test === T) { this.test = null; try { ac && ac.close(); } catch {} } this.d.toast(micShort(e)); this.meterNote(micShort(e)); this.watchPerm(); });
+  }
+  endTest() {
+    const T = this.test; if (!T) return; this.test = null;
+    clearInterval(T.iv); if (T.stream) this.releaseTest(T.stream); try { T.ac && T.ac.close(); } catch {}
+    this.meterNote(!T.stream ? '' : T.peak > 0.015 ? 'Your microphone works.' : 'No sound reached the game. Check the mic is not muted or covered.');
+    const bar = document.querySelector('#mic-meter i'); if (bar) bar.style.width = '0%';
+    this.renderMicRow();
+  }
+  meterNote(t) { const n = document.getElementById('mic-note'); if (n) { n.textContent = t; n.hidden = !t; } }
 }
 
 // ---- microphone access ----
 const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const ANDROID = /Android/.test(navigator.userAgent);
-const STANDALONE = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const standalone = () => { try { return matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true; } catch { return navigator.standalone === true; } };
 const INAPP = /FBAN|FBAV|Instagram|Line\/|Snapchat|Twitter|Discord|GSA\/|; wv\)/.test(navigator.userAgent);
 const named = (name, msg = name) => Object.assign(new Error(msg), { name });
 // Must be called straight from a tap. Tries the voice-tuned constraints first, then plain audio (some phones reject
@@ -457,10 +606,46 @@ export async function getMic() {
       try { mic = await md.getUserMedia({ audio: true }); }
       catch (e2) { throw e2 && e2.name && !['NotSupportedError', 'TypeError', 'OverconstrainedError'].includes(e2.name) ? e2 : e; } // keep the more telling error
     }
-    resumeAudio();
+    resumeAudio(); setMemo('granted');
     return mic;
-  } catch (e) { setSession('playback'); resumeAudio(); throw e; }
+  } catch (e) {
+    if (!(voice.mic && voice.state === 'on')) setSession('playback');
+    resumeAudio();
+    if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) setMemo('denied', e.name);
+    throw e;
+  }
 }
+// The answer is remembered per device (iPhone Home Screen apps forget it between launches; Safari and Chrome keep it).
+const MKEY = 'cc_mic';
+function micMemo() { try { const m = JSON.parse(localStorage.getItem(MKEY) || 'null'); return m && typeof m === 'object' && (m.state === 'granted' || m.state === 'denied') ? m : null; } catch { return null; } }
+function setMemo(state, name) { try { localStorage.setItem(MKEY, JSON.stringify({ state, name: name || '', ctx: micCtx(), at: Date.now() })); } catch {} }
+// where the game runs, for the help text: ios-app (Home Screen web app), ios-safari, android, android-app, desktop
+export function micCtx() { return IOS ? (standalone() ? 'ios-app' : 'ios-safari') : ANDROID ? (standalone() ? 'android-app' : 'android') : 'desktop'; }
+const SAFARI_SET = 'Settings > Apps > Safari > Microphone (on iOS 17: Settings > Safari > Microphone)';
+export function micSteps(ctx = micCtx()) {
+  if (ctx === 'ios-app') return [
+    'Close Chess Complex fully: swipe up from the bottom of the screen and pause, then swipe the game away.',
+    `Open ${SAFARI_SET} and choose Ask or Allow.`,
+    'Open Chess Complex from your Home Screen again, tap Join Voice (or Turn On Mic), then tap Allow.',
+  ];
+  if (ctx === 'ios-safari') return [
+    'In Safari, tap the page menu at the left of the address bar (aA on iOS 17), then Website Settings.',
+    'Set Microphone to Ask or Allow.',
+    `If it is still blocked, check ${SAFARI_SET} is not set to Deny.`,
+    'Reload the page, tap Turn On Mic, then tap Allow.',
+  ];
+  if (ctx === 'android' || ctx === 'android-app') return [
+    ctx === 'android-app' ? 'Long-press the Chess Complex icon > App info > Permissions (or Site settings) > Microphone > Allow.' : 'Tap the icon at the left of the address bar > Permissions > Microphone > Allow.',
+    'If it is still blocked, open Android Settings > Apps > Chrome (or your browser) > Permissions > Microphone > Allow.',
+    'Come back and tap Turn On Mic.',
+  ];
+  return [
+    'Click the icon at the left of the address bar and set Microphone to Allow for this site.',
+    'If that does not help, let the browser use the microphone in your system privacy settings (macOS: System Settings > Privacy & Security > Microphone; Windows: Settings > Privacy & security > Microphone).',
+    'Press Turn On Mic (reload the page if no prompt appears).',
+  ];
+}
+function stepsList() { const ol = el('ol', 'mic-steps'); for (const t of micSteps()) ol.appendChild(el('li', '', t)); return ol; }
 // navigator.audioSession exists on Safari 16.4+ only; elsewhere these are no-ops.
 function setSession(type) { try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch {} }
 // switching the session can interrupt running audio on iOS; nudge the game's audio back on
@@ -474,12 +659,7 @@ function micShort(e) {
 }
 function micHelp(e) {
   const n = e && e.name;
-  if (n === 'NotAllowedError' || n === 'SecurityError') {
-    if (IOS && STANDALONE) return 'Microphone is off for the home-screen app. On iPhone: Settings > Safari > Microphone > Ask or Allow, then reopen the game and tap Turn On Mic. You can still listen.';
-    if (IOS) return 'Microphone is blocked. In Safari tap the aA button in the address bar > Website Settings > Microphone > Allow, then tap Turn On Mic (reload the page if no prompt appears). You can still listen.';
-    if (ANDROID) return 'Microphone is blocked. Tap the icon left of the address bar > Permissions > Microphone > Allow (and check Android Settings > Apps > your browser > Permissions), then tap Turn On Mic. You can still listen.';
-    return 'Microphone is blocked. Click the icon left of the address bar, allow the microphone for this site, then press Turn On Mic. You can still listen.';
-  }
+  if (n === 'NotAllowedError' || n === 'SecurityError') return micCtx() === 'ios-app' ? 'Microphone is off for the Home Screen app. You can still listen. To turn it on:' : 'Microphone is blocked. You can still listen. To turn it on:';
   if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError') return 'Another app is using the microphone (a call, a voice memo or another browser tab). Close it, then tap Turn On Mic. You can still listen.';
   if (n === 'SecureContextError') return 'Voice needs the secure site. Open https://dianteclark.github.io/Chess-Complex/ and try again.';
   if (n === 'NotSupportedError') return INAPP ? 'This in-app browser cannot use the microphone. Open the game in Safari or Chrome (use the menu > Open in browser), then join voice again. You can still listen.' : 'This browser cannot share the microphone. Try Safari on iPhone or Chrome on Android. You can still listen.';

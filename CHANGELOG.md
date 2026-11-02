@@ -1,5 +1,11 @@
 # Changelog
 
+## 10.3 (November 2026)
+- **Turn camera (Rendering):** new `js/camdir.js`. Each turn is a beat: eased glide to the actor, framing of the actor and everything its action touches, hold until the turn's events finish, then the next actor. Turns queue instead of interleaving; backlogs speed playback up (to 2.8x) instead of snapping. One ultimate card at a time; banners wait for their visuals. Manual pan/pinch is respected until your next turn. Settings > Camera: Every turn / My turns / Free. Back-to-back ultimates: turns framed 65% to 82%, max pan speed 1601 to 884 px/s, max zoom rate 8.9 to 2.3/s. Turn timers get a 2 s host-side grace for the playback delay.
+- **Microphone flow (Social):** pre-permission card on first Join Voice whose Allow button calls getUserMedia inside the tap after switching the iOS audio session; remembered per device; blocked-state steps for iOS Home Screen, Safari, Android and desktop; permission state line; Settings Microphone row with Allow, Test (live meter) and Hide Chat Strip.
+- **Chat log (Social):** 3-line strip that dodges Director callouts and important pieces, full scrollable history (300 lines) with timestamps, team tags, voice join/leave lines, a new-messages pill and unread counts; works in landscape and while spectating.
+- Verified: mic 8/8, chat log 6/7 (one 250 ms landscape timing sample), fuzz clean, smoke 30/30 (landscape path re-run alone), online 35/35.
+
 ## 10.2.2 (November 2026)
 - **Voice chat on iPhone (owner report: app and Safari both said "no mic" even with the microphone allowed):** `audio.js` set `navigator.audioSession.type = 'playback'` (Safari 16.4+) so game sound plays through the silent switch. That session type refuses microphone capture. `getMic()` now switches to `'play-and-record'` before asking, restores `'playback'` on failure or when leaving voice, and resumes game audio after the switch; `audio.js` no longer overrides the session while voice holds the mic. Verified against a simulated Safari audio session (old code: NotReadableError, "No microphone found"; new: mic live).
 

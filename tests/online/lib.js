@@ -165,7 +165,10 @@ async function advancing(p, ms = 4000) {
   const a = await view(p); await sleep(ms); const b = await view(p);
   return { from: a.turnNo, to: b.turnNo, moved: b.turnNo != null && a.turnNo != null && b.turnNo > a.turnNo };
 }
-async function waitFor(p, fn, arg, ms = 10000) { try { await p.waitForFunction(fn, arg, { timeout: ms }); return true; } catch { return false; } }
+async function waitFor(p, fn, arg, ms = 10000) {
+  // Q 10.3: waitForFunction does not await a Promise returned by an async predicate (it is truthy at once), so poll those
+  if (typeof fn === 'function' && fn.constructor && fn.constructor.name === 'AsyncFunction') { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch {} await sleep(150); } return false; }
+  try { await p.waitForFunction(fn, arg, { timeout: ms }); return true; } catch { return false; } }
 const waitResults = (p, ms = 12000) => waitFor(p, () => !document.querySelector('#m-results').classList.contains('hidden'), null, ms);
 const waitDead = (p, ms = 6000) => waitFor(p, () => !document.querySelector('#m-dead').classList.contains('hidden'), null, ms);
 

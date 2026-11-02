@@ -10,7 +10,7 @@
 // Host -> sender when throttled:  { t: 'chat', a: 'slow' }
 import { EMOTES, EMOTE_PACKS } from './data.js';
 
-export const MAX_CUSTOM = 12, CUSTOM_LEN = 40, FAV_SLOTS = 8, RECENT_MAX = 10;
+export const MAX_CUSTOM = 12, CUSTOM_LEN = 40, FAV_SLOTS = 8, RECENT_MAX = 10, LOG_MAX = 300, STRIP_ROWS = 3;
 
 // ---------------------------------------------------------------- phrases
 export const CATS = [
@@ -159,23 +159,31 @@ const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) 
 const TABS = [['fav', 'Faves'], ['recent', 'Recent'], ...CATS.map((c) => [c.id, c.name]), ['packs', 'Packs'], ['mine', 'Mine'], ['log', 'Log'], ['players', 'Players']];
 
 export class ChatUI {
-  constructor() { this.tab = 'fav'; this.log = []; this.muted = new Set(); this.teamOnly = false; this.mounted = false; this.rows = []; this.rl = {}; this.sessKey = null; }
+  constructor() { this.tab = 'fav'; this.log = []; this.muted = new Set(); this.teamOnly = false; this.mounted = false; this.rl = {}; this.sessKey = null; this.unread = 0; this.lastAt = 0; }
   // deps: { profile(), save(), settings, saveSettings(), activeEmotes(profile), game, session(), toast(msg), sfx, director, voice }
   mount(deps) {
     if (this.mounted) return; this.mounted = true; this.d = deps;
     this.menu = $('#emote-menu'); this.menu.classList.add('qc'); this.menu.setAttribute('role', 'dialog'); this.menu.setAttribute('aria-label', 'Quick chat');
+    // 10.3: the strip (last 3 lines, always on in matches) and the full history sheet
     this.logEl = el('div', 'chat-log'); this.logEl.id = 'chat-log'; this.logEl.setAttribute('aria-live', 'polite'); $('#s-game').appendChild(this.logEl);
+    this.logEl.addEventListener('click', (e) => { if (e.target.closest('.cl-row')) { this.openSheet(); this.d.sfx && this.d.sfx.tap(); } });
     if (deps.director && deps.director.claim) deps.director.claim(this.logEl);
+    this.buildSheet();
     this.menu.addEventListener('click', (e) => this.onClick(e));
     this.menu.addEventListener('input', (e) => { const r = e.target.closest('[data-vol]'); if (r && this.d.voice) this.d.voice.setVolume(r.dataset.vol, +r.value); });
     this.buildModal();
     this.bindSettings();
     setInterval(() => this.tickLog(), 250);
+    // while the strip has lines in a match, track every other frame so it steps aside before a cine band or a
+    // gliding piece settles under it
+    const game = $('#s-game'); let fr = 0;
+    const loop = () => { requestAnimationFrame(loop); if ((fr++ & 1) || !this.logEl.childElementCount || !game.classList.contains('active') || document.hidden) return; this.tickLog(); };
+    requestAnimationFrame(loop);
   }
   get p() { return this.d.profile(); }
   get c() { return ensureChat(this.p); }
   inMatch() { const g = this.d.game; return !!(g && g.s && this.d.session()); }
-  resetSession(key) { if (key === this.sessKey) return; this.sessKey = key; this.muted.clear(); this.log = []; this.rl = {}; this.teamOnly = false; for (const r of this.rows) r.el.remove(); this.rows = []; }
+  resetSession(key) { if (key === this.sessKey) return; this.sessKey = key; this.muted.clear(); this.rl = {}; this.teamOnly = false; this.clearHistory(); }
 
   // ---- references: preset id, store emote id, or 'c:N' for a custom phrase
   refText(r) { if (typeof r !== 'string') return null; if (r.startsWith('c:')) return this.c.custom[+r.slice(2)] || null; return presetText(r); }
@@ -202,9 +210,9 @@ export class ChatUI {
     const c = this.c, m = this.menu; m.textContent = '';
     if (this.tab === 'fav' && !this.listFor('fav').length) this.tab = 'tactic';
     if (this.tab === 'recent' && !c.recent.length) this.tab = 'fav';
+    if (this.tab === 'log') this.tab = 'fav'; // the Log tab opens the history sheet
     const body = el('div', 'qc-body'); body.dataset.tab = this.tab;
-    if (this.tab === 'log') this.renderLog(body);
-    else if (this.tab === 'players') this.renderPlayers(body);
+    if (this.tab === 'players') this.renderPlayers(body);
     else {
       const list = this.listFor(this.tab);
       if (!list.length) body.appendChild(el('p', 'qc-empty', this.tab === 'mine' ? 'No phrases yet. Tap Customise to write up to 12 of your own.' : 'Nothing here yet.'));
@@ -214,7 +222,7 @@ export class ChatUI {
     for (const [id, name] of TABS) {
       if (id === 'team' && this.d.game && this.d.game.s && !this.d.game.s.teams && !this.d.game.s.siege) continue; // squad callouts only where there are teammates
       if (id === 'packs' && !this.listFor('packs').length) continue;
-      const b = el('button', 'qc-tab' + (id === this.tab ? ' on' : ''), name); b.dataset.tab = id; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', id === this.tab ? 'true' : 'false'); tabs.appendChild(b);
+      const b = el('button', 'qc-tab' + (id === this.tab ? ' on' : ''), id === 'log' && this.unread ? `${name} (${this.unread > 9 ? '9+' : this.unread})` : name); b.dataset.tab = id; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', id === this.tab ? 'true' : 'false'); tabs.appendChild(b);
     }
     const foot = el('div', 'qc-foot');
     if (this.teams()) { const t = el('button', 'qc-team' + (this.teamOnly ? ' on' : ''), this.teamOnly ? 'Team only: On' : 'Team only: Off'); t.dataset.qc = 'team'; t.setAttribute('aria-pressed', this.teamOnly ? 'true' : 'false'); foot.appendChild(t); }
@@ -222,10 +230,6 @@ export class ChatUI {
     const cl = el('button', 'qc-close', 'Close'); cl.dataset.qc = 'close'; cl.setAttribute('aria-label', 'Close quick chat'); foot.appendChild(cl);
     m.append(body, tabs, foot);
     const on = tabs.querySelector('.on'); if (on) requestAnimationFrame(() => { try { on.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch {} });
-  }
-  renderLog(body) {
-    if (!this.log.length) { body.appendChild(el('p', 'qc-empty', 'No messages yet.')); return; }
-    for (const L of this.log.slice(-30).reverse()) { const row = el('div', 'qc-logrow'); const n = el('b', '', L.name); n.style.color = L.color || ''; row.append(n, document.createTextNode(' ' + L.text)); if (L.tm) row.prepend(el('i', 'qc-tm', 'Team')); body.appendChild(row); }
   }
   renderPlayers(body) {
     const g = this.d.game, s = g && g.s, sess = this.d.session(), V = this.d.voice;
@@ -244,9 +248,10 @@ export class ChatUI {
   onClick(e) {
     const t = e.target.closest('button'); if (!t || !this.menu.contains(t)) return;
     const sfx = this.d.sfx;
+    if (t.dataset.tab === 'log') { this.close(); this.openSheet(); sfx && sfx.tap(); return; }
     if (t.dataset.tab) { this.tab = t.dataset.tab; this.render(); sfx && sfx.tap(); return; }
     if (t.dataset.say) { this.say(t.dataset.say); this.close(); return; }
-    if (t.dataset.mute) { const pid = t.dataset.mute; if (this.muted.has(pid)) this.muted.delete(pid); else this.muted.add(pid); this.render(); sfx && sfx.tap(); return; }
+    if (t.dataset.mute) { const pid = t.dataset.mute; if (this.muted.has(pid)) this.muted.delete(pid); else this.muted.add(pid); this.render(); this.renderStrip(); if (this.sheetOpen()) this.renderSheet(); sfx && sfx.tap(); return; }
     if (t.dataset.vc && this.d.voice) { this.d.voice.onControl(t.dataset.vc, t.dataset.pid); setTimeout(() => this.tab === 'players' && !this.menu.classList.contains('hidden') && this.render(), 50); return; }
     const q = t.dataset.qc;
     if (q === 'team') { this.teamOnly = !this.teamOnly; this.render(); sfx && sfx.tap(); }
@@ -285,40 +290,153 @@ export class ChatUI {
     if (!text) return;
     if (m.tm && g.me && !mine && u.team !== g.me.team) return; // a team message that reached the wrong side
     if (u.alive && g.r) g.r.emote(u.id, text);
-    const entry = { name: u.name, color: u.color, text, tm: !!m.tm, custom, at: Date.now() };
-    this.log.push(entry); if (this.log.length > 60) this.log.shift();
-    this.addRow(entry);
+    const entry = { pid: u.pid, name: u.name, color: u.color, text, tm: !!m.tm, custom, mine, at: Date.now() };
+    this.push(entry);
     this.d.sfx && this.d.sfx.emote && this.d.sfx.emote();
-    if (!this.menu.classList.contains('hidden') && this.tab === 'log') this.render();
   }
-  // mini log: up to 3 rows above the chat button, yields to any Director message it would touch
-  addRow(L) {
-    const row = el('div', 'cl-row' + (L.tm ? ' tm' : ''));
-    const n = el('b', '', L.name); n.style.color = L.color || ''; row.append(n, document.createTextNode(' ' + L.text));
-    if (L.tm) row.prepend(el('i', '', 'Team'));
-    this.logEl.appendChild(row); this.rows.push({ el: row, born: performance.now(), until: performance.now() + 6500 });
-    while (this.rows.length > 3) this.rows.shift().el.remove();
+  // system lines (voice joins and leaves): history sheet only, never the strip, never unread
+  system(text) {
+    const g = this.d && this.d.game; if (!g || !g.s || !this.d.session() || typeof text !== 'string') return;
+    this.push({ sys: true, text: text.slice(0, 80), at: Date.now() });
+  }
+  push(L) {
+    this.log.push(L); if (this.log.length > LOG_MAX) this.log.splice(0, this.log.length - LOG_MAX);
+    if (!L.sys) { this.lastAt = performance.now(); this.renderStrip(true); }
+    this.appendSheet(L);
     this.tickLog(true);
   }
+  shown(L) { return L.sys || !this.muted.has(L.pid); }
+  clearHistory() { this.log = []; this.unread = 0; this.renderStrip(); if (this.sheet) { this.sheetList.textContent = ''; this.closeSheet(); } this.badge(); }
+
+  // ---- strip: the last 3 lines above the chat button. Older lines fade, the strip dims when idle, and it yields to
+  // any Director message it would touch (the Director avoids it too: claim()). Tap it to open the history.
+  renderStrip(fresh) {
+    if (!this.logEl) return;
+    const rows = this.log.filter((L) => !L.sys && this.shown(L)).slice(-STRIP_ROWS);
+    this.logEl.textContent = '';
+    rows.forEach((L, i) => {
+      const age = rows.length - 1 - i;
+      const row = el('div', `cl-row a${age}` + (L.tm ? ' tm' : '') + (fresh && age === 0 ? ' new' : ''));
+      if (L.tm) row.appendChild(el('i', '', 'Team'));
+      const n = el('b', '', L.name); n.style.color = L.color || ''; row.append(n, document.createTextNode(' ' + L.text));
+      this.logEl.appendChild(row);
+    });
+    this.stripRows = rows;
+  }
+  stripOff() { return !!this.d.settings.chatStripOff; }
   tickLog(force) {
     if (!this.logEl) return;
-    const t = performance.now(), dt = Math.min(500, t - (this.logAt || t)); this.logAt = t;
     if (this.menu.classList.contains('hidden')) this.wrapOpen(false); else this.holdDir(); // closed by other code (board tap, new match)
-    // rows wait while the log is yielded (a tip or callout is in the way), up to 12 s, so a line is not missed
-    if (this.logEl.classList.contains('yield') && !force) for (const r of this.rows) if (t - r.born < 12000) r.until += dt;
-    for (const r of this.rows) if (t > r.until && !r.out) { r.out = true; r.el.classList.add('out'); setTimeout(() => r.el.remove(), 300); }
-    this.rows = this.rows.filter((r) => !r.out);
-    const wrap = $('.emote-wrap');
-    if (wrap && wrap.offsetParent) { const btn = wrap.querySelector('.emote-btn'); const top = (this.menu.classList.contains('hidden') ? wrap : btn).getBoundingClientRect().top; this.logEl.style.bottom = Math.max(8, Math.round(innerHeight - top + 8)) + 'px'; }
-    let yieldIt = !this.menu.classList.contains('hidden') || !this.rows.length;
-    if (!yieldIt && this.d.director && this.d.director.occupied) {
-      const me = this.logEl.getBoundingClientRect();
-      const o = this.d.director.occupied().filter((r) => !(Math.abs(r.x - (me.left - 4)) < 2 && Math.abs(r.y - (me.top - 4)) < 2));
-      yieldIt = o.some((r) => r.x < me.right && r.x + r.w > me.left && r.y < me.bottom && r.y + r.h > me.top);
-    }
+    const wrap = $('.emote-wrap'); let base = null;
+    if (wrap && wrap.offsetParent) { const btn = wrap.querySelector('.emote-btn'); const top = (this.menu.classList.contains('hidden') ? wrap : btn).getBoundingClientRect().top; base = Math.max(8, Math.round(innerHeight - top + 8)); }
+    let yieldIt = this.stripOff() || this.sheetOpen() || !this.menu.classList.contains('hidden') || !this.logEl.childElementCount;
+    if (!yieldIt && this.d.director && this.d.director.cineActive && this.d.director.cineActive()) yieldIt = true; // ultimate cinematics own the screen
+    if (!yieldIt && base != null) {
+      // Dodge, then yield: if a Director message (hint, callout, cine band, lethal...) or my / the active piece is
+      // under the strip, lift it just above the obstacle (not higher than 30% from the top); hide it only if that fails.
+      const me = this.logEl.getBoundingClientRect(), H = this.logEl.offsetHeight;
+      const D = this.d.director;
+      const occ = D && D.occupied ? D.occupied().filter((r) => !(Math.abs(r.x - (me.left - 4)) < 3 && Math.abs(r.w - (me.width + 8)) < 3)) : [];
+      const obs = occ.concat(this.pieceRects());
+      const hits = (b) => { const t = innerHeight - b - H, bt = innerHeight - b; return obs.filter((r) => r.x < me.right && r.x + r.w > me.left && r.y < bt && r.y + r.h > t); };
+      let b = base, ok = false;
+      for (let i = 0; i < 4; i++) {
+        const hh = hits(b); if (!hh.length) { ok = true; break; }
+        const nb = Math.round(innerHeight - Math.min(...hh.map((r) => r.y)) + 6);
+        if (nb <= b || innerHeight - nb - H < innerHeight * 0.3) break;
+        b = nb;
+      }
+      if (ok) this.logEl.style.bottom = b + 'px'; else yieldIt = true;
+    } else if (base != null) this.logEl.style.bottom = base + 'px';
     this.logEl.classList.toggle('yield', yieldIt);
+    this.logEl.classList.toggle('idle', performance.now() - this.lastAt > 10000);
+    // on my turn the strip lets taps through to the board (the log stays one tap away: chat button > Log)
+    const g = this.d.game; let mine = false; try { mine = !!(g && g.s && g.myTurn && g.myTurn()); } catch {}
+    this.logEl.classList.toggle('pass', mine);
+    // unread: lines nobody could see (strip hidden, yielded or switched off, or older than the 3 it shows)
+    const stripVisible = !yieldIt && !!this.logEl.offsetParent && getComputedStyle(this.logEl).visibility !== 'hidden';
+    if (this.sheetOpen()) { for (const L of this.log) L.seen = true; }
+    else if (stripVisible) for (const L of this.stripRows || []) L.seen = true;
+    const n = this.log.reduce((a, L) => a + (!L.seen && !L.sys && !L.mine && this.shown(L) ? 1 : 0), 0);
+    if (n !== this.unread || force) { this.unread = n; this.badge(); }
   }
-  clearMatch() { for (const r of this.rows) r.el.remove(); this.rows = []; this.close(); }
+  pieceRects() {
+    const g = this.d.game, r = g && g.r, s = g && g.s, out = []; if (!r || !s || !r.disp || !r.toScreen || !r.c) return out;
+    const c = r.c.getBoundingClientRect(), h = Math.max(14, r.z * 0.5);
+    for (const id of new Set([r.myId, s.active])) {
+      const d = id != null && r.disp.get(id), u = d && s.units.find((v) => v.id === id); if (!u || !u.alive) continue;
+      const [sx, sy] = r.toScreen(d.x + 0.5, d.y + 0.5), m = 10; // margin: the camera and pieces glide between checks
+      out.push({ x: c.left + sx - h - m, y: c.top + sy - h * 1.5 - m, w: 2 * h + 2 * m, h: 2.4 * h + 2 * m });
+    }
+    return out;
+  }
+  badge() {
+    const btn = $('.emote-wrap .emote-btn'); if (!btn) return;
+    let b = btn.querySelector('.qc-badge');
+    if (!this.unread) { if (b) b.remove(); btn.setAttribute('aria-label', 'Quick chat'); return; }
+    if (!b) { b = el('b', 'qc-badge'); b.setAttribute('aria-hidden', 'true'); btn.appendChild(b); }
+    b.textContent = this.unread > 9 ? '9+' : String(this.unread);
+    btn.setAttribute('aria-label', `Quick chat, ${this.unread} unread`);
+    const lt = this.menu && this.menu.querySelector('[data-tab="log"]'); if (lt) lt.textContent = `Log (${b.textContent})`;
+  }
+  clearMatch() { this.clearHistory(); this.close(); }
+
+  // ---- history sheet: the whole match (up to 300 lines), newest at the bottom, sticks to the bottom unless the
+  // player scrolled up (then a "new messages" pill). Bottom sheet in portrait, a left panel beside the HUD in landscape.
+  buildSheet() {
+    const s = el('section', 'chat-sheet hidden'); s.id = 'chat-sheet'; s.setAttribute('role', 'dialog'); s.setAttribute('aria-label', 'Chat log');
+    s.innerHTML = `<header class="cs-head"><b>Chat</b><small class="cs-n"></small><button class="cs-strip" data-cs="strip"></button><button class="cs-close" data-cs="close" aria-label="Close chat log">Close</button></header>
+      <div class="cs-list" role="log" aria-live="off" tabindex="0"></div><button class="cs-new hidden" data-cs="bottom">New messages</button>
+      <footer class="cs-foot"><button class="cs-say" data-cs="say">Quick Chat</button></footer>`;
+    $('#s-game').appendChild(s); this.sheet = s; this.sheetList = s.querySelector('.cs-list'); this.newPill = s.querySelector('.cs-new');
+    s.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cs]'); if (!b) return; const a = b.dataset.cs, sfx = this.d.sfx;
+      if (a === 'close') this.closeSheet();
+      else if (a === 'bottom') this.toBottom(true);
+      else if (a === 'strip') { this.d.settings.chatStripOff = !this.d.settings.chatStripOff; this.d.saveSettings(); this.syncSheetHead(); for (const t of document.querySelectorAll('[data-chatset="chatStripOff"]')) t.checked = !!this.d.settings.chatStripOff; }
+      else if (a === 'say') { this.closeSheet(); this.open(); }
+      sfx && sfx.tap && sfx.tap();
+    });
+    this.sheetList.addEventListener('scroll', () => { if (this.atBottom()) this.newPill.classList.add('hidden'); }, { passive: true });
+    addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.sheetOpen()) this.closeSheet(); });
+  }
+  sheetOpen() { return !!(this.sheet && !this.sheet.classList.contains('hidden')); }
+  openSheet() { if (!this.sheet) return; this.close(); this.renderSheet(); this.sheet.classList.remove('hidden'); this.toBottom(); this.tickLog(true); try { this.sheet.querySelector('.cs-close').focus({ preventScroll: true }); } catch {} }
+  closeSheet() { if (!this.sheet || !this.sheetOpen()) return; this.sheet.classList.add('hidden'); this.newPill.classList.add('hidden'); this.tickLog(true); }
+  toggleSheet() { if (this.sheetOpen()) this.closeSheet(); else this.openSheet(); }
+  atBottom() { const l = this.sheetList; return l.scrollHeight - l.scrollTop - l.clientHeight < 24; }
+  toBottom(smooth) { const l = this.sheetList; if (!l) return; try { l.scrollTo({ top: l.scrollHeight, behavior: smooth && !this.d.settings.motion ? 'smooth' : 'auto' }); } catch { l.scrollTop = l.scrollHeight; } this.newPill.classList.add('hidden'); }
+  syncSheetHead() {
+    if (!this.sheet) return; const n = this.log.filter((L) => !L.sys && this.shown(L)).length;
+    this.sheet.querySelector('.cs-n').textContent = n ? `${n} message${n === 1 ? '' : 's'}` : '';
+    const b = this.sheet.querySelector('.cs-strip'), on = !this.stripOff(); b.textContent = on ? 'On board: On' : 'On board: Off'; b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.classList.toggle('on', on);
+  }
+  sheetRow(L) {
+    const r = el('div', 'cs-row' + (L.sys ? ' sys' : '') + (L.tm ? ' tm' : '') + (L.mine ? ' mine' : ''));
+    let t = ''; try { t = new Date(L.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch {}
+    r.appendChild(el('time', '', t));
+    if (L.sys) { r.appendChild(el('span', 'cs-t', L.text)); return r; }
+    if (L.tm) r.appendChild(el('i', 'qc-tm', 'Team'));
+    const n = el('b', '', L.name); n.style.color = L.color || ''; r.appendChild(n);
+    r.appendChild(el('span', 'cs-t', L.text)); // plain text only, even for custom phrases
+    return r;
+  }
+  renderSheet() {
+    if (!this.sheet) return; const l = this.sheetList; l.textContent = '';
+    const rows = this.log.filter((L) => this.shown(L));
+    if (!rows.length) l.appendChild(el('p', 'qc-empty cs-empty', 'No messages yet. Tap Quick Chat to say something.'));
+    for (const L of rows) l.appendChild(this.sheetRow(L));
+    this.syncSheetHead();
+  }
+  appendSheet(L) {
+    if (!this.sheetOpen()) return;
+    const stick = this.atBottom(), l = this.sheetList;
+    const e = l.querySelector('.cs-empty'); if (e) e.remove();
+    l.appendChild(this.sheetRow(L));
+    while (l.childElementCount > LOG_MAX) l.firstElementChild.remove();
+    this.syncSheetHead();
+    if (stick || L.mine) this.toBottom(); else if (!L.sys) this.newPill.classList.remove('hidden');
+  }
 
   // ---- customisation screen
   buildModal() {

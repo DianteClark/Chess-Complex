@@ -109,7 +109,7 @@
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
     <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v10.2.2</div>
+    <div class="version">v10.3</div>
   </section>
 
   <!-- LOADOUT -->
@@ -471,6 +471,7 @@
     <label class="setting toggle"><span>Vibration</span><input type="checkbox" id="set-haptics"><i></i></label>
     <label class="setting toggle"><span>Reduced Motion<small>No slow-mo, flashes or camera punches</small></span><input type="checkbox" id="set-motion"><i></i></label>
     <label class="setting toggle"><span>One-Tap Attacks<small>Skip the preview tap</small></span><input type="checkbox" id="set-onetap"><i></i></label>
+    <div class="setting cam-set"><span>Camera<small id="set-cam-desc">Follow every turn</small></span><div class="seg small" id="set-cam" role="group" aria-label="Camera"><button data-cam="all" aria-label="Follow every turn">Every turn</button><button data-cam="mine" aria-label="Follow my turns only">My turns</button><button data-cam="free" aria-label="Free camera">Free</button></div></div>
     <div class="set-sec">Display</div>
     <div class="setting"><span>Graphics</span><div class="seg small" id="set-quality"><button data-q="auto">Auto</button><button data-q="high">High</button><button data-q="low">Low</button></div></div>
     <label class="setting toggle"><span>Colorblind Colors</span><input type="checkbox" id="set-cb"><i></i></label>
@@ -479,6 +480,11 @@
     <button class="btn small wide" id="btn-chat-custom">Customise Quick Chat</button>
     <label class="setting toggle"><span>Preset Chat Only<small>Hide phrases other players typed themselves</small></span><input type="checkbox" data-chatset="chatPresetOnly"><i></i></label>
     <label class="setting toggle"><span>Hide Chat From Others<small>No bubbles or log from other players</small></span><input type="checkbox" data-chatset="chatOff"><i></i></label>
+    <label class="setting toggle"><span>Hide Chat Strip<small>Keep the last 3 messages off the board. Read them in Quick Chat &gt; Log</small></span><input type="checkbox" data-chatset="chatStripOff"><i></i></label>
+    <div class="setting mic-row" id="mic-row"><span>Microphone<small id="mic-state">Will ask</small></span><div class="mic-btns"><button class="btn small gold" data-mic-act="allow">Allow Microphone</button><button class="btn small" data-mic-act="test">Test Microphone</button></div></div>
+    <div class="mic-meter" id="mic-meter" hidden role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+    <p class="set-note mic-note" id="mic-note" hidden></p>
+    <div class="vc-err mic-help" id="mic-help" hidden></div>
     <p class="set-note vc-privacy" id="vc-privacy"><b>Voice chat privacy.</b> Voice is off until you tap Join Voice in an online lobby or match, and it is never turned on for you. Audio goes directly to the players in your room (peer to peer, sometimes through a relay server) and is never recorded or stored. Your microphone is only live while you hold the Talk button, or while Open Mic is on. You can mute or turn down any player.</p>
     <div class="set-sec">Profile</div>
     <div class="row2"><button class="btn small" data-act="export-profile">Copy Backup Code</button><button class="btn small" data-act="import-profile">Restore Backup</button></div>

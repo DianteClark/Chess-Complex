@@ -1,6 +1,7 @@
 // Networking: friend-code rooms over WebRTC (PeerJS), plus a same-browser transport for testing.
 import { createMatch, applyAction, planBot, planHollow, unitById } from './engine.js';
 import { TURN_MS } from './data.js';
+const TURN_GRACE = 2000; // the client shows each turn ~1-1.5 s after it starts (camera beats); don't charge that to the player
 
 const PREFIX = 'chesscomplex-v1-';
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -96,7 +97,7 @@ export class GameHost {
     clearTimeout(this.aiT); clearTimeout(this.timerT);
     const s = this.s; if (s.over) return;
     const u = unitById(s, s.active); if (!u) return;
-    if (s.turnNo !== this.lastTurn) { this.lastTurn = s.turnNo; this.deadline = this.noTimer ? 0 : Date.now() + ((this.s.rules && this.s.rules.turnMs) || TURN_MS); if (!(u.kind === 'hollow' || u.bot)) this.publish([]); else this.deadline = 0; }
+    if (s.turnNo !== this.lastTurn) { this.lastTurn = s.turnNo; this.deadline = this.noTimer ? 0 : Date.now() + ((this.s.rules && this.s.rules.turnMs) || TURN_MS) + TURN_GRACE; if (!(u.kind === 'hollow' || u.bot)) this.publish([]); else this.deadline = 0; }
     if (u.kind === 'hollow' || u.bot) {
       const turn = s.turnNo;
       this.aiT = setTimeout(() => this.runAI(u.id, turn), this.fast ? 0 : u.kind === 'hollow' ? 260 : 520);

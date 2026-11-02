@@ -5,6 +5,7 @@ import { hiSprite } from './fx.js';
 import { ringOf, stats, unitById, previewDamage } from './engine.js';
 import { FX } from './fx.js';
 import * as W10 from './world.js'; // A5 10.0: materials, lighting, void, weather, overlays
+import { CamDirector } from './camdir.js'; // R 10.3: turn-by-turn camera beats
 import * as HZ from './hazards10.js'; // A9 10.0: fallback visuals for new hazard tiles / unit states
 
 const ease = (t) => 1 - Math.pow(1 - t, 3);
@@ -90,7 +91,7 @@ export class Renderer {
     this.c = canvas; this.x = canvas.getContext('2d');
     this.hooks = hooks;
     this.cam = { x: SIZE / 2, y: SIZE / 2, z: 40, tx: SIZE / 2, ty: SIZE / 2, tz: 40 };
-    this.fx = new FX();
+    this.fx = new FX(); this.cd = new CamDirector(this); this.beats = [];
     this.disp = new Map(); this.floats = []; this.bubbles = [];
     this.shake = 0; this.time = 0; this.real = 0; this.state = null; this.overlay = null; this.myId = null;
     this.hitFlash = new Map(); this.follow = true; this.hs = 0; this.slow = null; this.punch = 0;
@@ -124,7 +125,11 @@ export class Renderer {
   lookOf() { if (!this.look || this.look.th !== this.theme) { this.look = W10.lookOf(this.themeId, this.theme); this.look.th = this.theme; } return this.look; }
   light(x, y, col, rad, life, a) { W10.addLight(this, x, y, col, rad, life, a); }
   // cinematic framing: briefly push the camera in on a big moment, then hand control back
-  shot(x, y, zMul = 1.2, dur = 1) { if (this.reduced) return; this.focus(x, y); if (!this.shotEnd) this.shotPrevZ = this.cam.tz; this.cam.tz = Math.min(this.maxZ, this.defaultZoom() * zMul); this.shotEnd = this.real + dur; }
+  // R 10.3: shots go through the camera director (respects the Camera setting, a finger on the board and a manual pan)
+  shot(x, y, zMul = 1.2, dur = 1, kind = 'shot', actor) { if (this.reduced) return; this.cd.shot(x + 0.5, y + 0.5, zMul, dur, { kind, actor }); }
+  // R 10.3: 'follow' is the director's view of a manual override (false after a pan/pinch until my turn or a recentre)
+  get follow() { return !this.cd.user; }
+  set follow(v) { this.cd.user = !v; if (v) { this.cd.watch = null; this.cd.specSet = false; } }
   resize() {
     const full = Math.min(2, devicePixelRatio || 1), dpr = this.lowQ ? 1 : this.quality === 'auto' && this.aq && this.aq.tier === 1 ? Math.min(full, 1.5) : full;
     if (this.aq) this.aq.warm = Math.max(this.aq.warm, 0.6);
@@ -153,33 +158,57 @@ export class Renderer {
   // U 10.2: a finger on the board stops any camera glide (follow, focus, cinematic shot) where it is, like touching a
   // flung map, so the board holds still under a tap and its confirm. Not during the intro fly-over.
   hold() {
-    const c = this.cam; if (this.intro && this.intro.fly && this.intro.t < 1.7) return;
-    c.tx = c.x; c.ty = c.y; c.tz = c.z; c.vx = c.vy = c.vz = 0; if (this.shotEnd) { this.shotEnd = null; this.shotPrevZ = null; }
+    if (this.intro && this.intro.fly && this.intro.t < 1.7) return;
+    this.cd.hold(); // R 10.3: frozen until release(); an interrupted spectator glide resumes shortly after the finger lifts
   }
+  release() { this.cd.release(); }
   tileAtScreen(sx, sy) { const [wx, wy] = this.toWorld(sx, sy); const x = Math.floor(wx), y = Math.floor(wy); return x >= 0 && y >= 0 && x < SIZE && y < SIZE ? { x, y } : null; }
-  focus(x, y) { this.cam.tx = x + 0.5; this.cam.ty = y + 0.5; }
+  // R 10.3: an explicit look (callers outside the turn director): eased glide, never a snap
+  focus(x, y) { this.cd.glide(x + 0.5, y + 0.5, null, { force: true }); }
+  // the recentre tap: hand the camera back to the director and glide to the piece
+  recentre(x, y) { this.cd.user = false; this.cd.watch = null; this.cd.glide(x + 0.5, y + 0.5, this.defaultZoom(), { force: true }); }
+  // spectator target: null follows every turn, an id follows that piece's turns (idempotent: called on every update)
+  spectate(id) { const cd = this.cd; if (cd.specSet && cd.watch === id) return; cd.specSet = true; cd.watch = id; cd.user = false; const d = this.disp.get(id ?? (this.state && this.state.active)); if (d) cd.glide(d.tx + 0.5, d.ty + 0.5, null, { force: true }); }
+  setCamMode(m) { this.cd.mode = m === 'mine' || m === 'free' ? m : 'all'; }
+  // real ms until the visuals of the latest state start playing (callouts wait this long so they land with the action)
+  leadMs() { return Math.max(0, ((this.lastBase ?? this.time) - this.time) / (this.cd.speed || 1)) * 1000; }
   zoomBy(f, sx = this.CX ?? this.W / 2, sy = this.CY) {
     const [wx, wy] = this.toWorld(sx, sy);
     this.cam.z = this.cam.tz = Math.max(this.minZ, Math.min(this.maxZ, this.cam.z * f));
-    this.zoomSet = true; this.cam.vx = this.cam.vy = this.cam.vz = 0; this.shotEnd = null;
+    this.zoomSet = true; this.cam.vx = this.cam.vy = this.cam.vz = 0; this.cd.manual();
     const [nx, ny] = this.toWorld(sx, sy);
     this.cam.x += wx - nx; this.cam.y += wy - ny; this.cam.tx = this.cam.x; this.cam.ty = this.cam.y;
   }
-  pan(dx, dy) { this.cam.x -= dx / this.z; this.cam.y -= dy / this.z; this.cam.tx = this.cam.x; this.cam.ty = this.cam.y; this.cam.vx = this.cam.vy = 0; this.follow = false; }
-  overview() { this.cam.tz = this.fitZoom; const b = this.bounds; this.cam.tx = b ? (b.x0 + b.x1 + 1) / 2 : SIZE / 2; this.cam.ty = b ? (b.y0 + b.y1 + 1) / 2 : SIZE / 2; this.zoomSet = true; }
-  closeup() { this.cam.tz = this.defaultZoom(); this.follow = true; this.zoomSet = true; }
-  reset() { this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; this.banner = null; this.dim = null; this.lights = []; this.shotEnd = null; this.fcache = null; }
+  pan(dx, dy) { this.cam.x -= dx / this.z; this.cam.y -= dy / this.z; this.cam.tx = this.cam.x; this.cam.ty = this.cam.y; this.cam.vx = this.cam.vy = 0; this.cd.manual(); }
+  overview() { const b = this.bounds; this.cd.manual(); this.cd.glide(b ? (b.x0 + b.x1 + 1) / 2 : SIZE / 2, b ? (b.y0 + b.y1 + 1) / 2 : SIZE / 2, this.fitZoom, { force: true }); this.zoomSet = true; }
+  closeup() { const cd = this.cd; cd.user = false; this.zoomSet = true; const d = this.disp.get(this.state && this.state.active); if (d) cd.glide(d.tx + 0.5, d.ty + 0.5, this.defaultZoom(), { force: true }); else cd.glide(null, null, this.defaultZoom(), { force: true }); }
+  reset() { this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; this.banner = null; this.dim = null; this.lights = []; this.fcache = null; this.cd.reset(); this.beats = []; this.cineFree = 0; this.lastActEnd = 0; this.introEnd = 0; this.lastBase = null; }
 
   kick(n) { if (this.shakeOn && !this.reduced) this.shake = Math.min(16, this.shake + n); }
   hitstop(t) { if (!this.reduced) this.hs = Math.max(this.hs, t); }
   slowmo(scale, dur) { if (!this.reduced) this.slow = { scale, dur, t: 0 }; }
-  later(t, fn) { this.timers.push({ at: (this.base ?? this.time) + t, fn }); }
+  later(t, fn) { const T = { at: (this.base ?? this.time) + t, fn }; this.timers.push(T); return T; }
+  camAt(t, fn) { this.later(t, fn).cam = true; } // R 10.3: a camera keyframe (compress() may drop it)
+  // R 10.3: far behind (many fast bot turns queued): the current beat plays out untouched; everything after it is
+  // squeezed into ~1.5 s in order (no snap, no lost events) and only the last camera keyframe of that stretch is kept.
+  compress() {
+    const nb = this.beats.find((b) => b.at > this.time), E = nb ? nb.at : this.time, end = this.seqEnd || 0, span = end - E;
+    if (span <= 1.6) return;
+    const k = 1.5 / span, f = (a) => (a > E ? E + (a - E) * k : a);
+    let last = null; for (const T of this.timers) if (T.cam && T.at > E && (!last || T.at >= last.at)) last = T;
+    this.timers = this.timers.filter((T) => !(T.cam && T.at > E && T !== last));
+    for (const T of this.timers) T.at = f(T.at);
+    for (const d of this.disp.values()) { if (d.deathAt != null) d.deathAt = f(d.deathAt); if (d.hideUntil != null) d.hideUntil = f(d.hideUntil); if (d.drop && !d.drop.landed) d.drop.t0 = f(d.drop.t0); }
+    for (const b of this.beats) b.at = f(b.at);
+    this.seqEnd = f(end); this.cineFree = f(this.cineFree || 0); this.lastActEnd = f(this.lastActEnd || 0); if (this.cd.myTurnAt > E) this.cd.myTurnAt = f(this.cd.myTurnAt);
+    this.cd.stats.compress++;
+  }
   flush() {
     const due = this.timers.sort((a, b) => a.at - b.at); this.timers = [];
     const saveBase = this.base; this.base = this.time;
     for (const t of due) t.fn();
     this.base = saveBase;
-    this.seqEnd = this.time;
+    this.seqEnd = this.time; this.beats = []; this.cineFree = 0; this.lastActEnd = 0; this.cd.myTurnAt = -1; this.cd.stats.flush++;
     for (const d of this.disp.values()) { d.t0 = -9; d.x = d.sx = d.tx; d.y = d.sy = d.ty; d.lunge = null; d.warp = null; }
   }
   sfx(n) { this.hooks.sfx && this.hooks.sfx(n); }
@@ -203,7 +232,8 @@ export class Renderer {
   emote(id, text) { this.bubbles = this.bubbles.filter((b) => b.id !== id); this.bubbles.push({ id, text, t: 0, life: 2.8 }); }
 
   startIntro(s, myId) {
-    this.intro = { t: 0, fly: !this.reduced };
+    this.intro = { t: 0, fly: !this.reduced }; this.cd.g = null; this.cd.fade = null; this.cd.fadeA = 0;
+    this.introEnd = this.time + (this.intro.fly ? 1.95 : 0.7 + s.units.filter((u) => u.alive).length * 0.09 + 0.45); // R 10.3: turns queue behind the drop-in
     this.cam.x = this.cam.tx = SIZE / 2; this.cam.y = this.cam.ty = SIZE / 2; this.cam.z = this.cam.tz = this.fitZoom * 0.92; this.cam.vx = this.cam.vy = this.cam.vz = 0;
     const players = s.units.filter((u) => u.alive);
     players.forEach((u, i) => {
@@ -213,7 +243,7 @@ export class Renderer {
     this.later(0.7 + players.length * 0.09 + 0.6, () => {
       const me = unitById(this.state, myId);
       if (me && this.intro && this.intro.fly && this.intro.t < 1.7) this.intro.pend = me.id; // fly-over still running: frame() applies it when it lands
-      else if (me) { this.cam.tz = this.defaultZoom(); this.focus(me.x, me.y); }
+      else if (me) this.cd.glide(me.x + 0.5, me.y + 0.5, this.defaultZoom(), { force: true });
     });
   }
 
@@ -224,12 +254,31 @@ export class Renderer {
       if (!d) { d = { face: u.x > SIZE / 2 ? -1 : 1, x: u.x, y: u.y, sx: u.x, sy: u.y, tx: u.x, ty: u.y, t0: -9, dur: 0.2, how: 'step', piece: u.piece, pop: 0, hp: u.hp, ghost: u.hp, lunge: null, deathAt: null, drop: null }; this.disp.set(u.id, d); }
       if (d.piece !== u.piece) { d.pop = 1; d.piece = u.piece; }
     }
+    const prevActive = this.state ? this.state.active : null;
     this.state = s;
     if (first) return;
-    if ((this.seqEnd || 0) - this.time > 0.9) this.flush();
-    this.base = Math.max(this.time, this.seqEnd || 0);
-    const now0 = this.base;
-    let t = 0; let hits = 0; let lastAb = null;
+    // R 10.3: turns queue one after another (no interleaving, no cut-off). Far behind: squeeze what follows the current
+    // beat; only a huge backlog (a hidden tab coming back) falls back to the instant flush.
+    const back0 = (this.seqEnd || 0) - this.time;
+    if (back0 > 30) this.flush(); else if (back0 > 7) this.compress();
+    this.base = Math.max(this.time, this.seqEnd || 0, this.introEnd || 0, this.time + this.cd.busy());
+    this.lastBase = this.base; this.beatEnd = null;
+    const now0 = this.base, cd = this.cd, back = this.base - this.time;
+    const quick = back > 2.5 ? 0.45 : back > 1.2 ? 0.7 : 1; // holds and glides shrink when turns pile up
+    this.beats = this.beats.filter((b) => b.at > this.time - 4);
+    // the turn's action box: the actor, where it goes, what its ability covers and everyone it hits
+    const actor = prevActive, ti = events.findIndex((q) => q.e === 'turn');
+    let box = null, hitsMe = false;
+    const add = (x, y) => { if (x == null || y == null) return; if (!box) box = { x0: x, y0: y, x1: x, y1: y }; else { box.x0 = Math.min(box.x0, x); box.y0 = Math.min(box.y0, y); box.x1 = Math.max(box.x1, x); box.y1 = Math.max(box.y1, y); } };
+    for (const e of ti < 0 ? events : events.slice(0, ti)) {
+      if (e.e === 'move' && (e.id === actor || e.how === 'push' || e.how === 'pull')) { if (e.id === actor) add(e.from.x, e.from.y); add(e.to.x, e.to.y); }
+      else if (e.e === 'ability' && e.id === actor) { add(e.from.x, e.from.y); add(e.anchor.x, e.anchor.y); for (const q of e.tiles || []) add(q.x, q.y); }
+      else if (e.e === 'dmg' && e.src === actor && e.id !== actor && !e.self) { const v = unitById(s, e.id), d = this.disp.get(e.id); if (v && v.alive) add(v.x, v.y); else if (d) add(d.tx, d.ty); if (e.id === this.myId) hitsMe = true; }
+    }
+    const ultEv = events.find((q) => q.e === 'ability' && q.slot === 'ult' && q.id === actor);
+    if (box && !ultEv) this.camAt(0, () => cd.act(box, actor, { quick, hitsMe }));
+    // the camera leads a wide action by a beat (up to ~0.3 s) so the piece never runs out of frame
+    let t = box && !ultEv ? Math.min(0.3, cd.actLead(box, actor) * 0.55) * quick : 0; let hits = 0; let lastAb = null;
     for (const e of events) {
       if (e.e === 'move') {
         const d = this.disp.get(e.id); if (!d) continue;
@@ -257,16 +306,21 @@ export class Renderer {
         hits = 0; lastAb = e.ab;
         const d = this.disp.get(e.id);
         if (e.slot === 'ult') {
-          const st = t;
+          // R 10.3: one ultimate cine at a time; each gets its own framed moment (push-in on the whole action, then a
+          // pure zoom back at impact, same centre)
+          if (this.base + t < (this.cineFree || 0)) t = this.cineFree - this.base;
+          const st = t, ub = e.id === actor ? box : null; this.cineFree = this.base + st + 1.12;
+          if (ub) this.camAt(st, () => cd.act(ub, actor, { push: 1.14, hitsMe }));
           this.later(st, () => {
             const u = unitById(this.state, e.id);
             this.cine = { t: 0, life: 1.05, name: ABILITIES[e.ab].name, color: u ? u.color : '#ffd24d', who: u ? u.name : '', mine: e.id === this.myId, piece: u ? u.piece : 'pawn' };
-            if (this.dir) this.dir.cine(this.cine.life); // A1: the cine owns the hero lane; DOM callouts wait
-            this.focus(e.from.x, e.from.y); this.punch = Math.max(this.punch, 0.3); this.shot(e.from.x, e.from.y, 1.3, 1.1); this.light(e.from.x + 0.5, e.from.y + 0.6, '#ffd24d', 3.2, 1.1);
+            if (this.dir) this.dir.cine(this.cine.life / Math.max(1, this.cd.speed)); // A1: the cine owns the hero lane; DOM callouts wait (R 10.3: at the timeline's pace)
+            this.punch = Math.max(this.punch, 0.3); this.light(e.from.x + 0.5, e.from.y + 0.6, '#ffd24d', 3.2, 1.1);
             this.fx.ultCharge(e.from.x + 0.5, e.from.y + 0.5, u ? u.color : '#ffd24d', this.glowOf(e.id));
             this.sfx('ultcharge'); this.haptic([20, 30, 20, 30, 20]);
           });
           t += 0.8;
+          if (ub) this.camAt(t, () => cd.act(ub, actor, { hitsMe }));
         }
         const start = t;
         const secret = e.ab === 'tripwire' && !this.sideOf(e.id);
@@ -305,6 +359,19 @@ export class Renderer {
         const fresh = s.units.filter((u) => u.alive && u.wave === e.n);
         fresh.forEach((u, i) => { const d = this.disp.get(u.id); if (d) { d.x = d.sx = d.tx = u.x; d.y = d.sy = d.ty = u.y; d.hp = d.ghost = u.hp; d.drop = { t0: now0 + st + 0.55 + (u.boss ? 0.5 : i * 0.06), dur: u.boss ? 0.55 : 0.42, landed: false, boss: !!u.boss, quiet: i > 2 && !u.boss }; } });
         t += 0.4;
+      } else if (e.e === 'turn') {
+        // R 10.3: the beat boundary. Hold on the last action a moment, then glide to the next actor; its events (the
+        // next messages) start once the camera has landed.
+        if (box || hits) this.lastActEnd = this.base + t;
+        const hold = cd.worth(actor) ? 0.32 * quick * (e.id === this.myId ? 0.6 : 1) : 0.05; // my turn: hand control back sooner
+        if (this.lastActEnd && this.base + t < this.lastActEnd + hold) t = this.lastActEnd + hold - this.base;
+        this.lastActEnd = 0;
+        this.later(t, () => this.onFx(e));
+        this.beatEnd = this.base + t; // this message's own visuals end here; what follows is the hand-off glide
+        this.camAt(t, () => cd.turn(e.id));
+        this.beats.push({ at: this.base + t, actor: e.id });
+        if (e.id === this.myId) cd.myTurnAt = this.base + t;
+        t += cd.lead(e.id) * (quick < 1 ? 0.8 : 0.9);
       } else if (e.e === 'world' && e.kind === 'meteor' && e.phase === 'strike') {
         this.later(t, () => this.onFx(e));
         t += 0.75;
@@ -321,6 +388,8 @@ export class Renderer {
         if (u.alive && !d.moving && (d.tx !== u.x || d.ty !== u.y)) { d.sx = d.x; d.sy = d.y; d.tx = u.x; d.ty = u.y; d.t0 = this.time; d.dur = 0.2; d.how = 'step'; }
       }
     });
+    if (ti < 0 && (box || hits)) this.lastActEnd = this.base + t;
+    if (ti < 0 && s.active != null && s.active !== prevActive && !s.over) { const id = s.active; this.camAt(t, () => cd.turn(id)); this.beats.push({ at: this.base + t, actor: id }); } // a turn change without a 'turn' event
     this.seqEnd = this.base + t + 0.05;
     this.base = null;
   }
@@ -358,14 +427,13 @@ export class Renderer {
     this.fx.finisher(v.kind === 'hollow' ? 'shatter' : fin, d.x + 0.5, d.y + 0.86, v.piece, v.skin, skinOf(v.skin).glow);
     this.kick(v.kind === 'player' ? 14 : 8);
     this.light(d.x + 0.5, d.y + 0.7, skinOf(v.skin).glow, v.kind === 'player' ? 3 : 1.8, v.kind === 'player' ? 0.8 : 0.4);
-    if (v.kind === 'player' && s.over) this.shot(d.x, d.y, 1.45, 1.6);
+    if (v.kind === 'player' && s.over) this.shot(d.x, d.y, 1.45, 1.6, 'final');
     this.sfx(v.kind === 'player' ? 'kill:' + fin : 'shatter');
     if (v.kind === 'player') {
       this.hitstop(0.12);
       const final = s.over;
       this.slowmo(final ? 0.18 : 0.35, final ? 1.6 : 0.7);
       this.punch = Math.max(this.punch, final ? 0.22 : 0.1);
-      if (this.follow || final) this.focus(d.x, d.y);
       if (e.by === this.myId || e.id === this.myId) this.haptic([40, 30, 80]);
       if (e.streak) this.hooks.streak && this.hooks.streak(e);
       if (e.regicide) { this.fx.flash(0.5, '#ffe7a0'); this.punch = Math.max(this.punch, 0.2); this.slowmo(0.2, 1.2); this.fx.ring(d.x + 0.5, d.y + 0.86, '#ffd24d', 4.5, 0.9, 0.16); }
@@ -394,7 +462,7 @@ export class Renderer {
         const [x, y] = at(e.id);
         fx.promote(x, y + 0.86, this.colorOf(e.id), this.glowOf(e.id), { crowned: e.e === 'crowned' });
         this.light(x, y + 0.6, e.e === 'crowned' ? '#ffd24d' : this.glowOf(e.id), 3.6, 1.2);
-        if (e.e === 'crowned' || e.id === this.myId) { const d = this.disp.get(e.id); if (d) this.shot(d.x, d.y, 1.25, 1.1); }
+        if (e.e === 'crowned' || e.id === this.myId) { const d = this.disp.get(e.id); if (d) this.shot(d.x, d.y, 1.25, 1.1, 'shot', e.id); }
         this.kick(9); this.hitstop(0.1); this.punch = Math.max(this.punch, 0.1);
         if (e.id === this.myId) { this.slowmo(0.4, 0.6); this.haptic([20, 40, 20, 40, 60]); }
         this.sfx(e.e === 'crowned' ? 'crown' : e.piece ? 'promote:' + e.piece : 'promote');
@@ -445,7 +513,7 @@ export class Renderer {
       case 'over': {
         const w = unitById(s, e.winner); const d = w && this.disp.get(w.id);
         if (e.siege && !e.won) { // Siege defeat: the board goes dark
-          this.later(0.4, () => { this.dim = { t: 0 }; fx.flash(0.5, '#3a0010'); this.kick(10); this.slowmo(0.25, 1.6); this.sfx('announce:defeat'); this.cam.tz = this.fitZoom; this.follow = false; });
+          this.later(0.4, () => { this.dim = { t: 0 }; fx.flash(0.5, '#3a0010'); this.kick(10); this.slowmo(0.25, 1.6); this.sfx('announce:defeat'); this.cd.glide(null, null, this.fitZoom, { force: true }); this.cd.user = true; });
           break;
         }
         if (e.siege && e.won) {
@@ -454,7 +522,7 @@ export class Renderer {
         }
         if (e.team != null && w) for (const m of s.units) if (m !== w && m.kind === 'player' && m.alive && m.team === e.team) { const md = this.disp.get(m.id); if (md) this.later(1.0, () => this.fx.pillar(md.x + 0.5, md.y + 0.86, m.color, 0.9, 2, 8)); }
         if (d) {
-          this.later(0.9, () => { this.focus(d.x, d.y); this.cam.tz = this.defaultZoom() * 1.5; this.follow = false; this.fx.pillar(d.x + 0.5, d.y + 0.86, '#ffd24d', 1.2, 2.2, 9); });
+          this.later(0.9, () => { this.cd.glide(d.x + 0.5, d.y + 0.5, this.defaultZoom() * 1.5, { kind: 'final' }); this.cd.user = true; this.fx.pillar(d.x + 0.5, d.y + 0.86, '#ffd24d', 1.2, 2.2, 9); });
           for (let i = 0; i < 9; i++) this.later(1.2 + i * 0.32, () => { const cols = ['#ffd24d', '#7fe0ff', '#ff4d6d', '#5cff9d', '#c77dff']; this.fx.firework(d.x + 0.5 + (Math.random() - 0.5) * 3, d.y - 1.5 - Math.random() * 2, cols[i % cols.length]); this.sfx('firework'); });
         }
         break;
@@ -493,7 +561,7 @@ export class Renderer {
         const d = this.disp.get(e.id), u = unitById(s, e.id), col = u ? u.color : '#fff';
         const cx = e.x + 0.5, cy = e.y + 0.86;
         fx.revive(cx, cy, col); // A6: both beats (gather, then the +0.45s burst)
-        this.focus(e.x, e.y); this.sfx('soul');
+        this.cd.look(e.x + 0.5, e.y + 0.5, { actor: e.by ?? e.id }); this.sfx('soul');
         this.later(0.45, () => {
           if (d) { d.hideUntil = null; d.deathAt = null; d.x = d.sx = d.tx = e.x; d.y = d.sy = d.ty = e.y; d.t0 = -9; d.lunge = d.recoil = d.drop = d.warp = null; d.hp = d.ghost = u && u.alive ? u.hp : d.hp; d.pop = 1; d.squash = 1; d.reviveAt = this.time; }
           this.light(cx, cy - 0.3, '#fff6d0', 3.4, 1.2);
@@ -525,7 +593,7 @@ export class Renderer {
           if (e.boss) {
             this.announce('WAVE ' + e.n, 'THE COLOSSUS AWAKENS', '#b77dff', { life: 2.8, ominous: true });
             fx.flash(0.45, '#2a0a4a'); this.kick(12); this.punch = Math.max(this.punch, 0.1); this.haptic([80, 60, 80, 60, 160]);
-            const b = s.units.find((u) => u.alive && u.boss && u.wave === e.n); if (b) this.later(0.6, () => this.focus(b.x, b.y));
+            const b = s.units.find((u) => u.alive && u.boss && u.wave === e.n); if (b) this.later(0.6, () => this.cd.look(b.x + 0.5, b.y + 0.5, { actor: b.id, kind: 'boss' }));
           } else { this.announce('WAVE ' + e.n, e.of ? `OF ${e.of}` : '', '#c9a6ff'); this.kick(4); this.sfx('announce:wave'); }
           this.sfx('hollowrise');
         } else if (e.phase === 'clear') {
@@ -566,24 +634,25 @@ export class Renderer {
     if (this.quality === 'auto') this.autoQuality(realDt);
     if (this.reduced) this.punch = 0;
     this.fx.cap = this.lowQ ? 260 : 600; this.fx.lowQ = this.lowQ; this.fx.reduced = this.reduced;
-    let dt = realDt;
-    if (this.hs > 0) { this.hs -= realDt; dt = realDt * 0.04; }
-    else if (this.slow) { this.slow.t += realDt; const k = Math.min(1, this.slow.t / this.slow.dur); dt = realDt * lerp(this.slow.scale, 1, k * k); if (k >= 1) this.slow = null; }
+    // R 10.3: the timeline plays faster while turns are queued (pace from the backlog) instead of skipping them
+    const sp = this.cd.pace(Math.max(0, (this.seqEnd || 0) - this.time), realDt), pdt = realDt * sp;
+    let dt = pdt;
+    if (this.hs > 0) { this.hs -= pdt; dt = realDt * 0.04; }
+    else if (this.slow) { this.slow.t += pdt; const k = Math.min(1, this.slow.t / this.slow.dur); dt = pdt * lerp(this.slow.scale, 1, k * k); if (k >= 1) this.slow = null; }
     this.time += dt; this._wdt = dt;
     if (this.intro) this.intro.t += dt;
     if (this.timers.length) { const due = this.timers.filter((t) => t.at <= this.time); this.timers = this.timers.filter((t) => t.at > this.time); due.forEach((t) => t.fn()); }
     this.fx.update(dt);
     if (this.fx.impactKick) { this.kick(this.fx.impactKick); this.fx.impactKick = 0; }
-    if (this.cine) { this.cine.t += realDt; if (this.cine.t > this.cine.life) this.cine = null; }
+    if (this.cine) { this.cine.t += pdt; if (this.cine.t > this.cine.life) this.cine = null; }
     if (this.banner) { this.banner.t += realDt; if (this.banner.t > this.banner.life) this.banner = null; }
     if (this.dim) this.dim.t += realDt;
     const cam = this.cam;
-    // A5 10.0: critically damped spring follow + timed cinematic shots + intro fly-over
-    if (this.shotEnd && this.real > this.shotEnd) { this.shotEnd = null; if (this.shotPrevZ) cam.tz = this.shotPrevZ; }
-    const sdt = Math.min(0.05, realDt);
-    W10.spring(cam, 'x', 'vx', cam.tx, 0.24, sdt); W10.spring(cam, 'y', 'vy', cam.ty, 0.24, sdt); W10.spring(cam, 'z', 'vz', cam.tz, 0.28, sdt);
+    // A5 10.0 / R 10.3: director glides (turn beats, shots) drive the camera; the critically damped spring only settles
+    // leftovers (resize, bounds) when no glide is running; the intro fly-over overrides both
     const flying = this.intro && this.intro.fly && this.intro.t < 1.7;
-    if (!flying && this.intro && this.intro.pend != null) { const me = unitById(this.state, this.intro.pend); this.intro.pend = null; if (me) { cam.tz = this.defaultZoom(); this.focus(me.x, me.y); } }
+    if (!this.cd.update(realDt, flying)) { const sdt = Math.min(0.05, realDt); W10.spring(cam, 'x', 'vx', cam.tx, 0.24, sdt); W10.spring(cam, 'y', 'vy', cam.ty, 0.24, sdt); W10.spring(cam, 'z', 'vz', cam.tz, 0.28, sdt); }
+    if (!flying && this.intro && this.intro.pend != null) { const me = unitById(this.state, this.intro.pend); this.intro.pend = null; if (me) this.cd.glide(me.x + 0.5, me.y + 0.5, this.defaultZoom(), { force: true }); }
     if (flying) { const p = ease(Math.min(1, this.intro.t / 1.7)); cam.x = cam.tx = SIZE / 2; cam.y = cam.ty = SIZE / 2 + 5.5 * (1 - p); cam.z = cam.tz = this.fitZoom * (0.58 + 0.34 * p); cam.vx = cam.vy = cam.vz = 0; }
     const z = this.z;
     const B = this.bounds || { x0: 0, y0: 0, x1: SIZE - 1, y1: SIZE - 1 };
@@ -773,6 +842,7 @@ export class Renderer {
       vg = vc.g;
     }
     if (vg) { ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H); } else if (this.litVg && !intro) { /* A5: vignette already baked into the light map */ } else { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.bgCache.vgC, 0, 0); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+    if (this.cd.fadeA > 0) { ctx.globalAlpha = Math.min(1, this.cd.fadeA) * 0.92; ctx.fillStyle = '#07060b'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; } // R 10.3: reduced-motion cut
     if (this.banner) this.drawBanner(ctx, W, H);
     if (this.cine) this.drawCine(ctx, W, H);
     if (this.slow) { ctx.globalAlpha = 0.25 * (1 - this.slow.t / this.slow.dur); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H * 0.08); ctx.fillRect(0, H * 0.92, W, H * 0.08); ctx.globalAlpha = 1; }
