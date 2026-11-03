@@ -200,7 +200,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
       team: s.teams ? Math.floor(i / s.teams) : s.siege ? 0 : null,
       color: s.teams ? TEAM_COLORS[Math.floor(i / s.teams) % TEAM_COLORS.length] : PLAYER_COLORS[i % PLAYER_COLORS.length], skin: p.skin || 'ivory', finisher: p.finisher || 'shatter', trail: p.trail || 'none', title: String(p.title || '').slice(0, 24),
       piece: 'pawn', hone: {}, pts: { ...p.build.pts }, passive: p.build.passive, equips: { ...p.build.equips },
-      x, y, hp: 1, gauge: rand(s) * 40, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [], status: [],
+      x, y, hp: 1, gauge: 0, shards: 0, cd: { sig: 0, eq: 0 }, buffs: [], status: [],
       alive: true, kills: 0, momentum: 0, mark: null, place: 0, dmgDealt: 0, attune: 0, ult: 0, ults: 0, botLevel: p.botLevel || 'normal', pref: rand(s) < 0.5 ? 'knight' : 'bishop',
       plan: botPlan(rand(s)), // 15.0 (C): the bot's promotion road (queen, rook, ascend, pawn line)
     };
@@ -219,7 +219,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     const [x, y] = p;
     const h = {
       id: s.nextId++, kind: 'hollow', name: 'Hollow', piece: 'hollow', x, y, hx: x, hy: y, hp: HOLLOW_STATS.hp,
-      gauge: rand(s) * 50, shards: 2, cd: { sig: 0, eq: 0 }, buffs: [], status: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow',
+      gauge: 0, shards: 2, cd: { sig: 0, eq: 0 }, buffs: [], status: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow',
     };
     s.units.push(h);
     const around = DIRS8.map(([dx, dy]) => [x + dx, y + dy]).filter(([ax, ay]) => free(ax, ay) && !s.items.some((it) => it.x === ax && it.y === ay));
@@ -241,7 +241,7 @@ export function createTutorial(player) {
     s.tiles[y * SIZE + x] = { t: inside ? 'floor' : 'out' };
   }
   const me = s.units[0]; me.x = 5; me.y = 9; me.gauge = 100;
-  s.active = me.id; s.turn = { moved: false, acted: false, extraMoves: 0, rooted: false };
+  s.active = me.id; me.rt = s.round; s.turn = { moved: false, acted: false, extraMoves: 0, rooted: false };
   return s;
 }
 export function spawnDummy(s, x, y, hp = 40) {
@@ -546,7 +546,7 @@ export const harmed = (u) => !!(u && u.status && u.status.some((q) => STATUS[q.k
 export const ascended = (u) => !!(u && u.kind === 'player' && ASCEND[u.piece] && ((u.hone && u.hone[u.piece]) || 0) >= MAX_HONE);
 // Boss King tuning (tools/sim15.mjs sweeps these). converge/focus: how hard bots gang up on it.
 // Tuned with 300-game sweeps for ~40% King wins in 8-bot Royale (15.0). HP pool = (piece HP x hp + 5) x (1 + hpPer per rival beyond 1).
-export const KING_T = { hp: 0.88, hpPer: 0.03, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
+export const KING_T = { hp: 0.92, hpPer: 0.03, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
 export function addStatus(s, u, k, ev, o = {}) {
   if (!u || !u.alive || s.over || !STATUS[k]) return false;
   let t = Math.max(1, Math.round(o.t ?? STATUS[k].t));
@@ -732,8 +732,13 @@ function dmgMods(src, tgt) {
   if (ascended(src)) m *= src.piece === 'knight' ? 1.2 : src.piece === 'bishop' ? 1.15 : src.piece === 'queen' ? 1.1 : 1;
   if (tgt.braced) m *= 0.8;
   if (ascended(tgt) && tgt.piece === 'rook') m *= 0.85;
+  m *= speedEdge(src, tgt);
   return m;
 }
+// 15.2: SPD sets turn order and gives a Speed Edge: +3% damage per point of SPD you have over your target, and -3%
+// per point under (both capped at 15%). Turns are once per round now, so this keeps SPD worth investing in.
+export const SPEED_EDGE = { per: 0.03, cap: 0.15 };
+export const speedEdge = (a, b) => 1 + Math.max(-SPEED_EDGE.cap, Math.min(SPEED_EDGE.cap, SPEED_EDGE.per * (effSpd(a) - effSpd(b))));
 function adrenaline(s, u, ev) {
   if (u.passive !== 'adrenaline' || !u.alive || u.kind !== 'player' || (u.adrenAt && s.round < u.adrenAt)) return;
   const mx = stats(u).maxHp; if (u.hp >= mx * 0.5) return;
@@ -869,11 +874,11 @@ function kill(s, v, killer, ev, cause = null) {
 // ---------- 5.0: Siege ----------
 function mkHollow(s, x, y, extra) {
   const h = { id: s.nextId++, kind: 'hollow', name: 'Hollow', piece: 'hollow', x, y, hx: x, hy: y, hpMax: HOLLOW_STATS.hp, atkB: HOLLOW_STATS.atk, defB: HOLLOW_STATS.def, spdB: HOLLOW_STATS.spd,
-    gauge: rand(s) * 60, shards: 1, cd: { sig: 0, eq: 0 }, buffs: [], status: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow', ...extra };
+    gauge: 0, shards: 1, cd: { sig: 0, eq: 0 }, buffs: [], status: [], alive: true, hone: {}, color: '#7c7a99', skin: 'hollow', ...extra };
   h.hp = h.hpMax; s.units.push(h); return h;
 }
 export const isBossWave = (S, w) => !!S.gauntlet || w === S.waves || w === Math.floor(S.waves / 2);
-export const SIEGE_T = { spd: 0.4, c0: 1.2, cw: 0.3, hs: 0.1, as: 0.3, force: 4, boss: 0.8, ring: 3, pf0: 0.6, pf: 0.2, g: [1, 0.45, 0.85, 1.1, 1.4], gForce: 8, enrage: 10 };
+export const SIEGE_T = { spd: 0.4, c0: 1.2, cw: 0.3, hs: 0.1, as: 0.24, force: 4, boss: 0.74, ring: 3, pf0: 0.6, pf: 0.2, g: [1, 0.45, 0.85, 1.1, 1.4], gForce: 8, enrage: 10 };
 function siegeCleared(s, ev) {
   const S = s.siege;
   if (S.wave >= S.waves) {
@@ -1301,22 +1306,27 @@ export function applyAction(s, pid, a) {
 }
 
 // ---------- turn flow ----------
+// 15.2: round-based initiative. Every living unit acts exactly once per round, fastest SPD first, so nobody
+// gets two turns before someone else gets one. Tempo effects (Stagger, brambles, Haste pickups, Rally) still
+// work: they nudge u.gauge, which moves a unit up to 6 places' worth of SPD earlier or later until it acts.
+// Ties go to a seeded coin flip rolled at the start of each round, so they are fair and deterministic.
+export const initiative = (u) => effSpd(u) + Math.max(-6, Math.min(6, (u.gauge || 0) / 10));
+const beats = (a, b) => { const d = initiative(a) - initiative(b); if (Math.abs(d) > 1e-9) return d > 0; const e = effSpd(a) - effSpd(b); if (e) return e > 0; return (a.tb || 0) !== (b.tb || 0) ? (a.tb || 0) > (b.tb || 0) : a.id < b.id; };
+function nextUp(s) { let best = null; for (const u of s.units) if (u.alive && u.rt !== s.round && (!best || beats(u, best))) best = u; return best; }
 export function nextTurn(s, ev) {
   if (s.active != null) statusTurnEnd(s, unitById(s, s.active), ev); // 15.0: freeze and stun end with the turn they spoiled
-  for (let guard = 0; guard < 200 && !s.over; guard++) {
-    const alive = s.units.filter((u) => u.alive);
-    let best = null;
-    for (let k = 0; k < 400 && !best; k++) {
-      for (const u of alive) if (u.gauge >= 100 && (!best || u.gauge > best.gauge || (u.gauge === best.gauge && u.id < best.id))) best = u;
-      if (!best) for (const u of alive) u.gauge += effSpd(u);
+  if (s.round === 1 && !s.tbInit) { s.tbInit = 1; for (const u of s.units) u.tb = rand(s); }
+  for (let guard = 0; guard < 400 && !s.over; guard++) {
+    let best = nextUp(s);
+    if (!best) {
+      if (!s.units.some((u) => u.alive)) return;
+      s.round++; s.roundTurns = 0; onRound(s, ev); if (s.over) return;
+      for (const u of s.units) u.tb = rand(s);
+      best = nextUp(s); if (!best) return;
     }
-    if (!best) { for (const u of alive) if (!best || u.gauge > best.gauge) best = u; if (!best) return; best.gauge = 100; }
-    best.gauge -= 100;
+    s.pickInit = initiative(best); best.rt = s.round; best.gauge = 0;
     s.turnNo++;
-    if (best.kind === 'player') {
-      s.roundTurns++;
-      if (s.roundTurns >= alivePlayers(s).length) { s.roundTurns = 0; s.round++; onRound(s, ev); if (s.over) return; }
-    }
+    if (best.kind === 'player') s.roundTurns++;
     if (!best.alive) continue;
     s.active = best.id;
     s.turn = { moved: false, acted: false, extraMoves: 0, rooted: false };
@@ -1760,13 +1770,13 @@ function onRound(s, ev) {
 
 // Predict the next n turns (for the turn-order strip)
 export function predictOrder(s, n = 8) {
-  const sim = s.units.filter((u) => u.alive).map((u) => ({ id: u.id, g: u.gauge, sp: effSpd(u) }));
+  // 15.2: rest of this round in initiative order, then the next round(s) by SPD (gauge nudges are spent on the turn)
   const out = s.active ? [s.active] : [];
-  for (let k = 0; k < 2000 && out.length < n; k++) {
-    let best = null;
-    for (const u of sim) if (u.g >= 100 && (!best || u.g > best.g || (u.g === best.g && u.id < best.id))) best = u;
-    if (best) { best.g -= 100; out.push(best.id); } else for (const u of sim) u.g += u.sp;
-  }
+  const alive = s.units.filter((u) => u.alive);
+  const rest = alive.filter((u) => u.rt !== s.round && u.id !== s.active).sort((a, b) => (beats(a, b) ? -1 : 1));
+  for (const u of rest) { if (out.length >= n) return out; out.push(u.id); }
+  const nextR = alive.map((u) => ({ ...u, gauge: 0 })).sort((a, b) => (beats(a, b) ? -1 : 1));
+  for (let k = 0; out.length < n && nextR.length && k < 8; k++) for (const u of nextR) { if (out.length >= n) break; out.push(u.id); }
   return out;
 }
 

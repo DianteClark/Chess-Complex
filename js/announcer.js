@@ -51,7 +51,7 @@ export class Director {
   sound(n, lvl) { try { this.opts.sound && this.opts.sound(n, lvl); } catch {} }
 
   reset() {
-    this.q = []; this.cur = null; this.lastEnd = 0; this.holdUntil = 0; this.turnUntil = 0;
+    this.q = []; this.cur = null; this.lastEnd = 0; this.holdUntil = 0; this.turnUntil = 0; this.hintHold = 0;
     for (const r of this.feedRows) r.el.remove();
     this.feedRows = []; this.hintQ = []; this.hintCur = null; this.occ = []; this.pendFeed = []; this.pendTurn = null;
     if (!this.mounted) return;
@@ -64,6 +64,8 @@ export class Director {
   // Pause every lane except status (contender intro, modals).
   hold(ms) { this.holdUntil = Math.max(this.holdUntil, now() + ms); this.root && this.root.classList.add('dir-hold'); }
   release() { this.holdUntil = 0; this.root && this.root.classList.remove('dir-hold'); }
+  // 15.1: tips/toasts only (the hero lane keeps playing), e.g. while "Round 1" and the camera drop-in play
+  holdHints(ms) { this.hintHold = Math.max(this.hintHold || 0, now() + ms); }
   held() {
     if (now() < this.holdUntil) return true;
     if (this.root && this.root.classList.contains('dir-hold')) this.root.classList.remove('dir-hold');
@@ -133,7 +135,7 @@ export class Director {
     // hint
     if (this.hintCur && t >= this.hintCur.until) this.endHint();
     this.hintQ = this.hintQ.filter((h) => t - h.at <= h.ttl);
-    if (!this.hintCur && !held && this.hintQ.length && t >= (this.hintRetry || 0)) { const h = this.hintQ.shift(); this.showHint(h); if (this.cur && this.hitsHero(this.hintEl)) { this.endHint(); this.hintQ.unshift(h); this.hintRetry = t + 300; } }
+    if (!this.hintCur && !held && this.hintQ.length && t >= (this.hintRetry || 0) && t >= (this.hintHold || 0)) { const h = this.hintQ.shift(); this.showHint(h); if (this.cur && this.hitsHero(this.hintEl)) { this.endHint(); this.hintQ.unshift(h); this.hintRetry = t + 300; } }
   }
   // Screen rects currently owned by DOM messages (recomputed lazily; canvas floats must not draw under them).
   occupied() {
@@ -422,3 +424,86 @@ export function compass(s, x, y, size = 16) {
 export const ASCENDED = { knight: 'Ascended Knight', bishop: 'Archbishop', rook: 'Fortress Rook', queen: 'Empress Queen' };
 
 export const director = new Director();
+
+// ---------------------------------------------------------------- 15.1 match intro (D)
+// One calm sequence instead of overlapping pop-ups: contenders -> location wheel (spin, land, hold) -> one location
+// briefing card (name, one line, hazard, signature event) -> the caller plays "Round 1" + the camera drop-in.
+// Wall-clock timers only (setTimeout / performance.now): the renderer's timeline pace (camdir speed-up) never touches
+// intro text. A tap advances ONE step (a spinning wheel lands first); "Skip intro" (returning players) ends it all.
+// Every lane of the Director is held for the whole intro, so tips, toasts, feed and callouts wait for it.
+export const INTRO = { ct: 2500, spin: 3100, hold: 2500, brief: 3200, perRow: 500, gap: 300, fly: 1950, net: 600, minTap: 350 };
+export const briefMs = (b) => (b ? INTRO.brief + INTRO.perRow * Math.max(0, ((b.rows || []).length) - 1) : 0);
+// Deterministic from the state (host and clients agree): how long until the first turn may start.
+export function introMs({ contenders = true, wheel = false, brief = null } = {}) {
+  let t = 0;
+  if (contenders) t += INTRO.ct + INTRO.gap;
+  if (wheel) t += INTRO.spin + INTRO.hold + INTRO.gap;
+  if (brief) t += briefMs(brief) + INTRO.gap;
+  return t ? t + INTRO.fly : 0;
+}
+export function briefHTML(b) {
+  const rows = (b.rows || []).map((r) => `<div class="ib-row${r.cls ? ' ' + r.cls : ''}"><em>${esc(r.k)}</em><b>${esc(r.name)}</b>${r.desc ? `<span>${esc(r.desc)}</span>` : ''}</div>`).join('');
+  return `<div class="ib-card" data-msg="intro"><div class="ib-kick">${esc(b.kicker || '')}</div><div class="ib-name">${esc(b.title)}</div>${b.line ? `<p class="ib-line">${esc(b.line)}</p>` : ''}${rows ? `<div class="ib-rows">${rows}</div>` : ''}</div>`;
+}
+export class Intro {
+  constructor(dir) { this.dir = dir; this.on = false; this.log = []; }
+  // steps: [{ id, dot, ms, tapText, show(api) -> { tap?() => true if consumed, end?() } }]; o: { root, skip, onDone }
+  run(steps, o = {}) {
+    this.stop();
+    this.steps = steps.filter(Boolean); this.i = -1; this.o = o; this.on = true; this.t0 = now(); this.log = [];
+    const root = this.root = o.root || document.body;
+    root.classList.add('intro-on'); this.dir.hold(120000); this.dir.clearHints();
+    const dots = this.steps.filter((s) => s.dot).length;
+    const mk = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return root.appendChild(t.content.firstChild); };
+    this.tapEl = mk(`<div class="intro-tap" id="intro-tap"><span class="it-hint"></span></div>`);
+    this.barEl = mk(`<div class="intro-bar" id="intro-bar">${dots > 1 ? `<div class="ib-dots" aria-hidden="true">${'<i></i>'.repeat(dots)}</div>` : '<div></div>'}${o.skip ? '<button type="button" class="ib-skip" id="intro-skip">Skip intro</button>' : ''}</div>`);
+    this.tapEl.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.tap(); });
+    const sk = this.barEl.querySelector('.ib-skip'); if (sk) sk.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.skipAll(); });
+    this.next();
+  }
+  mark(id) { this.log.push({ id, t: Math.round(now() - this.t0) }); }
+  // the outgoing step fades for INTRO.gap before the next one appears: never two intro panels on screen at once
+  next() {
+    if (!this.on || this.gapping) return;
+    clearTimeout(this.timer); const had = this.i >= 0;
+    if (!had) { this.show(); return; }
+    this.gapping = true; this.stepAt = now() + 1e6; this.endCur(); // gapping first: a step's end() may call api.next()
+    this.timer = setTimeout(() => { this.gapping = false; if (this.on) this.show(); }, INTRO.gap);
+  }
+  show() {
+    if (++this.i >= this.steps.length) { this.finish(false); return; }
+    const st = this.steps[this.i]; this.stepAt = now(); this.mark(st.id);
+    const di = this.steps.slice(0, this.i + 1).filter((s) => s.dot).length - 1;
+    this.barEl.querySelectorAll('.ib-dots i').forEach((d, k) => { d.className = k < di ? 'past' : k === di ? 'on' : ''; });
+    this.barEl.classList.toggle('quiet', !st.dot);
+    this.tapEl.querySelector('.it-hint').textContent = st.tapText ?? 'Tap to continue';
+    this.tapEl.classList.toggle('wait', !!st.wait);
+    let cur = {}; try { cur = st.show({ next: () => { if (this.on && this.steps[this.i] === st) this.next(); } }) || {}; } catch (e) { console.warn('intro step', st.id, e); }
+    this.cur = cur;
+    if (st.ms > 0) this.timer = setTimeout(() => { if (this.on && this.steps[this.i] === st) this.next(); }, st.ms);
+  }
+  endCur() { const c = this.cur; this.cur = null; if (c && c.end) { try { c.end(); } catch {} } }
+  tap() {
+    if (!this.on || now() - this.stepAt < INTRO.minTap) return;
+    const st = this.steps[this.i]; if (st && st.wait) return;
+    const c = this.cur; if (c && c.tap) { let used = false; try { used = c.tap() === true; } catch {} if (used) { this.mark(st.id + ':tap'); return; } }
+    this.next();
+  }
+  skipAll() { if (!this.on) return; this.mark('skip'); clearTimeout(this.timer); this.gapping = true; this.endCur(); this.finish(true); }
+  finish(skipped) {
+    if (!this.on) return; this.on = false; this.mark('done');
+    this.cleanup();
+    const f = this.o.onDone; this.o = {};
+    if (f) { try { f(!!skipped); } catch (e) { console.warn('intro done', e); } }
+  }
+  cleanup() {
+    clearTimeout(this.timer); this.gapping = false;
+    for (const el of [this.tapEl, this.barEl]) if (el) el.remove();
+    this.tapEl = this.barEl = null;
+    if (this.root) this.root.classList.remove('intro-on');
+    this.dir.release();
+  }
+  // leaving the match: drop everything, no onDone
+  stop() { if (!this.on) return; this.on = false; clearTimeout(this.timer); this.endCur(); this.o = {}; this.cleanup(); }
+}
+export const intro = new Intro(director);

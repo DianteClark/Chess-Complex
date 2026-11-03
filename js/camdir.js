@@ -8,6 +8,8 @@
 // the player's next turn or a recentre tap, the Camera setting picks 'all' (follow every turn), 'mine' (only my turns;
 // spectators still follow everyone) or 'free' (never moves on its own), and reduced motion swaps long glides for a quick
 // fade. Holds and glides shrink and the timeline speeds up (pace) when the backlog of queued turns grows.
+// R 15.1: real speed (1x) by default; pace ramps smoothly to at most 1.4x only when several seconds behind, and never
+// during the viewer's own actions, ultimates or kills (render.js marks those spans 'calm'). Glides are ~15% slower.
 import { unitById } from './engine.js';
 
 const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -60,17 +62,17 @@ export class CamDirector {
     return { x: cx, y: cy, z };
   }
   // ------------------------------------------------------------------ motion
-  maxPx() { const { w, h } = this.view(); return 1.5 * Math.min(w, h) + 150; } // peak pan speed, screen px per real second
+  maxPx() { const { w, h } = this.view(); return 1.25 * Math.min(w, h) + 130; } // peak pan speed, screen px per real second (R 15.1: was 1.5x + 150)
   durFor(x, y, z, from) {
     const c = from || this.r.cam, dist = Math.hypot(x - c.x, y - c.y), dz = Math.abs(Math.log(z / (c.z || z)));
     if (dist < 0.08 && dz < 0.02) return 0;
     if (this.r.reduced && dist > 4.5) return 0.3; // fade cut
-    let d = clampN(0.32 + 0.065 * dist + 0.45 * dz, 0.3, 1.0);
+    let d = clampN(0.38 + 0.075 * dist + 0.52 * dz, 0.34, 1.15); // R 15.1: deliberate, not whippy (was 0.32 + 0.065 d, 0.3-1.0)
     if (this.r.reduced) d = Math.min(d, 0.3);
     return Math.max(d, this.cap(x, y, z, c)); // director clock seconds
   }
-  // shortest allowed glide: peak pan speed under maxPx() and peak zoom rate under 2.4/s, in real time at the current pace
-  cap(x, y, z, from) { const c = from || this.r.cam; return Math.max(1.5 * Math.hypot(x - c.x, y - c.y) * Math.max(z, c.z || z) / this.maxPx(), (1.5 * Math.abs(Math.log(z / (c.z || z)))) / 2.4) * this.speed; }
+  // shortest allowed glide: peak pan speed under maxPx() and peak zoom rate under 2.0/s, in real time at the current pace
+  cap(x, y, z, from) { const c = from || this.r.cam; return Math.max(1.5 * Math.hypot(x - c.x, y - c.y) * Math.max(z, c.z || z) / this.maxPx(), (1.5 * Math.abs(Math.log(z / (c.z || z)))) / 2.0) * this.speed; }
   // Start a glide. x/y/z null keep the current target. Returns the expected duration in timeline seconds (0 = no move).
   glide(x, y, z, o = {}) {
     const r = this.r, c = r.cam, T = this.tgt();
@@ -149,14 +151,15 @@ export class CamDirector {
   manual() { this.user = true; this.userAt = this.r.real; this.g = null; this.pend = null; this.shotBack = null; } // pan / pinch / wheel
   mine() { const r = this.r; return !!(r.state && r.myId != null && r.state.active === r.myId && !r.state.over); }
   // ------------------------------------------------------------------ per frame
-  // Timeline pace from the backlog of queued visuals: 1x normally, up to ~2.6x when bot turns pile up, faster still when
-  // the viewer's own turn is waiting behind them; at most 1.8x while an ultimate cine is on screen (unless my turn waits).
+  // Timeline pace from the backlog of queued visuals (timeline seconds). R 15.1: 1x (real speed) until the backlog is
+  // genuinely long (> 2.5 s; > 1.5 s when the viewer's own turn waits behind it), then a smoothstep ramp to at most 1.4x
+  // at 4 s past that. Ultimate cines and the 'calm' spans render.js marks (my own actions, kills) always play at 1x;
+  // the pace eases up slowly and drops quickly, looking a little ahead so a calm moment starts at 1x.
   pace(back, realDt) {
-    const mine = this.myTurnAt > this.r.time;
-    let k = back < 0.8 ? 1 : Math.min(2.8, 1 + (back - 0.8) * 0.6);
-    if (this.r.cine && !mine) k = Math.min(k, 1.8); // the cine runs at the same pace, so it stays in step either way
-    if (mine) k = Math.max(k, Math.min(3.5, 1 + back * 1.2));
-    this.speed += (k - this.speed) * Math.min(1, realDt * 4);
+    const r = this.r, mine = this.myTurnAt > r.time, lo = mine ? 1.5 : 2.5, x = clampN((back - lo) / 4, 0, 1);
+    let k = 1 + 0.4 * x * x * (3 - 2 * x);
+    if (k > 1 && (r.cine || (r.calmAt && r.calmAt(r.time, 0.4)))) k = 1;
+    this.speed += (k - this.speed) * Math.min(1, realDt * (k < this.speed ? 7 : 1.2));
     if (Math.abs(this.speed - k) < 0.01) this.speed = k;
     return this.speed;
   }

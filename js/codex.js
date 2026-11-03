@@ -96,7 +96,7 @@ export function renderCodex(tab, el, profile) {
     el.innerHTML = `<div class="panel"><div class="lbl">Base Abilities</div><p class="hint">Your build's passive. It works on every piece, all match. Five are free; unlock the rest with Marks.</p>${Object.values(PASSIVES).map((p) => `<div class="cx-line"><b>${p.name}</b>${LOCK_TAG(p)}<p>${p.desc}</p></div>`).join('')}</div>
       <div class="panel"><div class="lbl">Status Effects</div><p class="hint">Abilities, base abilities, hazards and world events can apply these. Turns count down at the start of the affected piece's turn. Shrines and potions wash off the harmful ones.</p>${Object.entries(STATUS).map(([k, q]) => `<div class="cx-line"><b class="st-${k}">${q.name}</b><p>${q.desc}${q.bad && k !== 'exposed' ? ` Lasts ${q.t} turn${q.t > 1 ? 's' : ''}.` : ''}</p></div>`).join('')}
         <p class="hint">A piece is never frozen and stunned at once: whichever lands second is shrugged off.</p></div>
-      <div class="panel"><div class="lbl">Stat Points</div><div class="cx-line"><p>You get 10 points for your Pawn build. Each point: +${STAT_GAIN.hp} HP, +${STAT_GAIN.atk} ATK, +${STAT_GAIN.def} DEF or +${STAT_GAIN.spd} SPD. Points carry into every piece. SPD above 12 counts for half.</p></div></div>
+      <div class="panel"><div class="lbl">Stat Points</div><div class="cx-line"><p>You get 10 points for your Pawn build. Each point: +${STAT_GAIN.hp} HP, +${STAT_GAIN.atk} ATK, +${STAT_GAIN.def} DEF or +${STAT_GAIN.spd} SPD. Points carry into every piece. SPD decides who acts first each round and gives a Speed Edge (+3% damage per point over your target, max 15%). SPD above 12 counts for half.</p></div></div>
       <div class="panel"><div class="lbl">Damage</div><div class="cx-line"><p>Damage = ATK x ability power x 30 / (30 + DEF), with a small random spread. 10% of hits are critical for x1.5. Previews show the range before crits.</p></div></div>`;
   } else if (tab === 'board') {
     el.innerHTML = `
@@ -124,7 +124,7 @@ export function renderCodex(tab, el, profile) {
         <div class="cx-line"><b>${MUTATORS.conveyor.name}</b><p>Conveyor tracks move anything standing on them one tile along the arrows at the end of every round. Ride them, or park an enemy on one that runs into lava.</p></div>
         <div class="cx-line"><b>${MUTATORS.crumble.name}</b><p>Cracked floor holds the first step, then gives way under the second: 12% max HP and you tumble to the nearest safe tile. The hole becomes a pit that blocks movement and shots.</p></div>
         <div class="cx-line"><b>${MUTATORS.rift.name}</b><p>Every third round two random players swap places, wherever they are.</p></div>
-        <div class="cx-line"><b>Overgrowth</b><p>Thorny hedges cover the Royal Gardens. Landing in brambles costs turn speed and stops a slide.</p></div>
+        <div class="cx-line"><b>Overgrowth</b><p>Thorny hedges cover the Royal Gardens. Landing in brambles pushes you later in the turn order and stops a slide.</p></div>
         <div class="cx-line"><b>Poison Pools</b><p>Bubbling pools in the Witchwood Bog poison anyone who steps in. Shrines and potions wash it off.</p></div>
         <div class="cx-line"><b>Lava</b><p>Landing in lava also sets you on fire.</p></div>
         <p class="hint">Chaos mode stacks two of these on the same board.</p></div>

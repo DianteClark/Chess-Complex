@@ -157,7 +157,10 @@ async function startMatch(run, host, { bots = 0, clients = [] } = {}) {
   const all = [host, ...clients];
   for (const p of all) await p.waitForFunction(() => window.__cc.game.s && document.querySelector('.screen.active').id === 's-game', null, { timeout: 8000 });
   await host.evaluate(() => { window.__cc.session.host.fast = true; });
-  await sleep(3200); // intro / contenders
+  // 15.2: the intro now runs ~15 s; skip it on the host so the first turn starts right away
+  await host.evaluate(() => { const h = window.__cc.session.host; h && h.go && h.go(); });
+  for (const p of all) await p.evaluate(() => { const i = window.__cc.intro; i && i.skipAll && i.skipAll(); }).catch(() => {});
+  await sleep(1200);
 }
 async function clientPid(c) { return c.evaluate(() => window.__cc.session.myPid); }
 // 15.0 (N): tap Ready Up on every member that is in the party lobby and not ready yet, then wait for the leader's Start.

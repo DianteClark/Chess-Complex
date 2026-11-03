@@ -146,6 +146,116 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     await run.shot('c1', 'reconnected');
   };
 
+  // 15.2 (N): owner bug "game froze after our second match using the party system". Three party matches in a row
+  // (host + c1 + 2 bots). Match 1 skips the intro the way startMatch does; matches 2 and 3 play the real intro hold
+  // (no go(), no skip, the host not in fast mode) so a stale intro timer / turn clock / handler from the last match
+  // shows up. Each match must advance on both screens, reach results on both, and the party must come back.
+  // P5b: the member is knocked out first each match, opens results and goes Back to Party while the match still runs
+  // (benched), taps through the intro of match 2 and uses Skip intro on match 3.
+  for (const vr of ['a', 'b']) S[`P5${vr}-party-three-matches`] = async (run) => {
+    const { host, c, cpid } = await match(run, { bots: 2 });
+    const state = (p) => p.evaluate(() => { const g = window.__cc.game, s = window.__cc.session; return { screen: (document.querySelector('.screen.active') || {}).id, turn: g.s ? g.s.turnNo : null, over: g.s ? !!g.s.over : null, v: g.s ? g.s.v : null, results: !document.querySelector('#m-results').classList.contains('hidden'), introOn: window.__cc.intro.on, hostTurn: s && s.host ? s.host.s.turnNo : null, introUntil: s && s.host ? s.host.introUntil : null, gen: g.gen }; });
+    for (let k = 1; k <= 3; k++) {
+      if (k > 1) {
+        // real intro on both screens: wait for it, then the first turns must come
+        const s0 = { h: await state(host), c: await state(c) };
+        run.note(`match ${k} start ${JSON.stringify(s0)}`);
+        await autoplay(host); await autoplay(c); await L.protectHumans(host);
+        if (vr === 'b') {
+          await sleep(1500);
+          if (k === 2) for (let i = 0; i < 6; i++) { await c.evaluate(() => { const t = document.querySelector('#intro-tap'); if (t) t.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); }); await sleep(700); }
+          else await c.evaluate(() => { const t = document.querySelector('#intro-skip'); if (t) t.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+        }
+        const okH = await waitFor(host, () => !window.__cc.intro.on && window.__cc.game.s && window.__cc.game.s.turnNo > 1, null, 30000);
+        const okC = await waitFor(c, () => !window.__cc.intro.on && window.__cc.game.s && window.__cc.game.s.turnNo > 1, null, 30000);
+        if (!okH || !okC) run.note(`match ${k} after intro ${JSON.stringify({ h: await state(host), c: await state(c) })}`);
+        run.check(okH, `match ${k}: host never got past the intro into turns`);
+        run.check(okC, `match ${k}: c1 never got past the intro into turns`);
+      }
+      for (const [l, p] of [['host', host], ['c1', c]]) { const a = await L.advancing(p, 4000); run.check(a.moved, `match ${k}: ${l} turns did not advance ${JSON.stringify(a)} ${JSON.stringify(await state(p))}`); }
+      const ht = await host.evaluate(() => window.__cc.session.host.s.turnNo), ct = await c.evaluate(() => window.__cc.game.s.turnNo);
+      run.check(Math.abs(ht - ct) <= 4, `match ${k}: c1 out of sync (host ${ht}, c1 ${ct})`);
+      if (vr === 'b') {
+        await L.hostKill(host, cpid);
+        if (!run.check(await L.waitDead(c, 15000), `match ${k}: c1 dead modal never appeared`)) run.note(`c1 ${JSON.stringify(await state(c))} me ${JSON.stringify(await c.evaluate(() => { const m = window.__cc.game.me; return m && { alive: m.alive, place: m.place }; }))}`);
+        await tap(c, '#m-dead [data-act="results"]'); await sleep(600);
+        run.check(await waitResults(c, 5000), `match ${k}: c1 See Results did not open results`);
+        await tap(c, '#btn-rematch'); await sleep(600);
+        run.check((await party(c)).screen === 's-join', `match ${k}: c1 benched Back to Party failed`);
+        await sleep(2500); // the match plays on without c1 for a bit
+        const a = await L.advancing(host, 3000); const hOver = await host.evaluate(() => window.__cc.session.host.s.over); run.check(a.moved || hOver, `match ${k}: host stalled after c1 left for the lobby ${JSON.stringify(a)}`);
+        if (!a.moved) run.note('stall diag ' + JSON.stringify(await host.evaluate(() => { const h = window.__cc.session.host, s = h.s, u = s.units.find((q) => q.id === s.active); return { over: s.over, active: u && { pid: u.pid, kind: u.kind, alive: u.alive, bot: !!u.isBot, name: u.name }, introUntil: h.introUntil, fast: h.fast, deadline: h.deadline && h.deadline - Date.now(), screen: document.querySelector('.screen.active').id, humans: s.units.filter((q) => q.kind === 'player' && !q.isBot).map((q) => [q.pid, q.alive]) }; })));
+        await L.killAllExcept(host, ['me']);
+        run.check(await waitResults(host, 15000), `match ${k}: host no results`);
+        await sleep(1200);
+        if (k === 3) break;
+        await tap(host, '#btn-rematch'); await sleep(500);
+        run.check((await party(host)).screen === 's-host', `match ${k}: host not back in the party`);
+        await autoplay(host, false); await autoplay(c, false);
+        await tap(c, '#btn-ready'); await sleep(400);
+        run.check(await waitFor(host, () => !document.querySelector('#btn-start-host').disabled, null, 5000), `match ${k}: Start never enabled ${JSON.stringify(await party(host))}`);
+        await tap(host, '#btn-start-host');
+        for (const [l, p] of [['host', host], ['c1', c]]) run.check(await waitFor(p, () => window.__cc.game.s && !window.__cc.game.s.over && document.querySelector('.screen.active').id === 's-game', null, 8000), `match ${k + 1}: ${l} did not enter`);
+        continue;
+      }
+      await L.killAllExcept(host, ['me']);
+      run.check(await waitResults(host, 15000), `match ${k}: host no results`); run.check(await waitResults(c, 15000), `match ${k}: c1 no results`);
+      await sleep(1200);
+      if (k === 3) break;
+      // match 1: leader taps Back to Party first; match 2: the member does
+      const order = k === 1 ? [host, c] : [c, host];
+      for (const p of order) { await tap(p, '#btn-rematch'); await sleep(500); }
+      let hp = await party(host), cp = await party(c);
+      run.check(hp.screen === 's-host' && cp.screen === 's-join' && cp.inParty, `match ${k}: not both back in the party ${hp.screen} ${cp.screen}`);
+      await autoplay(host, false); await autoplay(c, false);
+      await tap(c, '#btn-ready'); await sleep(400);
+      run.check(await waitFor(host, () => !document.querySelector('#btn-start-host').disabled, null, 5000), `match ${k}: Start never enabled`);
+      await tap(host, '#btn-start-host');
+      for (const [l, p] of [['host', host], ['c1', c]]) run.check(await waitFor(p, () => window.__cc.game.s && !window.__cc.game.s.over && document.querySelector('.screen.active').id === 's-game', null, 8000), `match ${k + 1}: ${l} did not enter`);
+    }
+    run.check((await L.clientPid(c)) === cpid, 'c1 changed seat across matches');
+  };
+
+  // P5c (reproduces the owner's freeze): the member goes Back to Party, its link drops and reconnects (phone screen off
+  // while waiting) while the leader is still on the old match (live or on results). Before 15.2 the reconnect resumed
+  // the old match on the member's screen: a finished board with no results and no way back. Then a second match.
+  for (const when of ['live', 'over']) S[`P5c-benched-reconnect-${when}`] = async (run) => {
+    const { host, c, cpid } = await match(run, { bots: 2 });
+    for (const p of [host, c]) await net(p, { dead: 4000, retry: 1000, hb: 1000 });
+    await L.hostKill(host, cpid);
+    run.check(await L.waitDead(c, 15000), 'c1: dead modal never appeared');
+    await tap(c, '#m-dead [data-act="results"]'); await sleep(600);
+    await tap(c, '#btn-rematch'); await sleep(600);
+    if (when === 'over') { await L.killAllExcept(host, ['me']); run.check(await waitResults(host, 15000), 'host: no results'); await sleep(800); }
+    await c.evaluate(async () => (await import('/js/net.js')).NET.drop(1500));
+    await sleep(9000);
+    let cp = await party(c);
+    run.check(cp.screen === 's-join' && cp.inParty, `c1 pulled out of the party lobby by the reconnect ${JSON.stringify(cp)}`);
+    if (when === 'live') { await L.killAllExcept(host, ['me']); run.check(await waitResults(host, 15000), 'host: no results'); await sleep(800); }
+    await tap(host, '#btn-rematch'); await sleep(800);
+    cp = await party(c);
+    run.check(cp.screen === 's-join' && cp.ready && !cp.ready.hidden && !cp.ready.dis, `c1 cannot ready up for the next match ${JSON.stringify(cp)}`);
+    await tap(c, '#btn-ready'); await sleep(400);
+    run.check(await waitFor(host, () => !document.querySelector('#btn-start-host').disabled, null, 5000), 'host: Start never enabled');
+    await tap(host, '#btn-start-host');
+    run.check(await waitFor(c, () => window.__cc.game.s && !window.__cc.game.s.over && document.querySelector('.screen.active').id === 's-game', null, 8000), 'c1: did not enter match 2');
+    await host.evaluate(() => { const h = window.__cc.session.host; h.fast = true; h.go(); });
+    await autoplay(host); await autoplay(c);
+    const a = await L.advancing(c, 5000); run.check(a.moved, `c1: match 2 not advancing ${JSON.stringify(a)}`);
+    await L.killAllExcept(host, ['me']);
+    run.check(await waitResults(c, 15000), 'c1: no results in match 2');
+  };
+  // A link that drops right as the match ends: the reconnect resends the final state without its 'over' event.
+  S['P5d-over-without-event'] = async (run) => {
+    const { host, c } = await match(run, { bots: 2 });
+    // c1 misses the state carrying 'over' (simulated), then gets the final state again the way a reconnect sends it
+    await c.evaluate(() => { const g = window.__cc.game, o = g.onMsg.bind(g); g.onMsg = (m) => { if (m.t === 'state' && (m.ev || []).some((e) => e.e === 'over')) return; o(m); }; });
+    await L.killAllExcept(host, ['me']);
+    run.check(await waitResults(host, 15000), 'host: no results');
+    await host.evaluate(() => window.__cc.session.host.publish([]));
+    run.check(await waitResults(c, 10000), 'c1: final state without the over event left it on a dead board');
+  };
+
   // Reconnect while waiting in the party lobby, plus leader-only rules (members cannot start or change options).
   S['P4-lobby-reconnect'] = async (run) => {
     const { host, code } = await L.hostLobby(run);

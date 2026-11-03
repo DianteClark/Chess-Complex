@@ -9,6 +9,7 @@ import { CamDirector } from './camdir.js'; // R 10.3: turn-by-turn camera beats
 import * as HZ from './hazards10.js'; // A9 10.0: fallback visuals for new hazard tiles / unit states
 import * as BD from './backdrop.js'; // E1 15.0: location backdrops
 import { LOCATIONS } from './locations.js'; // R 15.0: location weather (W)
+import { NET } from './net.js'; // R 15.1: NET.backlog lets the host's bots wait for the playback (real-speed turns)
 
 const ease = (t) => 1 - Math.pow(1 - t, 3);
 const easeBack = (t) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
@@ -110,6 +111,11 @@ export class Renderer {
     this.lights = []; this.weather = new W10.Weather(); this.themeId = 'hall'; this.look = null;
     this.resize();
     addEventListener('resize', () => this.resize());
+    // R 15.1: the host paces its bots to this screen's playback (net.js schedule); a hidden tab never holds them up
+    if (canvas.id === 'board') NET.backlog = () => (typeof document !== 'undefined' && document.hidden) || this.asleep || !this.state ? 0 : this.backlog() * 1000;
+    // R 15.1: iOS Safari zooms the whole page on a pinch that starts on the HUD or the spectate bar (touch-action only
+    // guards the canvas), and the page stays zoomed, so the board's own zoom looks broken; block it while a match is up
+    if (canvas.id === 'board' && typeof document !== 'undefined') for (const k of ['gesturestart', 'gesturechange']) document.addEventListener(k, (e) => { if (this.state && !this.asleep) e.preventDefault(); }, { passive: false });
   }
   setQuality(q) { this.quality = q || 'auto'; this.lowQ = q === 'low'; this.ftAvg = 16; this.ftT = 0; this.aq = { tier: this.lowQ ? 2 : 0, t: 0, warm: 1, hold: 6, upAt: -1e9 }; this.resize(); }
   // B3 10.1: adaptive quality for 'auto'. Tiers: 0 full (DPR up to 2), 1 DPR 1.5 with every effect, 2 lowQ (DPR 1, cheap
@@ -155,6 +161,7 @@ export class Renderer {
     // U 10.2: layout size, not getBoundingClientRect: a resize during a screen transition (scale .94-.99) used to bake the
     // shrunken size in, so the bitmap was stretched and taps landed up to a tile off until the next resize
     const r = this.c.clientWidth ? { width: this.c.clientWidth, height: this.c.clientHeight } : this.c.getBoundingClientRect();
+    const z0 = this.fitZoom && this.VH ? this.defaultZoom() : 0; // R 15.1: the level's zoom for the old viewport
     this.W = r.width || innerWidth; this.H = r.height || innerHeight; this.dpr = dpr;
     this.c.width = Math.round(this.W * dpr); this.c.height = Math.round(this.H * dpr);
     this.pad = this.pad || { t: 0, b: 0, r: 0 };
@@ -164,6 +171,10 @@ export class Renderer {
     this.fitZoom = Math.min(this.VW / (bw + 1.2), this.VH / (bh + 1.2));
     this.minZ = this.fitZoom * 0.9; this.maxZ = Math.max(this.fitZoom * 3, 70, this.closeZoom() * 1.6);
     if (!this.zoomSet) { this.cam.z = this.cam.tz = this.defaultZoom(); }
+    else if (z0 && this.state) { // R 15.1: the board viewport changed (spectate bar, rotation, URL bar): keep the zoom relative to the level
+      const k = this.defaultZoom() / z0, g = this.cd && this.cd.g;
+      if (Math.abs(k - 1) > 0.005) { this.cam.z *= k; this.cam.tz *= k; if (g) { g.z0 *= k; g.z1 *= k; g.vz *= k; } }
+    }
   }
   setPad(t, b, r = 0) { this.pad = { t, b, r }; this.resize(); }
   // R 15.0: two zoom levels. 'close' = an 8x8-tile window (the short side of the board viewport spans 8 tiles, like a
@@ -179,11 +190,13 @@ export class Renderer {
     if (!glide || !this.state) return;
     const cd = this.cd, b = this.bounds;
     if (l === 'board') { cd.user = false; cd.glide(b ? (b.x0 + b.x1 + 1) / 2 : SIZE / 2, b ? (b.y0 + b.y1 + 1) / 2 : SIZE / 2, this.fitZoom, { force: true }); return; }
-    const me = this.myId != null ? unitById(this.state, this.myId) : null, id = me && me.alive ? me.id : (cd.watch ?? this.state.active), d = this.disp.get(id);
+    const me = this.myId != null ? unitById(this.state, this.myId) : null, id = me && me.alive ? me.id : (cd.watch ?? cd.actor ?? this.state.active), d = this.disp.get(id); // R 15.1: spectating Auto: the piece on screen (the beat's actor), not the live state's (up to a turn ahead)
     cd.user = false; cd.watch = me && me.alive ? null : cd.watch;
     if (d) cd.glide(d.tx + 0.5, d.ty + 0.5, this.closeZoom(), { force: true }); else cd.glide(null, null, this.closeZoom(), { force: true });
   }
-  toggleZoom() { this.setZoomLevel(this.zoomLevel === 'board' ? 'close' : 'board'); return this.zoomLevel; }
+  // R 15.1: toggles from the level on screen, not the stored one: after a zoom-out the level never set (death, Siege
+  // defeat, the pre-intro wide view) one tap used to 'switch' to Board with no visible change
+  toggleZoom() { const z = this.cam.tz || this.cam.z, seen = this.state && this.fitZoom && z < Math.sqrt(this.fitZoom * this.closeZoom()) ? 'board' : this.state ? 'close' : this.zoomLevel; this.setZoomLevel(seen === 'board' ? 'close' : 'board'); return this.zoomLevel; }
   // keeps the HUD toggle (#s-game [data-act=zoom]) in step: data-level + label, for pinch-driven level changes too
   zoomUI() {
     if (this.c.id !== 'board' || typeof document === 'undefined') return;
@@ -212,10 +225,16 @@ export class Renderer {
   // the recentre tap: hand the camera back to the director and glide to the piece
   recentre(x, y) { this.cd.user = false; this.cd.watch = null; this.cd.glide(x + 0.5, y + 0.5, this.defaultZoom(), { force: true }); }
   // spectator target: null follows every turn, an id follows that piece's turns (idempotent: called on every update)
-  spectate(id) { const cd = this.cd; if (cd.specSet && cd.watch === id) return; cd.specSet = true; cd.watch = id; cd.user = false; const d = this.disp.get(id ?? (this.state && this.state.active)); if (d) cd.glide(d.tx + 0.5, d.ty + 0.5, null, { force: true }); }
+  // R 15.1: glides at the current zoom level's zoom (a push-in or the death zoom-out no longer sticks) to the piece on
+  // screen (Auto: the current beat's actor, not the live state's next actor)
+  spectate(id) { const cd = this.cd; if (cd.specSet && cd.watch === id) return; cd.specSet = true; cd.watch = id; cd.user = false; cd.shotBack = null; const d = this.disp.get(id ?? cd.actor ?? (this.state && this.state.active)); if (d) cd.glide(d.tx + 0.5, d.ty + 0.5, this.defaultZoom(), { force: true }); }
+  // R 15.1: is timeline time t (or the next `ahead` s) inside a calm span (my own actions, an ultimate, a kill)? pace() keeps those at 1x
+  calmAt(t, ahead = 0) { const c = this.calm; if (!c || !c.length) return false; if (c[0][1] < t - 2) this.calm = c.filter((p) => p[1] >= t); for (const p of this.calm) if (p[0] <= t + ahead && p[1] >= t) return true; return false; }
   setCamMode(m) { this.cd.mode = m === 'mine' || m === 'free' ? m : 'all'; }
   // real ms until the visuals of the latest state start playing (callouts wait this long so they land with the action)
   leadMs() { return Math.max(0, ((this.lastBase ?? this.time) - this.time) / (this.cd.speed || 1)) * 1000; }
+  // R 15.1: real seconds of queued visuals still to play (everything up to the end of the latest state's sequence)
+  backlog() { return Math.max(0, Math.max(this.seqEnd || 0, this.introEnd || 0) - this.time) / (this.cd.speed || 1); }
   zoomBy(f, sx = this.CX ?? this.W / 2, sy = this.CY) {
     const [wx, wy] = this.toWorld(sx, sy);
     this.cam.z = this.cam.tz = Math.max(this.minZ, Math.min(this.maxZ, this.cam.z * f));
@@ -241,7 +260,7 @@ export class Renderer {
   }
   overview() { this.setZoomLevel('board'); }
   closeup() { this.setZoomLevel('close'); }
-  reset() { this.zoomLevel = 'close'; this.zoomUI(); this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; this.banner = null; this.dim = null; this.lights = []; this.fcache = null; this.cd.reset(); this.beats = []; this.cineFree = 0; this.lastActEnd = 0; this.introEnd = 0; this.lastBase = null; }
+  reset() { this.zoomLevel = 'close'; this.zoomUI(); this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; this.banner = null; this.dim = null; this.lights = []; this.fcache = null; this.cd.reset(); this.beats = []; this.calm = []; this.cineFree = 0; this.lastActEnd = 0; this.introEnd = 0; this.lastBase = null; }
 
   kick(n) { if (this.shakeOn && !this.reduced) this.shake = Math.min(16, this.shake + n); }
   hitstop(t) { if (!this.reduced) this.hs = Math.max(this.hs, t); }
@@ -259,6 +278,7 @@ export class Renderer {
     for (const T of this.timers) T.at = f(T.at);
     for (const d of this.disp.values()) { if (d.deathAt != null) d.deathAt = f(d.deathAt); if (d.hideUntil != null) d.hideUntil = f(d.hideUntil); if (d.drop && !d.drop.landed) d.drop.t0 = f(d.drop.t0); }
     for (const b of this.beats) b.at = f(b.at);
+    if (this.calm) for (const p of this.calm) { p[0] = f(p[0]); p[1] = f(p[1]); }
     this.seqEnd = f(end); this.cineFree = f(this.cineFree || 0); this.lastActEnd = f(this.lastActEnd || 0); if (this.cd.myTurnAt > E) this.cd.myTurnAt = f(this.cd.myTurnAt);
     this.cd.stats.compress++;
   }
@@ -267,7 +287,7 @@ export class Renderer {
     const saveBase = this.base; this.base = this.time;
     for (const t of due) t.fn();
     this.base = saveBase;
-    this.seqEnd = this.time; this.beats = []; this.cineFree = 0; this.lastActEnd = 0; this.cd.myTurnAt = -1; this.cd.stats.flush++;
+    this.seqEnd = this.time; this.beats = []; this.calm = []; this.cineFree = 0; this.lastActEnd = 0; this.cd.myTurnAt = -1; this.cd.stats.flush++;
     for (const d of this.disp.values()) { d.t0 = -9; d.x = d.sx = d.tx; d.y = d.sy = d.ty; d.lunge = null; d.warp = null; }
   }
   sfx(n) { this.hooks.sfx && this.hooks.sfx(n); }
@@ -327,7 +347,8 @@ export class Renderer {
     this.base = Math.max(this.time, this.seqEnd || 0, this.introEnd || 0, this.time + this.cd.busy());
     this.lastBase = this.base; this.beatEnd = null;
     const now0 = this.base, cd = this.cd, back = this.base - this.time;
-    const quick = back > 2.5 ? 0.45 : back > 1.2 ? 0.7 : 1; // holds and glides shrink when turns pile up
+    const quick = back > 6 ? 0.6 : back > 3.5 ? 0.8 : 1; // holds and glides shrink when turns pile up (R 15.1: later and gentler, was 0.45 / 0.7 from 1.2 s)
+    if (!this.calm) this.calm = [];
     this.beats = this.beats.filter((b) => b.at > this.time - 4);
     // the turn's action box: the actor, where it goes, what its ability covers and everyone it hits
     const actor = prevActive, ti = events.findIndex((q) => q.e === 'turn');
@@ -373,6 +394,7 @@ export class Renderer {
           // pure zoom back at impact, same centre)
           if (this.base + t < (this.cineFree || 0)) t = this.cineFree - this.base;
           const st = t, ub = e.id === actor ? box : null; this.cineFree = this.base + st + 1.12;
+          this.calm.push([this.base + st, this.base + st + 1.6]); // R 15.1: an ultimate always plays at real speed
           if (ub) this.camAt(st, () => cd.act(ub, actor, { push: 1.14, hitsMe }));
           this.later(st, () => {
             const u = unitById(this.state, e.id);
@@ -406,6 +428,7 @@ export class Renderer {
       } else if (e.e === 'death') {
         const d = this.disp.get(e.id); if (d) d.deathAt = now0 + t + 0.06;
         this.later(t + 0.06, () => this.onDeath(e));
+        this.calm.push([now0 + t - 0.3, now0 + t + 1.2]); // R 15.1: a kill (and its finisher) plays at real speed
         t += 0.2;
       } else if (e.e === 'portal') {
         const d = this.disp.get(e.id);
@@ -455,6 +478,8 @@ export class Renderer {
     if (ti < 0 && (box || hits)) this.lastActEnd = this.base + t;
     if (ti < 0 && s.active != null && s.active !== prevActive && !s.over) { const id = s.active; this.camAt(t, () => cd.turn(id)); this.beats.push({ at: this.base + t, actor: id }); } // a turn change without a 'turn' event
     this.seqEnd = this.base + t + 0.05;
+    // R 15.1: the viewer's own actions play at real speed (from the batch start to its last visual)
+    if (actor != null && actor === this.myId && events.some((q) => (q.e === 'move' || q.e === 'ability') && q.id === actor)) this.calm.push([now0, this.seqEnd]);
     this.base = null;
   }
 

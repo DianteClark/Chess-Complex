@@ -144,6 +144,8 @@ class Voice {
     addEventListener('blur', () => this.setPtt(false));
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.setPtt(false); });
     document.addEventListener('visibilitychange', () => { if (!document.hidden) this.watchPerm(); }); // back from the system Settings app
+    // iPhone may refuse to start a voice that arrived without a recent tap: any tap restarts stalled voices
+    document.addEventListener('pointerdown', () => { for (const e of this.calls.values()) if (e.el && e.el.paused && e.stream) e.el.play().catch(() => {}); }, true);
     this.loop = setInterval(() => this.tick(), 100);
     this.buildCard(); this.bindMicRow(); this.watchPerm();
     this.renderLobby();
@@ -269,18 +271,16 @@ class Voice {
     if (!this.ac || !this.mic) return;
     try { this.mySrc = this.ac.createMediaStreamSource(this.mic); this.myAn = this.ac.createAnalyser(); this.myAn.fftSize = 512; this.mySrc.connect(this.myAn); } catch {}
   }
-  remoteNodes(ent) { // remote voice -> analyser + per-player gain -> audio.js voiceOut (limiter -> speakers)
-    try { ent.src && ent.src.disconnect(); ent.gain && ent.gain.disconnect(); } catch {}
+  // 15.2: remote voices always play through their own <audio> element. Routing remote WebRTC audio through Web Audio
+  // (with the element muted) is silent on iPhone Safari and broke whenever the game rebuilt its AudioContext for the mic.
+  // Web Audio is only used for the speaking meter here (analyser, not connected to the speakers).
+  remoteNodes(ent) {
+    try { ent.src && ent.src.disconnect(); } catch {}
     ent.src = ent.gain = ent.an = null;
-    const out = this.ac && voiceOut();
-    if (!out || !ent.stream) { if (ent.el) ent.el.muted = false; return; }
-    try {
-      // Chrome only pulls remote WebRTC audio into Web Audio when the stream is also attached to a media element;
-      // the element stays muted so the voice is heard once (through Web Audio), never twice
-      if (ent.el) ent.el.muted = true;
-      ent.src = this.ac.createMediaStreamSource(ent.stream); ent.gain = this.ac.createGain(); ent.an = this.ac.createAnalyser(); ent.an.fftSize = 512;
-      ent.src.connect(ent.an); ent.src.connect(ent.gain); ent.gain.connect(out);
-    } catch { if (ent.el) ent.el.muted = false; ent.gain = null; }
+    if (ent.el) ent.el.muted = this.mutedV.has(ent.pid);
+    if (!this.ac || !ent.stream) return;
+    try { ent.src = this.ac.createMediaStreamSource(ent.stream); ent.an = this.ac.createAnalyser(); ent.an.fftSize = 512; ent.src.connect(ent.an); }
+    catch { ent.src = ent.an = null; }
   }
   rewire(ac) { // audio.js rebuilt the context: move meters and remote voices onto the new one
     if (this.state === 'off') return;
@@ -383,7 +383,7 @@ class Voice {
   setVolume(pid, v) { this.vol[pid] = Math.max(0, Math.min(1, +v || 0)); this.applyVol(pid); }
   applyVol(pid) {
     const v = this.mutedV.has(pid) ? 0 : (this.vol[pid] ?? 1);
-    for (const e of this.calls.values()) if (e.pid === pid) { if (e.gain) e.gain.gain.value = v * 1.4; else if (e.el) { e.el.muted = v === 0; try { e.el.volume = v; } catch {} } }
+    for (const e of this.calls.values()) if (e.pid === pid && e.el) { e.el.muted = v === 0; try { e.el.volume = v; } catch {} if (e.el.paused) e.el.play().catch(() => {}); }
   }
   toggleMute(pid) { if (this.mutedV.has(pid)) this.mutedV.delete(pid); else this.mutedV.add(pid); this.applyVol(pid); this.changed(); }
 
@@ -483,7 +483,7 @@ class Voice {
     if (!this.roster.has(pid)) return;
     if (this.state !== 'on') { row.appendChild(el('small', 'vc-tag', 'In voice')); return; }
     const m = el('button', 'vc-mute' + (this.mutedV.has(pid) ? ' on' : ''), this.mutedV.has(pid) ? 'Voice muted' : 'Mute voice'); m.dataset.vc = 'mute'; m.dataset.pid = pid; m.setAttribute('aria-pressed', this.mutedV.has(pid) ? 'true' : 'false');
-    const r = el('input', 'vc-vol'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.05; r.value = this.vol[pid] ?? 1; r.dataset.vol = pid; r.setAttribute('aria-label', 'Voice volume');
+    const r = el('input', 'vc-vol'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.05; r.value = this.vol[pid] ?? 1; r.dataset.vol = pid; r.setAttribute('aria-label', 'Voice volume'); r.style.setProperty('--p', Math.round((this.vol[pid] ?? 1) * 100) + '%');
     row.append(m, r);
   }
   renderLobby() {

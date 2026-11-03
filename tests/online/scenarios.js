@@ -33,7 +33,7 @@ async function expectAdvancing(run, label, ms = 4000, msg = '') {
 async function finish(run, host, keep) { await killAllExcept(host, keep); }
 async function dieAndModal(run, host, label, pid) {
   await hostKill(host, pid);
-  const ok = await waitDead(run.pages[label]);
+  const t0 = Date.now(); const ok = await waitDead(run.pages[label], 15000); run.note(`${label}: dead modal after ${Date.now() - t0} ms`);
   run.check(ok, `${label}: Eliminated modal never appeared`);
   await run.shot(label, 'dead');
 }

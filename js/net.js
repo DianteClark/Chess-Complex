@@ -199,7 +199,13 @@ export class GameHost {
     this.lastTurn = -1; this.deadline = 0;
     this.aiT = null; this.timerT = null; this.fast = false;
   }
-  start() { this.publish(this.s.v === 0 && !this.s.tutorial ? introEvents(this.s) : []); this.schedule(); } // 15.0 (W): {e:'location', id} on the first state
+  // 15.0 (W): {e:'location', id} on the first state. 15.1 (D): introMs holds the first turn (bots and the turn clock)
+  // back while every screen plays the match intro; go() starts it early (solo, when the player taps through).
+  start(introMs = 0) {
+    this.publish(this.s.v === 0 && !this.s.tutorial ? introEvents(this.s) : []);
+    if (introMs > 0) { this.introUntil = Date.now() + introMs; this.introT = setTimeout(() => this.go(), introMs); } else this.schedule();
+  }
+  go() { if (!this.introUntil) return; clearTimeout(this.introT); this.introUntil = 0; this.schedule(); }
   publish(ev) { this.emit({ t: 'state', state: structuredClone(this.s), ev, dl: this.deadline ? Math.max(0, this.deadline - Date.now()) : -1 }); }
   act(pid, a) {
     if (this.s.over) return false;
@@ -210,12 +216,15 @@ export class GameHost {
   setBot(pid) { const u = this.s.units.find((v) => v.pid === pid); if (u) { u.bot = true; if (this.s.active === u.id) this.schedule(); } }
   schedule() {
     clearTimeout(this.aiT); clearTimeout(this.timerT);
-    const s = this.s; if (s.over) return;
+    const s = this.s; if (s.over || this.introUntil) return; // 15.1 (D): go() schedules once the intro is over
     const u = unitById(s, s.active); if (!u) return;
     if (s.turnNo !== this.lastTurn) { this.lastTurn = s.turnNo; this.deadline = this.noTimer ? 0 : Date.now() + ((this.s.rules && this.s.rules.turnMs) || TURN_MS) + TURN_GRACE; if (!(u.kind === 'hollow' || u.bot)) this.publish([]); else this.deadline = 0; }
     if (u.kind === 'hollow' || u.bot) {
       const turn = s.turnNo;
-      this.aiT = setTimeout(() => this.runAI(u.id, turn), this.fast ? 0 : u.kind === 'hollow' ? 260 : 520);
+      // R 15.1: bots never act faster than the host's screen can show turns at real speed: when its playback backlog
+      // (NET.backlog(), ms, set by render.js) runs past ~0.9 s, the bot thinks that much longer (capped at 3 s)
+      const lag = !this.fast && NET.backlog ? Math.min(3000, Math.max(0, NET.backlog() - 900)) : 0;
+      this.aiT = setTimeout(() => this.runAI(u.id, turn), this.fast ? 0 : (u.kind === 'hollow' ? 260 : 520) + lag);
     } else {
       // 15.0 (N): a player who reconnects during their own turn (the bot had it, so no deadline) gets a fresh clock
       // instead of an instant timeout
@@ -238,5 +247,5 @@ export class GameHost {
     };
     step(0);
   }
-  stop() { clearTimeout(this.aiT); clearTimeout(this.timerT); this.s.over = true; }
+  stop() { clearTimeout(this.aiT); clearTimeout(this.timerT); clearTimeout(this.introT); this.introUntil = 0; this.s.over = true; }
 }

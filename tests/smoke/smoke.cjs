@@ -192,14 +192,16 @@ async function playMode(T, mode, { die = false, bots = null, rematch = false } =
   T.check((await screenId(p)) === 's-game', `${mode}: did not enter game`);
   const info = await p.evaluate(() => { const g = window.__cc.game; return { mode: g.s && g.s.mode, n: g.s && g.s.units.filter((u) => u.kind === 'player').length }; });
   T.check(info.mode === mode, `${mode}: engine mode is ${info.mode}`);
-  await sleep(1500); await shot(T, `${mode}-start`); await audit(T, `${mode}-hud`);
+  await sleep(1500); await shot(T, `${mode}-start`);
+  await p.evaluate(() => { const i = window.__cc.intro; i && i.skipAll && i.skipAll(); }); await sleep(600); // 15.2: the ~15 s intro is covered by tests in /tmp/d151
+  await audit(T, `${mode}-hud`);
   // exercise the action bar once on my turn: tap Attack and Sig then Move
   await waitFor(p, () => window.__cc.game.myTurn(), 15000);
   for (const sl of ['atk', 'sig', 'move']) { const sel = `#h-actions [data-slot="${sl}"]`; if (await visible(p, sel)) await tap(T, sel, { wait: 200 }); }
   if (die) {
     await speedUp(p); await sleep(2500);
     await killMe(p);
-    const dead = await waitFor(p, () => !document.querySelector('#m-dead').classList.contains('hidden') || !document.querySelector('#m-results').classList.contains('hidden'), 12000);
+    const dead = await waitFor(p, () => !document.querySelector('#m-dead').classList.contains('hidden') || !document.querySelector('#m-results').classList.contains('hidden'), 25000); // 15.2: the modal waits for real-speed playback; speedUp lets bots outrun it
     T.check(dead, `${mode}: no Eliminated modal after death`);
     if (await visible(p, '#m-dead [data-act="spectate"]')) {
       await shot(T, `${mode}-dead`);
@@ -222,6 +224,7 @@ async function playMode(T, mode, { die = false, bots = null, rematch = false } =
     await tap(T, '#btn-rematch', { wait: 1500 });
     const st = await p.evaluate(() => ({ over: window.__cc.game.s.over, turn: window.__cc.game.s.turnNo, res: !document.querySelector('#m-results').classList.contains('hidden'), mode: window.__cc.game.s.mode }));
     T.check(!st.over && !st.res && st.mode === mode, `${mode}: rematch did not start a fresh match ${JSON.stringify(st)}`);
+    await p.evaluate(() => { const i = window.__cc.intro; i && i.skipAll && i.skipAll(); }); await sleep(600); // 15.2: rematch replays the intro
     // forfeit via in-game menu
     await tap(T, '#s-game [data-act="menu"]', { wait: 300 });
     await tap(T, '#m-menu [data-act="forfeit"]', { wait: 900 });

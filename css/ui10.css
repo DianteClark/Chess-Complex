@@ -520,3 +520,74 @@ body.reduced #s-game .event-chip.gold { animation: none; }
 #s-game .hpbar i::after { content: ''; position: absolute; inset: 0 0 50% 0; background: linear-gradient(180deg, rgba(255,255,255,.28), transparent); pointer-events: none; }
 #s-game .ult-btn:not(.ready) .ur-fg { transition: stroke-dashoffset .5s cubic-bezier(.2,.8,.2,1); }
 #s-game .ult-btn.ready .ult-k { letter-spacing: .14em; }
+
+/* ---------------------------------------------------------------- 15.1 (D) match intro: one calm sequence */
+/* the HUD steps aside while the intro plays: one thing on screen at a time */
+#s-game.intro-on .hud-top, #s-game.intro-on .hud-bottom, #s-game.intro-on .ult-btn, #s-game.intro-on .emote-wrap, #s-game.intro-on .event-chip,
+#s-game.intro-on .timer, #s-game.intro-on .chat-log, #s-game.intro-on .feed, #s-game.intro-on .dboss, #s-game.intro-on [data-dir-avoid], #s-game.intro-on .gm-tip, #s-game.intro-on .lethal { opacity: 0 !important; visibility: hidden !important; transition: opacity .25s; }
+#s-game .hud-top, #s-game .hud-bottom { transition: opacity .35s; }
+#s-game.intro-on .contenders { animation: ibIn .3s ease-out both; cursor: default; }
+#s-game .contenders.ib-out { animation: ibOut .3s ease-in forwards; }
+#s-game.intro-on .lw-skip { display: none; }
+@keyframes ibIn { from { opacity: 0; } }
+@keyframes ibOut { to { opacity: 0; } }
+/* tap catcher: one tap = one step (the sequence decides what a tap means) */
+.intro-tap { position: absolute; inset: 0; z-index: 11; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: none; }
+.intro-tap .it-hint { position: absolute; left: 0; right: 0; bottom: calc(18px + var(--sb, 0px)); text-align: center; font-size: 11px; font-weight: 800; letter-spacing: .26em; text-transform: uppercase; color: rgba(255,255,255,.62); animation: pulseA 1.8s ease-in-out infinite; pointer-events: none; }
+.intro-tap.wait .it-hint { display: none; }
+/* progress dots + Skip intro */
+.intro-bar { position: absolute; z-index: 12; left: 0; right: 0; top: calc(8px + var(--st, 0px)); height: 40px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.intro-bar .ib-dots { display: flex; gap: 8px; padding: 6px 10px; border-radius: 99px; background: rgba(8,7,14,.55); }
+.intro-bar .ib-dots i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.22); transition: background .25s, transform .25s; }
+.intro-bar .ib-dots i.past { background: rgba(255,210,77,.55); }
+.intro-bar .ib-dots i.on { background: var(--gold2, #ffd24d); transform: scale(1.25); box-shadow: 0 0 8px rgba(255,210,77,.7); }
+.intro-bar .ib-skip { position: absolute; right: calc(10px + env(safe-area-inset-right, 0px)); top: 0; min-height: 40px; padding: 0 14px; border-radius: 99px; border: 1px solid rgba(255,255,255,.22); background: rgba(8,7,14,.6); color: #fff; font: 700 12px/1 var(--ui, system-ui); letter-spacing: .08em; pointer-events: auto; cursor: pointer; }
+.intro-bar .ib-skip:active { transform: scale(.96); }
+/* the location briefing card: name, one line, hazard + signature event */
+.intro-brief { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 56px 16px calc(44px + var(--sb, 0px));
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--lc) 16%, rgba(10,9,16,.86)), rgba(5,4,10,.94) 75%); animation: ibIn .3s ease-out both; }
+.intro-brief.out { animation: ibOut .3s ease-in forwards; }
+.ib-card { width: min(420px, 100%); max-height: 100%; overflow: hidden; padding: 18px 18px 16px; border-radius: 16px; text-align: center;
+  background: linear-gradient(180deg, rgba(28,24,40,.96), rgba(14,12,22,.96)); border: 1px solid color-mix(in srgb, var(--lc) 45%, transparent);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.5), 0 18px 50px rgba(0,0,0,.6), 0 0 40px color-mix(in srgb, var(--lc) 18%, transparent); animation: ibCard .45s cubic-bezier(.2,1.2,.4,1) both; }
+@keyframes ibCard { from { opacity: 0; transform: translateY(14px) scale(.97); } }
+.ib-kick { font-size: 11px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase; color: var(--lc); }
+.ib-name { margin: 6px 0 4px; font-family: var(--display, Georgia, serif); font-weight: 900; font-size: clamp(24px, 7.4vw, 34px); line-height: 1.05; color: #fff; text-shadow: 0 0 22px color-mix(in srgb, var(--lc) 55%, transparent); }
+.ib-line { margin: 0 auto 12px; max-width: 34em; font-size: 14px; line-height: 1.4; color: rgba(240,232,214,.9); }
+.ib-rows { display: grid; gap: 8px; text-align: left; }
+.ib-row { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 2px; align-items: baseline; padding: 9px 12px; border-radius: 10px; background: rgba(255,255,255,.05); border-left: 3px solid var(--lc); }
+.ib-row em { grid-row: 1; font-style: normal; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.6); }
+.ib-row b { grid-row: 1; font-size: 15px; color: #fff; }
+.ib-row span { grid-column: 1 / -1; font-size: 13px; line-height: 1.35; color: rgba(240,232,214,.82); }
+.ib-row.hz { border-left-color: #ff8a5a; } .ib-row.hz b { color: #ffc2a0; }
+.ib-row.ev { border-left-color: var(--lc); } .ib-row.ev b { color: color-mix(in srgb, var(--lc) 55%, #fff); }
+.ib-row.mb { border-left-color: #b98cff; }
+.intro-brief.calm, .intro-brief.calm .ib-card { animation-duration: .01s; }
+body.bigtext .ib-line { font-size: 15px; } body.bigtext .ib-row span { font-size: 14px; }
+@media (max-height: 520px) {
+  .intro-brief { padding: 50px 16px calc(36px + var(--sb, 0px)); }
+  .ib-card { width: min(640px, 100%); padding: 12px 16px; }
+  .ib-name { font-size: 26px; margin: 4px 0 2px; }
+  .ib-line { margin-bottom: 8px; font-size: 13px; }
+  .ib-rows { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .ib-row { padding: 7px 10px; }
+}
+/* online: finished early, everyone starts together on the host's clock */
+.intro-wait { position: absolute; z-index: 10; left: 50%; top: 42%; transform: translate(-50%, -50%); padding: 10px 18px; border-radius: 99px; background: rgba(8,7,14,.8); border: 1px solid rgba(255,210,77,.4); color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .08em; white-space: nowrap; }
+
+/* ---------------------------------------------------------------- 15.1 (D) pawn line: its own road in Promote + HUD tag */
+#m-promote .promo-stay { margin-top: 6px; }
+#m-promote .promo-sec.ps-div { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+#m-promote .promo-sec.ps-div::before, #m-promote .promo-sec.ps-div::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,.16); }
+#m-promote .promo-pl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; box-sizing: border-box; margin: 6px 0 8px; padding: 8px; border-radius: 14px; background: rgba(214,176,92,.06); border: 1px dashed rgba(214,176,92,.45); }
+#m-promote .ppl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 0 4px; }
+#m-promote .ppl-head b { font-size: 12px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--gold2, #ffd24d); }
+#m-promote .promo-pl > .popt { min-width: 0; width: auto; margin: 0; }
+#m-promote .promo-pl > .popt > div { min-width: 0; }
+#m-promote .ppl-head span { min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: rgba(240,232,214,.85); }
+#m-promote .popt.pl-card { border-color: rgba(214,176,92,.4); }
+#m-promote .promo-sec.ps-sub { margin-top: 4px; }
+#s-game .card-name #h-piece { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+#s-game .card-name .pl-rank { font-size: 11px; letter-spacing: .04em; text-transform: none; color: rgba(240,232,214,.75); font-weight: 600; }
+@media (max-height: 520px) { .intro-bar { justify-content: flex-start; padding-left: calc(14px + env(safe-area-inset-left, 0px)); } } /* landscape: the dots stay clear of the wheel's kicker */
+#m-promote .popt .skip { white-space: nowrap; }

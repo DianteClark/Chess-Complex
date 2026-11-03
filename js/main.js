@@ -13,8 +13,10 @@ import { FX } from './fx.js';
 import { sfx, playNamed, unlockAudio, settings, saveSettings, haptic } from './audio.js';
 Object.assign(settings, Object.assign({ motion: !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches), onetap: false, quality: 'auto', cb: false, bigtext: false }, settings));
 import { music } from './music.js';
-import { director, STATUS, hasStatus, statusList, statusChips, statusGlossary, STATUS_CALL, locationInfo, loadLocations, compass, ASCENDED } from './announcer.js';
+import { director, STATUS, hasStatus, statusList, statusChips, statusGlossary, STATUS_CALL, locationInfo, loadLocations, compass, ASCENDED, intro, INTRO, introMs, briefMs, briefHTML } from './announcer.js';
+import { LOCATIONS } from './locations.js'; // 15.1 (D): the intro briefing reads the location's signature event
 import { initScene, sequelReveal, showroom, modeArt, newsFrom } from './menus.js';
+import { keepAwake } from './wakelock.js'; // 15.2: no screen timeout in lobbies and matches
 import * as F from './front15.js'; // F 15.0: title rank, profile editor, grouped Play, build slots + unlocks, location wheel
 import { GameHost, openServer, openClient, makeCode } from './net.js';
 import { chat, hostCheck as chatHostCheck, BOT_LINES } from './chat.js';
@@ -318,6 +320,9 @@ function renderLessons() {
   $('#lesson-list').innerHTML = LESSONS.map((l, i) => `<button class="lesson ${done.includes(l.id) ? 'done' : ''} ${i === nextIdx ? 'next' : ''}" data-lesson="${l.id}" style="animation-delay:${i * 0.05}s"><div class="num"><span>${i + 1}</span></div><div><b>${l.name}</b><p>${l.blurb}</p></div><span class="st">${done.includes(l.id) ? 'Done' : i === nextIdx ? 'Start' : 'Play'}</span></button>`).join('')
     + `<button class="lesson grad ${done.includes('graduation') ? 'done' : ''} ${nextIdx === -1 && !done.includes('graduation') ? 'next' : ''}" data-lesson="graduation"><div class="num"><span>G</span></div><div><b>Graduation</b><p>A real match against 2 easy bots. 100 Marks for finishing.</p></div><span class="st">${done.includes('graduation') ? 'Done' : 'Play'}</span></button>`;
 }
+// 15.1 (D): the pawn line, spelled out wherever the piece name shows (owner: "is Champion the pawn promotion?")
+const pawnRank = (p) => ({ pawn: 1, veteran: 2, champion: 3 })[p] || 0;
+const PAWN_TAG = { veteran: 'Pawn rank 2/3', champion: 'Pawn rank 3/3' };
 const coachUI = {
   coach(text, obj, next) {
     const el = $('#coach'); el.classList.remove('hidden');
@@ -477,7 +482,7 @@ function startSolo(bots = null, modeArg = null) {
   sess.send = (a) => sess.host.act('me', a);
   sess.emote = (k) => hostEmote(sess, 'me', k); sess.chat = (m) => hostChat(sess, 'me', m);
   game.enter();
-  sess.host.start();
+  sess.host.start(game.introDelay(sess.host.s, false)); // 15.1 (D): first turn waits for the intro (go() when it ends)
 }
 
 // 10.0 (A8): player cards in seats, with open seats shown (as divs, so `li` count stays the player count).
@@ -533,7 +538,8 @@ function startHostLobby() {
             conn.pid = pid; sess.conns.set(pid, conn); party.lobbyBack(sess, pid);
             conn.send({ t: 'welcome', pid }); voice.hostSync(sess);
             const u = sess.started && sess.host && sess.host.s.units.find((v) => v.pid === pid);
-            if (u && !(sess.left && sess.left.has(pid))) { u.bot = false; conn.send({ t: 'start', pid, mid: sess.mid, resume: true }); sess.host.publish([]); sess.host.schedule(); if (!sess.host.s.over) game.feed(`<b>${esc(u.name)}</b> reconnected`); }
+            // 15.2 (N): a member already back in the party lobby (tapped Back to Party) is not pulled into the old match
+            if (u && !(sess.left && sess.left.has(pid)) && !(sess.party && sess.party.back.has(pid))) { u.bot = false; conn.send({ t: 'start', pid, mid: sess.mid, resume: true }); sess.host.publish([]); sess.host.schedule(); if (!sess.host.s.over) game.feed(`<b>${esc(u.name)}</b> reconnected`); }
             renderLobby();
             return;
           }
@@ -585,7 +591,7 @@ function startHost() {
   sess.send = (a) => sess.host.act('me', a);
   for (const c of sess.conns.values()) c.send({ t: 'start', pid: c.pid, mid });
   game.enter();
-  sess.host.start();
+  sess.host.start(game.introDelay(sess.host.s, true)); // 15.1 (D): first turn waits for every screen's intro (fixed, host clock)
 }
 
 function drawJoinLobby(m) {
@@ -619,6 +625,9 @@ function joinGame() {
       else if (m.t === 'lobby') { sess.lobby = Array.isArray(m.players) ? m.players : []; voice.changed(); drawJoinLobby(m); party.onLobby(sess, m); }
       else if (m.t === 'full' || m.t === 'bye') { if (sess.byeReason) return; sess.byeReason = m.reason || 'full'; gone({ full: 'That lobby is full.', started: 'That match has already started.', kicked: 'The host removed you from the lobby.', ended: 'The host ended the match.', closed: 'The party leader left, so the party has closed.' }[sess.byeReason] || 'Disconnected.'); }
       else if (m.t === 'start') {
+        // 15.2 (N): owner bug "froze after our second match": a reconnect while this member waits in the party lobby
+        // (Back to Party) got the old match's resume and was dropped onto its finished board with no results. Stay put.
+        if (m.resume && m.mid && m.mid === sess.mid && (sess.benched || screen !== 'game')) { sess.myPid = m.pid; return; }
         sess.myPid = m.pid; sess.benched = false; sess.amReady = false; party.netBanner(null);
         if (m.resume && m.mid && m.mid === sess.mid && game.s && screen === 'game') return; // 15.0 (N): reconnected mid-match: carry on where we were
         sess.mid = m.mid; matchKey = typeof m.mid === 'string' ? m.mid.slice(0, 24) : 'm' + Date.now(); game.enter();
@@ -699,7 +708,7 @@ const game = {
   },
   after(fn, ms) { const g = this.gen; return setTimeout(() => { if (g === this.gen) fn(); }, (ms || 0) + (this.evLag || 0)); }, // R 10.3: + evLag while handling a state's events
   enter() {
-    this.gen = (this.gen || 0) + 1; F.stopWheel(); // F 15.0
+    this.gen = (this.gen || 0) + 1; F.stopWheel(); intro.stop(); $$('#intro-brief, #intro-wait').forEach((x) => x.remove()); $('#contenders').classList.add('hidden'); // F 15.0; 15.1 (D) intro
     this.ms = { kills: 0, hollows: 0, ults: 0, crown: false, rook: false, queen: false, pieces: ["pawn"], revives: 0, colossi: 0 }; this.best = null; this.potmOn = false; this.minHp = 1; this.taken = {}; this.since = {}; this.killedBy = null; this.danger = false; this.r.danger = null; $('#btn-danger').classList.remove('on');
     this.r.reduced = settings.motion; this.r.setQuality(settings.quality); this.r.setCamMode(settings.cam); // R 10.3
     document.body.classList.toggle('bigtext', !!settings.bigtext);
@@ -720,6 +729,9 @@ const game = {
     const top = coach.classList.contains('hidden') ? $('.hud-top').getBoundingClientRect().bottom : coach.getBoundingClientRect().bottom;
     const bot = $('.hud-bottom').getBoundingClientRect();
     const ub = $('#ult-btn').getBoundingClientRect();
+    // R 15.1: spectating hides the HUD bottom row (rect 0x0 at the top), which used to give a 840 px bottom pad and a
+    // 120 px board strip after any resize (iPhone URL bar, rotation, boss bar); the spectate bar is the bottom edge now
+    if (!bot.width && !bot.height) { const sb = $('#spec-bar').getBoundingClientRect(), sbt = sb.height ? sb.top : innerHeight; this.r.setPad((director.bossOn ? Math.max(top, director.bossEl.getBoundingClientRect().bottom) : top) + 4, Math.max(4, innerHeight - sbt + 4)); return; } // --hb keeps the live HUD's value (chat log stays above the emote button)
     const side = bot.top < innerHeight * 0.5 && bot.left > innerWidth * 0.3; // landscape: HUD is a right-hand column
     if (side) { this.r.setPad((director.bossOn ? Math.max(top, director.bossEl.getBoundingClientRect().bottom) : top) + 4, 4, Math.max(0, innerWidth - bot.left + 4)); $('#s-game').style.setProperty('--hb', '0px'); return; }
     const lowest = Math.min(bot.top, ub.top > 0 ? ub.top : bot.top);
@@ -743,7 +755,7 @@ const game = {
     this.r.myId = mine ? mine.id : null;
     this.r.setState(this.s, m.ev, first);
     if (first && this.s.arena) this.r.setBounds(this.s.arena);
-    if (first) { this.r.startIntro(this.s, this.r.myId); this.after(() => this.fitPad(), 50); }
+    if (first) { if (!this.wantsIntro(this.s)) this.r.startIntro(this.s, this.r.myId); this.after(() => this.fitPad(), 50); } // 15.1 (D): with the intro sequence the camera drop-in plays with "Round 1"
     // R 10.3: callouts timed with after() wait until this state's visuals start playing (turns queue on the renderer's
     // timeline), so banners, feed lines and the ult cine stay in step with the camera beat
     this.evLag = first ? 0 : Math.min(6000, this.r.leadMs()); this.handleEvents(m.ev, first); this.evLag = 0;
@@ -765,22 +777,18 @@ const game = {
     if (first) this.lastAlive = alive;
     if (alive === 2 && this.lastAlive > 2 && !this.s.over) this.after(() => this.banner('Final Two', 'Only one walks away', 'red', { tier: 2, prio: 75, key: 'final', kicker: 'Endgame', level: 4, ttl: 4000 }), 900);
     this.lastAlive = alive;
+    // 15.2 (N): a finished state that arrives without its 'over' event (the link dropped just as the match ended and
+    // the reconnect resent the final state) still leads to results instead of a dead board
+    if (this.s.over && !this.resultsShown && session.mode !== 'tutorial' && !(m.ev || []).some((e) => e.e === 'over')) this.after(() => { if (this.s && this.s.over && !this.resultsShown) this.showResults(); }, 2500);
     this.refresh();
   },
   handleEvents(ev, first) {
     const s = this.s, myId = this.r.myId;
     const tut = session && session.mode === 'tutorial';
     if (first) {
-      if (!tut) {
-        this.showContenders();
-        // F 15.0: the location wheel spins after the contender reveal and lands on s.location; the opening banners wait for it
-        const wl = s.location ? F.wheelMs() + 900 : 0;
-        if (wl) this.after(() => F.locationIntro(this.s || s, { director, sfx }), 2700);
-        this.after(() => s.siege ? this.banner('Hold the Line', `${s.siege.waves} waves. Survive together.`, 'cyan', { kicker: (MODES[s.mode] || {}).name, prio: 45, ttl: 4000 }) : this.banner('Round 1', s.teams ? 'Last team standing wins' : 'Last piece standing wins', '', { kicker: (MODES[s.mode] || {}).name, prio: 45, ttl: 4000 }), 2750 + wl);
-        if (s.mutator && s.mutator !== 'none' && MUTATORS[s.mutator]) { const list = s.mutator === 'chaos' && Array.isArray(s.mutators) ? s.mutators.map((k) => (MUTATORS[k] || {}).name).filter(Boolean).join(' + ') : ''; this.after(() => this.banner(MUTATORS[s.mutator].name, list || MUTATORS[s.mutator].desc, 'cyan', { kicker: 'Hazard', prio: 38, ttl: 6000 }), 3000 + wl); }
-        if (s.mirrorBuild && PASSIVES[s.mirrorBuild.passive]) this.after(() => this.banner('Mirror Match', `Everyone is ${PASSIVES[s.mirrorBuild.passive].name}`, 'cyan', { kicker: 'Same build for all', prio: 39, ttl: 6000 }), 3000 + wl);
-        this.locIntro(s, ev); // D 15.0: location name + one line when the wheel lands
-      }
+      // 15.1 (D): one calm intro (contenders -> wheel -> location briefing -> Round 1); hazard, signature event and
+      // Build of the Day are rows of the briefing card instead of separate banners. A rejoin mid-match gets none of it.
+      if (!tut && this.wantsIntro(s)) this.matchIntro(s);
       return;
     }
     if (!tut) this.checkDiscoveries(ev);
@@ -906,6 +914,7 @@ const game = {
     $('#s-game').classList.add('spectating');
     $('#spec-bar').classList.remove('hidden');
     this.r.follow = true; this.updateSpec();
+    requestAnimationFrame(() => this.fitPad()); setTimeout(() => { if (this.spec) this.fitPad(); }, 360); // R 15.1: the board gets the space the hidden HUD row leaves (again once the bar's rise animation ends)
   },
   cycleSpec(d) {
     const alive = this.s.units.filter((u) => u.alive && u.kind === 'player');
@@ -937,11 +946,70 @@ const game = {
       : ps.length === 2
       ? `<div class="ct-mode">${M.name}</div><div class="ct-duel">${card(ps[0], 0)}<div class="vs">VS</div>${card(ps[1], 2)}</div>`
       : `<div class="ct-mode">${M.name}</div><div class="ct-grid">${ps.map(card).join('')}</div><div class="ct-sub">${ps.length} enter. One leaves.</div>`;
-    el.classList.remove('hidden'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    el.classList.remove('hidden', 'ib-out'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
     sfx.whoosh(); this.after(() => sfx.stinger(1), 400);
-    clearTimeout(this.ctT); this.ctT = setTimeout(() => { el.classList.add('hidden'); director.release(); }, 2700);
-    director.hold(2700);
-    el.onclick = () => { el.classList.add('hidden'); director.release(); };
+    clearTimeout(this.ctT); el.onclick = null; // 15.1 (D): the intro sequence times it and handles the tap
+  },
+  hideContenders() { const el = $('#contenders'); if (el.classList.contains('hidden')) return; el.classList.add('ib-out'); clearTimeout(this.ctT); this.ctT = setTimeout(() => { el.classList.add('hidden'); el.classList.remove('ib-out'); }, 300); },
+  // ---------- 15.1 (D): match intro ----------
+  wantsIntro(s) { return !!(s && !s.tutorial && !(session && session.mode === 'tutorial') && s.v === 0 && !s.over); },
+  // The location briefing: name, one line, then hazard / signature event / shared build as rows (null = no card)
+  introBrief(s) {
+    const M = MODES[s.mode] || {}, rows = [];
+    const LOC = s.location && LOCATIONS[s.location], Li = s.location ? locationInfo(s.location) : null;
+    if (s.mutator && s.mutator !== 'none' && MUTATORS[s.mutator]) {
+      const list = Array.isArray(s.mutators) && s.mutators.length > 1 ? s.mutators.map((k) => (MUTATORS[k] || {}).name).filter(Boolean).join(' + ') : '';
+      rows.push({ k: list ? 'Hazards' : 'Hazard', name: list || MUTATORS[s.mutator].name, desc: list ? s.mutators.map((k) => (MUTATORS[k] || {}).desc).filter(Boolean)[0] || '' : MUTATORS[s.mutator].desc, cls: 'hz' });
+    }
+    if (LOC && LOC.events && !(s.custom && s.custom.events === false)) { const sig = Object.keys(LOC.events).find((k) => WORLD_EVENTS[k]); if (sig) rows.push({ k: 'Signature event', name: WORLD_EVENTS[sig].name, desc: WORLD_EVENTS[sig].desc, cls: 'ev' }); }
+    if (s.mirrorBuild && PASSIVES[s.mirrorBuild.passive]) rows.push({ k: s.mode === 'daily' ? 'Build of the Day' : 'Mirror Match', name: `Everyone is ${PASSIVES[s.mirrorBuild.passive].name}`, cls: 'mb' });
+    if (!LOC && !rows.length) return null;
+    return { kicker: LOC ? `World Tour - ${M.name || 'Match'}` : M.name || 'Match', title: LOC ? (Li && Li.name) || LOC.name : M.name || 'Match', line: LOC ? (Li && Li.blurb) || LOC.blurb || '' : M.desc || '', color: (Li && Li.c) || (LOC && LOC.mood && LOC.mood.accent) || '#ffd24d', rows };
+  },
+  introPlan(s) { const wheel = !!s.location, brief = this.introBrief(s); return { wheel, brief, ms: introMs({ contenders: true, wheel, brief }) }; },
+  // How long the host holds the first turn back (net.js GameHost.start(ms)): the whole intro, plus link latency online
+  introDelay(s, online) { return this.wantsIntro(s) ? this.introPlan(s).ms + (online ? INTRO.net : 0) : 0; },
+  showBrief(b) {
+    const root = $('#s-game'); const el = document.createElement('div');
+    el.className = 'intro-brief' + (settings.motion ? ' calm' : ''); el.id = 'intro-brief'; el.style.setProperty('--lc', b.color || '#ffd24d');
+    el.innerHTML = briefHTML(b); root.appendChild(el);
+    try { sfx.whoosh(); } catch {}
+    return { end: () => { el.classList.add('out'); setTimeout(() => el.remove(), 320); } };
+  },
+  matchIntro(s) {
+    const gen = this.gen, plan = this.introPlan(s), t0 = performance.now();
+    const online = !!(session && session.mode !== 'solo');
+    const steps = [
+      { id: 'contenders', dot: true, ms: INTRO.ct, show: () => { this.showContenders(); return { end: () => this.hideContenders() }; } },
+      plan.wheel && { id: 'wheel', dot: true, ms: 0, show: (api) => {
+        const w = F.locationIntro(this.s || s, { sfx, hold: INTRO.hold, onClose: api.next });
+        if (!w || typeof w !== 'object') { setTimeout(api.next, 0); return {}; }
+        return { tap: () => w.tap(), end: () => w.close() };
+      } },
+      plan.brief && { id: 'brief', dot: true, ms: briefMs(plan.brief), show: () => this.showBrief(plan.brief) },
+    ];
+    const round = () => {
+      if (gen !== this.gen || !this.s) return;
+      intro.log.push({ id: 'round1', t: Math.round(performance.now() - t0) });
+      director.holdHints(INTRO.fly + 1600); // tips start once "Round 1" and the camera drop-in have played
+      this.r.startIntro(this.s, this.r.myId); this.after(() => this.fitPad(), 50);
+      const S = this.s, kick = (MODES[S.mode] || {}).name;
+      if (S.siege) this.banner('Hold the Line', `${S.siege.waves} waves. Survive together.`, 'cyan', { kicker: kick, prio: 45, ttl: 4000 });
+      else this.banner('Round 1', S.teams ? 'Last team standing wins' : 'Last piece standing wins', '', { kicker: kick, prio: 45, ttl: 4000 });
+      if (session && session.mode === 'solo' && session.host && session.host.go) session.host.go(); // solo: the first turn starts now
+    };
+    intro.run(steps, { root: $('#s-game'), skip: (profile.games || 0) > 0, onDone: () => {
+      if (gen !== this.gen) return;
+      // online: everyone's first turn starts on the host's clock; finishing early waits here with a small countdown
+      const left = online ? t0 + plan.ms - INTRO.fly - performance.now() : 0;
+      if (left > 300) this.introWait(left, round); else round();
+    } });
+  },
+  introWait(ms, done) {
+    const gen = this.gen, el = document.createElement('div'); el.className = 'intro-wait'; el.id = 'intro-wait'; el.dataset.msg = 'intro';
+    $('#s-game').appendChild(el); const end = performance.now() + ms;
+    const tick = () => { if (gen !== this.gen || !el.isConnected) { el.remove(); return; } const l = end - performance.now(); if (l <= 0) { el.remove(); done(); return; } el.textContent = `Match starts in ${Math.ceil(l / 1000)}`; setTimeout(tick, Math.min(250, l)); };
+    tick();
   },
   tip(id, html) {
     profile.tips = profile.tips || [];
@@ -988,7 +1056,7 @@ const game = {
   showAbInfo(slot) {
     const u = this.me; if (!u || !this.s) return;
     const box = $('#abinfo');
-    if (slot === 'move') { box.innerHTML = `<img src="${diagram(u.piece === 'king' ? 'king' : u.piece, 'move', 96, u.skin)}" alt=""><div><b>${PIECES[u.piece].name} Movement</b><p>${PIECES[u.piece].moveDesc}</p></div>`; }
+    if (slot === 'move') { box.innerHTML = `<img src="${diagram(u.piece === 'king' ? 'king' : u.piece, 'move', 96, u.skin)}" alt=""><div><b>${PIECES[u.piece].name} Movement</b><p>${PIECES[u.piece].moveDesc}${PAWN_TAG[u.piece] ? ` ${PIECES[u.piece].name} is on the pawn line (${PAWN_TAG[u.piece].toLowerCase()}): a promoted pawn.` : ''}</p></div>`; }
     else {
       const id = slotAbility(u, slot); if (!id) return;
       const A = ABILITIES[id];
@@ -1224,7 +1292,7 @@ const game = {
     $('#h-name').textContent = u.name;
     const hone = u.hone[u.piece] || 0;
     $('#h-hone').innerHTML = '<i></i>'.repeat(hone);
-    $('#h-piece').textContent = PIECES[u.piece] ? PIECES[u.piece].name : '';
+    { const hp = $('#h-piece'), nm = PIECES[u.piece] ? PIECES[u.piece].name : '', tg = PAWN_TAG[u.piece]; const h = tg ? `${nm}<small class="pl-rank">${tg}</small>` : nm; if (hp.dataset.h !== h) { hp.dataset.h = h; hp.innerHTML = h; hp.title = tg ? `${nm}: a promoted pawn (${tg.toLowerCase()})` : ''; } } // 15.1 (D)
     const r = Math.max(0, u.hp / stt.maxHp);
     const hp = $('#h-hp'); hp.style.width = r * 100 + '%'; hp.className = r > 0.5 ? '' : r > 0.25 ? 'mid' : 'low';
     $('#h-hpghost').style.width = r * 100 + '%';
@@ -1415,7 +1483,7 @@ const game = {
     if (!v) { box.classList.add('hidden'); return; }
     const st = stats(v);
     const extra = v.dummy ? 'A training dummy. It will not fight back.' : v.kind === 'hollow' ? 'Guards a shard cache. Drops 2 shards.' : `${PASSIVES[v.passive].name} - ${v.shards} shard${v.shards === 1 ? '' : 's'} - Attune ${v.attune || 0} - Ult ${Math.round(v.ult || 0)}% - ${v.kills} KO`;
-    box.innerHTML = `<img src="${pieceIcon(v.piece, v.skin, v.color, 46)}" alt=""><div>${v.title ? `<span style="color:var(--gold);font-size:10px;letter-spacing:.12em;text-transform:uppercase">${esc(v.title)}</span>` : ''}<b style="color:${v.kind === 'player' ? v.color : '#bbb'}">${esc(v.name)}${v.piece === 'king' ? ' - King' : v.kind === 'player' ? ' - ' + PIECES[v.piece].name : ''}</b><span>HP ${v.hp}/${st.maxHp} - ATK ${st.atk} - DEF ${st.def} - SPD ${st.spd}</span><span>${extra}</span>${statusList(v).length ? `<span class="ins-st">${statusChips(v, { names: true, max: 4 })}</span>` : ''}</div>`;
+    box.innerHTML = `<img src="${pieceIcon(v.piece, v.skin, v.color, 46)}" alt=""><div>${v.title ? `<span style="color:var(--gold);font-size:10px;letter-spacing:.12em;text-transform:uppercase">${esc(v.title)}</span>` : ''}<b style="color:${v.kind === 'player' ? v.color : '#bbb'}">${esc(v.name)}${v.piece === 'king' ? ' - King' : v.kind === 'player' ? ' - ' + PIECES[v.piece].name + (PAWN_TAG[v.piece] ? ` (${PAWN_TAG[v.piece].toLowerCase()})` : '') : ''}</b><span>HP ${v.hp}/${st.maxHp} - ATK ${st.atk} - DEF ${st.def} - SPD ${st.spd}</span><span>${extra}</span>${statusList(v).length ? `<span class="ins-st">${statusChips(v, { names: true, max: 4 })}</span>` : ''}</div>`;
     const co = $('#coach'); box.style.top = co.classList.contains('hidden') ? (director.bossOn ? director.L.top + 'px' : '') : (co.getBoundingClientRect().bottom + 6) + 'px';
     box.classList.remove('hidden'); sfx.tap();
     this.inspT = setTimeout(() => box.classList.add('hidden'), 3200);
@@ -1424,21 +1492,30 @@ const game = {
     const u = this.me; const opts = promoteOptions(u);
     if (!opts.length) { sfx.error(); return; }
     const hone = u.hone[u.piece] || 0;
-    const LADDER = [['pawn'], ['knight', 'bishop'], ['rook'], ['queen']];
-    const curTier = PIECES[u.piece].tier;
+    // 15.1 (D): the pawn line (Pawn -> Veteran -> Champion, stays a pawn) is its own road, shown apart from the
+    // Knight/Bishop -> Rook -> Queen ladder, next to Hone (both keep you on the piece you are)
+    const onPawnLine = PIECES[u.piece].line === 'pawn';
+    const LADDER = onPawnLine ? [['pawn'], ['veteran'], ['champion']] : [['pawn'], ['knight', 'bishop'], ['rook'], ['queen']];
+    const curTier = onPawnLine ? (pawnRank(u.piece) || 1) : PIECES[u.piece].tier;
     const path = LADDER.map((row, i) => `<div class="pl-step ${i + 1 < curTier ? 'past' : i + 1 === curTier ? 'cur' : ''}">${row.map((pc) => `<img src="${pieceIcon(pc, u.skin, null, 34)}" alt="" class="${pc === u.piece ? 'me' : ''}">`).join('')}</div>`).join('<i class="pl-arrow"></i>');
     const card = (o) => {
       const piece = o.type === 'evolve' ? o.to : u.piece;
       const P = PIECES[piece], sig = ABILITIES[P.sig];
       const can = u.shards >= o.cost;
-      const desc = o.type === 'evolve' ? `${P.moveDesc} Signature: ${sig.name}.` : `+15% stats. ${sig.honed && hone === 0 ? 'Signature upgrade: ' + sig.honed : 'Level ' + o.level + ' of 3.'}`;
+      const pl = o.type === 'evolve' && P.line === 'pawn';
+      const desc = pl ? `Pawn rank ${pawnRank(piece)} of 3${piece === 'champion' ? ' (top)' : ''}. Moves like a pawn, tougher. New: ${[(ABILITIES[P.attack] || {}).name, sig.name].filter(Boolean).join(', ')}.`
+        : o.type === 'evolve' ? `${P.moveDesc} Signature: ${sig.name}.` : `+15% stats. ${sig.honed && hone === 0 ? 'Signature upgrade: ' + sig.honed : 'Level ' + o.level + ' of 3.'}`;
       const tag = o.type === 'evolve' && o.steps > 1 ? `<em class="skip">Skips ${o.steps - 1} step${o.steps > 2 ? 's' : ''}</em>` : '';
-      return `<button class="popt ${can ? '' : 'locked'}" data-to="${o.to}" ${can ? '' : 'disabled'}><img src="${pieceIcon(piece, u.skin, o.type === 'hone' ? '#7fe0ff' : null, 60)}" alt=""><div><b>${o.type === 'evolve' ? P.name : 'Hone ' + P.name}${tag}</b><span>${desc}</span>${can ? '' : `<span class="need">Need ${o.cost - u.shards} more shard${o.cost - u.shards > 1 ? 's' : ''}</span>`}</div><div class="cost"><span class="shard-ico"></span>${o.cost}</div></button>`;
+      return `<button class="popt ${can ? '' : 'locked'}${pl ? ' pl-card' : ''}" data-to="${o.to}" ${can ? '' : 'disabled'}><img src="${pieceIcon(piece, u.skin, o.type === 'hone' ? '#7fe0ff' : null, 60)}" alt=""><div><b>${o.type === 'evolve' ? P.name : 'Hone ' + P.name}${tag}</b><span>${desc}</span>${can ? '' : `<span class="need">Need ${o.cost - u.shards} more shard${o.cost - u.shards > 1 ? 's' : ''}</span>`}</div><div class="cost"><span class="shard-ico"></span>${o.cost}</div></button>`;
     };
-    const evo = opts.filter((o) => o.type === 'evolve'), hn = opts.find((o) => o.type === 'hone');
+    const evoAll = opts.filter((o) => o.type === 'evolve'), hn = opts.find((o) => o.type === 'hone');
+    const evo = evoAll.filter((o) => PIECES[o.to].line !== 'pawn'), pawnEvo = evoAll.filter((o) => PIECES[o.to].line === 'pawn');
+    const stay = pawnEvo.length || hn;
     $('#promo-opts').innerHTML = `<div class="promo-path">${path}</div><div class="promo-have"><span class="shard-ico"></span> You have <b>${u.shards}</b> shards</div><p class="hint center" style="margin:0 0 4px">Climbing step by step costs the same as jumping. Evolving early never wastes shards.</p>`
       + (evo.length ? `<div class="promo-sec">Evolve</div>${evo.map(card).join('')}` : '')
-      + (hn ? `<div class="promo-sec">Or stay a ${PIECES[u.piece].name}</div>${card(hn)}` : '');
+      + (stay ? `<div class="promo-stay">${evo.length ? `<div class="promo-sec ps-div">Or stay a ${PIECES[u.piece].line === 'pawn' ? 'pawn' : PIECES[u.piece].name}</div>` : ''}`
+        + (pawnEvo.length ? `<div class="promo-pl"><div class="ppl-head"><b>Pawn line</b><span>Veteran -> Champion, stays a pawn</span></div>${pawnEvo.map(card).join('')}</div>` : '')
+        + (hn ? `${pawnEvo.length ? '<div class="promo-sec ps-sub">Hone</div>' : !evo.length ? `<div class="promo-sec">Or stay a ${PIECES[u.piece].name}</div>` : ''}${card(hn)}` : '') + '</div>' : '');
     director.dismissHint(); $('#h-inspect').classList.add('hidden'); $('#abinfo').classList.add('hidden');
     $('#m-promote').classList.remove('hidden'); sfx.select();
   },
@@ -1456,10 +1533,12 @@ const game = {
   stopSpectate() {
     this.spec = null; $('#s-game').classList.remove('spectating'); $('#spec-bar').classList.add('hidden'); this.r.follow = true;
     const u = this.me; if (u) this.r.focus(u.x, u.y);
+    requestAnimationFrame(() => this.fitPad()); // R 15.1: the HUD row is back
   },
   showResults(aborted = false, reason = '') {
     if (this.resultsShown) return;
     this.resultsShown = true;
+    intro.stop(); F.stopWheel(); $$('#intro-brief, #intro-wait').forEach((x) => x.remove()); // 15.1 (D)
     director.clearHints(); director.release(); $('#contenders').classList.add('hidden');
     $$('#s-game .modal').forEach((m) => m.classList.add('hidden'));
     const s = this.s, u = this.me;
@@ -1665,7 +1744,7 @@ $('#set-cam') && $('#set-cam').addEventListener('click', (e) => { const b = e.ta
 $('#set-quality').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); game.r.setQuality(settings.quality); $$('#set-quality button').forEach((x) => x.classList.toggle('on', x === b)); sfx.tap(); });
 function sig(str) { let h1 = 0x811c9dc5, h2 = 0x1b873593; for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 ^ (c + i), 2246822519); } return ((h1 >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 12); }
 function info(title, html) { $('#info-title').textContent = title; $('#info-body').innerHTML = html; $('#m-info').classList.remove('hidden'); }
-const WHATS_NEW = `<h4>15.1</h4><ul><li><b>Smoother matches</b>: World Tour scenery, lighting and boards draw far cheaper, so matches run as smoothly as before the update even on high quality.</li><li><b>Balance</b>: the King wins about 40% of matches. The pawn road is still a real path to victory but no longer the best one (Veteran 92 HP, Champion now 6 shards with slightly lower stats).</li><li><b>Readability</b>: every label in the Royal Pass, Abilities tab and collections is at least 11px.</li></ul><h4>15.0</h4><ul><li><b>World Tour</b>: 8 locations (Frost Citadel, Volcanic Forge, Sunken Temple, Royal Gardens, Desert Ruins, Iron Works, Astral Rift, Witchwood Bog), each with its own scenery, weather, music, hazards and signature events. A wheel picks where you fight, and your store board is laid over the location.</li><li><b>The King is a raid boss</b>: the Crown is marked a round early, the King gets a boss bar, a royal aura and two enraged phases, and teaming up strips its armour (Exposed). Regicide is the biggest moment in the game.</li><li><b>Status effects</b>: Burn, Poison, Freeze, Stun, Slow, Shield and Haste, shown on the pieces and your HUD.</li><li><b>Every piece can win</b>: hone to level 3 to Ascend (new passive and empowered ultimate), or stay a Pawn and promote to Veteran then Champion. The Queen now costs 11 shards.</li><li><b>New abilities</b>: 7 base abilities and 10 equips. Start with 5 base abilities and 2 equips per piece; unlock the rest with Marks.</li><li><b>Parties</b>: stay together between matches, pick mode and location, ready up. Dropped players reconnect automatically while a bot holds their seat.</li><li><b>Royal Pass</b>: a premium Crown Path lane for 3,000 Marks in Season 4: World Tour.</li><li><b>Modes regrouped</b> into Competitive, Co-op, Party, Challenge and Custom. Daily now gives everyone the same build and a location of the day.</li><li><b>Your profile</b>: tap the top-left chip to edit your name, title, avatar and banner. Your level and title sit under the logo.</li><li><b>Custom builds</b>: a Custom card with 3 saved build slots.</li><li><b>Zoom</b>: matches open on an 8x8 view around your piece; tap 8x8 / Board for the whole board.</li><li><b>Quick chat favourites</b>: pick 6 to 10 phrases; the rest live in All Phrases.</li><li><b>Fixed</b>: mic crackle in voice chat on iPhone, friends disconnecting in late Siege waves, the join lobby not clearing after the host left, menus slowing down after some modes, and name tags floating two tiles up.</li><li>New music for every location, new effects and sounds for everything above, new Ascended and pawn-line piece art, and 4 location finishers.</li></ul><h4>10.3</h4><ul><li><b>Turn-by-turn camera</b>: the camera glides to whoever is acting, frames their whole move or ability, and waits for it to finish before moving on. Back-to-back ultimates each get their own moment.</li><li><b>Camera setting</b>: Follow every turn, Follow my turns only, or Free. Pan or pinch and the camera stays put until your next turn; tap your portrait to recentre.</li><li><b>Microphone setup</b>: Join Voice explains the microphone first, then asks (this is what makes the iPhone Home Screen app show its prompt). Blocked? You get step-by-step help. Settings can test your mic with a live meter.</li><li><b>Chat log</b>: the last 3 messages stay on screen; tap them to scroll the whole match chat with timestamps, team tags and an unread count.</li><li>Turn timers include a short grace so the camera's playback never eats your time.</li></ul><h4>10.2.2</h4><ul><li><b>Voice chat works on iPhone</b>: the game's sound held the iPhone in playback-only mode, which blocks the microphone. Joining voice now switches the phone to play-and-record, and leaving switches it back.</li></ul><h4>10.2.1</h4><ul><li><b>Voice chat microphone fix</b>: Join Voice asks for microphone permission properly on phones, retries with simpler settings when a phone rejects the voice-tuned ones, and explains exactly how to allow the microphone on iPhone, Android or desktop. A new Turn On Mic button asks again without leaving voice.</li></ul><h4>10.2</h4><ul><li><b>Accurate taps</b>: zoomed-out taps land where your finger first touched, snap to the nearest legal tile, and hold the camera still. On tiny tiles, the first tap previews with a magnifier and the second confirms (turn on One-Tap in Settings to skip).</li><li><b>Move in the storm</b>: collapsed ground is now open floor, so pieces caught in the storm can always move out. Moves into the storm show in red. It still burns 20% max HP each turn.</li><li><b>Quick Chat</b>: 87 phrases in six categories, favourites, recently used, up to 12 phrases of your own, and team-only callouts in Squads.</li><li><b>Safer chat</b>: custom phrases are cleaned and filtered, spam is rate-limited, and you can mute anyone or show only preset phrases.</li><li><b>Voice chat (beta)</b>: opt-in push-to-talk or open mic with friends online, per-player mute and volume, and speaking indicators.</li><li>Eliminated players can still chat and talk while spectating.</li></ul><h4>10.1</h4><ul><li><b>Smoother</b>: the title screen, store and matches run much faster on phones, and auto quality reacts sooner.</li><li><b>New hazard art</b>: a royal Throne dais, erupting geysers, industrial conveyors, collapsing floors and Rift Storm tears.</li><li><b>Tidier screens</b>: every label at least 11px, every button at least 40px, and layout fixes on small phones and in landscape.</li><li><b>Lesson Complete</b> now shows your progress and what the next lesson covers.</li><li><b>Accurate text everywhere</b>: tutorials, Codex, How to Play and ability descriptions match the rules. The bounty world event is now called Royal Bounty.</li><li>Fixed: clipped emote names in Collections, the Lessons button spacing, and the tutorial saying the Crown appears at the centre.</li></ul><h4>10.0</h4><ul><li><b>Four new modes</b>: King of the Hill, Chaos, Gauntlet (co-op boss rush) and Mirror Match.</li><li><b>A living world</b>: rebuilt boards with real materials, dynamic lighting, shadows, new weather (rain, ash, aurora, sandstorms, fog) and a cinematic camera.</li><li><b>All-new piece art</b>: every piece re-sculpted and lit in 3D, with real materials and animated premium sets.</li><li><b>New effects</b>: every ability rebuilt, plus 11 new finishers.</li><li><b>The Director</b>: callouts, banners, tips and ultimate cinematics take turns in fixed lanes, so nothing stacks.</li><li><b>New soundtrack and sound</b>: an adaptive score with a theme for every mode, and a layered sound for every ability and finisher, with an announcer voice.</li><li><b>New Siege enemies</b> (Stalker, Hexer, Splitter, Brute) and a new boss, the Wraith Regent.</li><li><b>New world events and hazards</b>: Eclipse, Earthquake, Mana Surge, Royal Bounty, War Drums, Restless Dead, geysers, conveyors, a crumbling floor and Rift Storms.</li><li><b>Six new abilities and two new base abilities</b> (Bastion and Predator).</li><li><b>A rebuilt Store</b>: Mythic rarity, 25 piece sets, 13 boards, 14 trails, Collections, try-on previews and a wishlist.</li><li><b>Season 3: The Endgame</b>: a free 40-tier Crown Path.</li><li><b>Daily login streaks, a Profile screen and 26 new trophies</b>.</li><li><b>A whole new look</b>: new menus, title screen, loadout showroom and cinematic results.</li></ul><h4>5.0</h4><ul><li><b>Squads</b>: teams of two, no friendly fire, a Bond DEF bonus when you stick together, and revives: step on a fallen teammate's soul to bring them back.</li><li><b>Siege</b>: co-op against eight waves of hunting Hollows, with a Colossus boss on waves 4 and 8. The first Colossus drops the Crown.</li><li><b>Map hazards</b>: Magma Rift, Frostbite and Warpgates. Most matches roll one.</li><li><b>Five new abilities</b> (Tripwire, Lance, Penance, Quake, Gambit) and two new base abilities (Lifesteal, Last Stand).</li><li><b>The Announcer</b>: First Blood, Double Take, Shutdown, Regicide, Final Two and more.</li><li><b>Play of the Match</b>: the best move of every game, replayed in slow motion on the results screen.</li><li><b>Piece Mastery</b>: level each piece to 10 for titles and Marks.</li><li><b>Season 2: The Middlegame</b>: a fresh Crown Path with the Warden and Colossus sets, the Riftgate board and the Soulfire finisher.</li><li>Dozens of rules fixes, faster rendering, bigger tap targets and a landscape title screen.</li></ul><h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
+const WHATS_NEW = `<h4>15.2</h4><ul><li><b>Fair turns</b>: every round, every piece gets exactly one turn, fastest SPD first. Nobody gets two moves before someone else gets one. SPD also gives a Speed Edge: +3% damage per point over your target (up to 15%).</li><li><b>Balance</b>: all four promotion roads (Pawn line, Ascend, Rook, Queen) win within a couple of points of each other; the King wins about 38% of matches. Queen SPD 12, Rook HP 134. Siege retuned for the new turns.</li><li><b>Voice chat fixed</b>: friends' voices play again on iPhone, and the volume slider shows its real level.</li><li><b>Screen stays on</b> during matches and lobbies.</li><li><b>One match intro</b> instead of three quick pop-ups: contenders, the location wheel, then one location card. Tap to go faster; returning players can skip.</li><li><b>Pawn line</b> shown as its own section in Promote (Veteran, then Champion, stays a pawn).</li><li><b>Spectating</b>: the board no longer shrinks to a strip, and zoom works.</li><li><b>Real-speed playback</b>: other players' turns play at normal speed and bots wait for your screen to catch up.</li><li><b>Fixed</b>: a freeze when starting a second match in a party.</li></ul><h4>15.1</h4><ul><li><b>Smoother matches</b>: World Tour scenery, lighting and boards draw far cheaper, so matches run as smoothly as before the update even on high quality.</li><li><b>Balance</b>: the King wins about 40% of matches. The pawn road is still a real path to victory but no longer the best one (Veteran 92 HP, Champion now 6 shards with slightly lower stats).</li><li><b>Readability</b>: every label in the Royal Pass, Abilities tab and collections is at least 11px.</li></ul><h4>15.0</h4><ul><li><b>World Tour</b>: 8 locations (Frost Citadel, Volcanic Forge, Sunken Temple, Royal Gardens, Desert Ruins, Iron Works, Astral Rift, Witchwood Bog), each with its own scenery, weather, music, hazards and signature events. A wheel picks where you fight, and your store board is laid over the location.</li><li><b>The King is a raid boss</b>: the Crown is marked a round early, the King gets a boss bar, a royal aura and two enraged phases, and teaming up strips its armour (Exposed). Regicide is the biggest moment in the game.</li><li><b>Status effects</b>: Burn, Poison, Freeze, Stun, Slow, Shield and Haste, shown on the pieces and your HUD.</li><li><b>Every piece can win</b>: hone to level 3 to Ascend (new passive and empowered ultimate), or stay a Pawn and promote to Veteran then Champion. The Queen now costs 11 shards.</li><li><b>New abilities</b>: 7 base abilities and 10 equips. Start with 5 base abilities and 2 equips per piece; unlock the rest with Marks.</li><li><b>Parties</b>: stay together between matches, pick mode and location, ready up. Dropped players reconnect automatically while a bot holds their seat.</li><li><b>Royal Pass</b>: a premium Crown Path lane for 3,000 Marks in Season 4: World Tour.</li><li><b>Modes regrouped</b> into Competitive, Co-op, Party, Challenge and Custom. Daily now gives everyone the same build and a location of the day.</li><li><b>Your profile</b>: tap the top-left chip to edit your name, title, avatar and banner. Your level and title sit under the logo.</li><li><b>Custom builds</b>: a Custom card with 3 saved build slots.</li><li><b>Zoom</b>: matches open on an 8x8 view around your piece; tap 8x8 / Board for the whole board.</li><li><b>Quick chat favourites</b>: pick 6 to 10 phrases; the rest live in All Phrases.</li><li><b>Fixed</b>: mic crackle in voice chat on iPhone, friends disconnecting in late Siege waves, the join lobby not clearing after the host left, menus slowing down after some modes, and name tags floating two tiles up.</li><li>New music for every location, new effects and sounds for everything above, new Ascended and pawn-line piece art, and 4 location finishers.</li></ul><h4>10.3</h4><ul><li><b>Turn-by-turn camera</b>: the camera glides to whoever is acting, frames their whole move or ability, and waits for it to finish before moving on. Back-to-back ultimates each get their own moment.</li><li><b>Camera setting</b>: Follow every turn, Follow my turns only, or Free. Pan or pinch and the camera stays put until your next turn; tap your portrait to recentre.</li><li><b>Microphone setup</b>: Join Voice explains the microphone first, then asks (this is what makes the iPhone Home Screen app show its prompt). Blocked? You get step-by-step help. Settings can test your mic with a live meter.</li><li><b>Chat log</b>: the last 3 messages stay on screen; tap them to scroll the whole match chat with timestamps, team tags and an unread count.</li><li>Turn timers include a short grace so the camera's playback never eats your time.</li></ul><h4>10.2.2</h4><ul><li><b>Voice chat works on iPhone</b>: the game's sound held the iPhone in playback-only mode, which blocks the microphone. Joining voice now switches the phone to play-and-record, and leaving switches it back.</li></ul><h4>10.2.1</h4><ul><li><b>Voice chat microphone fix</b>: Join Voice asks for microphone permission properly on phones, retries with simpler settings when a phone rejects the voice-tuned ones, and explains exactly how to allow the microphone on iPhone, Android or desktop. A new Turn On Mic button asks again without leaving voice.</li></ul><h4>10.2</h4><ul><li><b>Accurate taps</b>: zoomed-out taps land where your finger first touched, snap to the nearest legal tile, and hold the camera still. On tiny tiles, the first tap previews with a magnifier and the second confirms (turn on One-Tap in Settings to skip).</li><li><b>Move in the storm</b>: collapsed ground is now open floor, so pieces caught in the storm can always move out. Moves into the storm show in red. It still burns 20% max HP each turn.</li><li><b>Quick Chat</b>: 87 phrases in six categories, favourites, recently used, up to 12 phrases of your own, and team-only callouts in Squads.</li><li><b>Safer chat</b>: custom phrases are cleaned and filtered, spam is rate-limited, and you can mute anyone or show only preset phrases.</li><li><b>Voice chat (beta)</b>: opt-in push-to-talk or open mic with friends online, per-player mute and volume, and speaking indicators.</li><li>Eliminated players can still chat and talk while spectating.</li></ul><h4>10.1</h4><ul><li><b>Smoother</b>: the title screen, store and matches run much faster on phones, and auto quality reacts sooner.</li><li><b>New hazard art</b>: a royal Throne dais, erupting geysers, industrial conveyors, collapsing floors and Rift Storm tears.</li><li><b>Tidier screens</b>: every label at least 11px, every button at least 40px, and layout fixes on small phones and in landscape.</li><li><b>Lesson Complete</b> now shows your progress and what the next lesson covers.</li><li><b>Accurate text everywhere</b>: tutorials, Codex, How to Play and ability descriptions match the rules. The bounty world event is now called Royal Bounty.</li><li>Fixed: clipped emote names in Collections, the Lessons button spacing, and the tutorial saying the Crown appears at the centre.</li></ul><h4>10.0</h4><ul><li><b>Four new modes</b>: King of the Hill, Chaos, Gauntlet (co-op boss rush) and Mirror Match.</li><li><b>A living world</b>: rebuilt boards with real materials, dynamic lighting, shadows, new weather (rain, ash, aurora, sandstorms, fog) and a cinematic camera.</li><li><b>All-new piece art</b>: every piece re-sculpted and lit in 3D, with real materials and animated premium sets.</li><li><b>New effects</b>: every ability rebuilt, plus 11 new finishers.</li><li><b>The Director</b>: callouts, banners, tips and ultimate cinematics take turns in fixed lanes, so nothing stacks.</li><li><b>New soundtrack and sound</b>: an adaptive score with a theme for every mode, and a layered sound for every ability and finisher, with an announcer voice.</li><li><b>New Siege enemies</b> (Stalker, Hexer, Splitter, Brute) and a new boss, the Wraith Regent.</li><li><b>New world events and hazards</b>: Eclipse, Earthquake, Mana Surge, Royal Bounty, War Drums, Restless Dead, geysers, conveyors, a crumbling floor and Rift Storms.</li><li><b>Six new abilities and two new base abilities</b> (Bastion and Predator).</li><li><b>A rebuilt Store</b>: Mythic rarity, 25 piece sets, 13 boards, 14 trails, Collections, try-on previews and a wishlist.</li><li><b>Season 3: The Endgame</b>: a free 40-tier Crown Path.</li><li><b>Daily login streaks, a Profile screen and 26 new trophies</b>.</li><li><b>A whole new look</b>: new menus, title screen, loadout showroom and cinematic results.</li></ul><h4>5.0</h4><ul><li><b>Squads</b>: teams of two, no friendly fire, a Bond DEF bonus when you stick together, and revives: step on a fallen teammate's soul to bring them back.</li><li><b>Siege</b>: co-op against eight waves of hunting Hollows, with a Colossus boss on waves 4 and 8. The first Colossus drops the Crown.</li><li><b>Map hazards</b>: Magma Rift, Frostbite and Warpgates. Most matches roll one.</li><li><b>Five new abilities</b> (Tripwire, Lance, Penance, Quake, Gambit) and two new base abilities (Lifesteal, Last Stand).</li><li><b>The Announcer</b>: First Blood, Double Take, Shutdown, Regicide, Final Two and more.</li><li><b>Play of the Match</b>: the best move of every game, replayed in slow motion on the results screen.</li><li><b>Piece Mastery</b>: level each piece to 10 for titles and Marks.</li><li><b>Season 2: The Middlegame</b>: a fresh Crown Path with the Warden and Colossus sets, the Riftgate board and the Soulfire finisher.</li><li>Dozens of rules fixes, faster rendering, bigger tap targets and a landscape title screen.</li></ul><h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
 <h4>2.0 Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
 <h4>Progression</h4><ul><li><b>Crown Path</b>: a free 30-tier season track with exclusive cosmetics and titles.</li><li><b>Trophies</b>: 21 achievements, each with Marks and a title.</li><li>Pick a title to show in lobbies and results.</li></ul>
 <h4>Balance</h4><ul><li>Heavy is the Head: the King no longer attunes, charges ultimates at half speed and takes 10% more damage. The Crown appears at a random safe spot.</li><li>Tank preset reworked. Regen scales with attunement.</li></ul>
@@ -1790,7 +1869,12 @@ document.body.classList.toggle('bigtext', !!settings.bigtext); document.body.cla
 { const n = newsFrom(WHATS_NEW); if (n.ver) $('#nc-head').textContent = `Chess Complex ${n.ver}`; if (n.items.length) $('#nc-body').textContent = n.items.slice(0, 3).join(', ') + (n.items.length > 3 ? ` and ${n.items.length - 3} more` : ''); }
 const afterSplash = (showNew) => { if (!profile.seenReveal15 && (profile.games || profile.tutorial.length) && !q0.get('join')) { profile.seenReveal15 = profile.seenReveal10 = true; save(); sequelReveal(showNew, { reduced: !!settings.motion, sfx }); } else showNew(); }; // F 15.0: the "15" reveal, once
 const q0 = new URLSearchParams(location.search);
-setTimeout(() => { $('#splash').classList.add('out'); afterSplash(() => { if (profile.seenVersion !== '15.1' && (profile.games || profile.tutorial.length)) { info('What\'s New in 15.1', WHATS_NEW); } profile.seenVersion = '15.1'; save(); }); }, 700);
+setTimeout(() => { $('#splash').classList.add('out'); afterSplash(() => { if (profile.seenVersion !== '15.2' && (profile.games || profile.tutorial.length)) { info('What\'s New in 15.2', WHATS_NEW); } profile.seenVersion = '15.2'; save(); }); }, 700);
 const q = new URLSearchParams(location.search);
 if (q.get('join')) { go('join'); $('#in-code').value = q.get('join').toUpperCase().slice(0, 5); }
-window.__cc = { game, profile, get session() { return session; }, startSolo };
+setInterval(() => keepAwake(!!session && (screen === 'game' || screen === 'host' || screen === 'join' || screen === 'tutorial')), 1500);
+// 15.2: every range slider keeps its filled track (--p) in step with its value (the CSS default is 50%).
+const syncRange = (r) => { const lo = +r.min || 0, hi = r.max === '' ? 100 : +r.max, v = +r.value; r.style.setProperty('--p', (hi > lo ? ((v - lo) / (hi - lo)) * 100 : 0) + '%'); };
+document.addEventListener('input', (e) => { if (e.target && e.target.type === 'range') syncRange(e.target); }, true);
+new MutationObserver(() => { for (const r of document.querySelectorAll('input[type=range]')) if (!r.dataset.p || r.dataset.p !== r.value) { r.dataset.p = r.value; syncRange(r); } }).observe(document.body, { childList: true, subtree: true });
+window.__cc = { intro, game, profile, get session() { return session; }, startSolo };

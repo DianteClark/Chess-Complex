@@ -10,9 +10,9 @@ export const PIECES = {
             moveDesc: 'L-shaped jump. Ignores anything in the way.' },
   bishop: { ult: 'excommunicate', name: 'Bishop', tier: 2, hp: 80,  atk: 14, def: 6,  spd: 11, attack: 'ray',        sig: 'transpose', equips: ['sanctuary', 'cross', 'blink', 'penance', 'consecrate', 'blessing', 'hex'],
             moveDesc: 'Slides diagonally up to 4 tiles.' },
-  rook:   { ult: 'castling', name: 'Rook',   tier: 3, hp: 140, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege', 'quake', 'repel', 'bombard', 'scorch', 'concuss'],
+  rook:   { ult: 'castling', name: 'Rook',   tier: 3, hp: 134, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege', 'quake', 'repel', 'bombard', 'scorch', 'concuss'],
             moveDesc: 'Slides straight up to 4 tiles.' },
-  queen:  { ult: 'nova', name: 'Queen',  tier: 4, hp: 150, atk: 22, def: 10, spd: 10, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate', 'gambit', 'gravity', 'frostNova', 'plague'],
+  queen:  { ult: 'nova', name: 'Queen',  tier: 4, hp: 150, atk: 22, def: 10, spd: 12, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate', 'gambit', 'gravity', 'frostNova', 'plague'],
             moveDesc: 'Slides any direction up to 5 tiles.' },
   king:   { ult: 'divineRight', name: 'King',   tier: 5, hp: 0,   atk: 0,  def: 0,  spd: 0,  attack: 'royalStrike', sig: 'royalGuard', equips: [],
             moveDesc: 'Steps 1 tile. Wears the Crown.' },
@@ -81,7 +81,7 @@ export const ABILITIES = {
   // knight equips
   trample:    { name: 'Trample',      cd: 3, desc: 'Leap in an L and crash down, hitting every tile around the landing.' },
   stagger:    { name: 'Stagger',      cd: 3, desc: 'A T-Strike that knocks targets back in the turn order.' },
-  rally:      { name: 'Rally Cry',    cd: 4, desc: '+4 SPD for 2 turns and a burst of initiative.' },
+  rally:      { name: 'Rally Cry',    cd: 4, desc: '+4 SPD for 2 turns, and you act earlier next round.' },
   // bishop equips
   sanctuary:  { name: 'Sanctuary',    cd: 4, desc: 'Heal 30% of max HP.' },
   cross:      { name: 'Cross',        cd: 3, desc: 'Fire both diagonals at once, 2 tiles each way.' },
@@ -186,7 +186,7 @@ export const MUTATORS = {
   rift:     { name: 'Rift Storm', desc: 'Every third round the rift swaps two random pieces across the board.' },
   chaos:    { name: 'Chaos Stack', desc: 'Two hazards at once. Check the board.' },
   // 15.0 (W): location hazards
-  brambles: { name: 'Overgrowth', desc: 'Thorny hedges everywhere. Landing in brambles costs turn speed.' },
+  brambles: { name: 'Overgrowth', desc: 'Thorny hedges everywhere. Landing in brambles pushes you later in the turn order.' },
   poison:   { name: 'Poison Pools', desc: 'Bubbling bog pools. Land on one or start a turn in it and you are poisoned.' },
 };
 export const PLAYER_COLORS = ['#ff4d6d', '#4dabff', '#ffd24d', '#5cff9d', '#c77dff', '#ff8f3d', '#3dfff0', '#ff6ad5'];
@@ -302,7 +302,7 @@ export const BOT_LEVELS = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
 export const COMBOS = [
   { name: 'Wall Slam', pieces: ['Pawn'], text: 'Line up a Shove so the target hits a wall, rubble or another piece. The collision adds bonus damage, and if it hits a piece, both take it.' },
   { name: 'Double Jump', pieces: ['Knight'], text: 'Vault is free. Vault, jump twice to close distance, and you still have your action for a T-Strike.' },
-  { name: 'Initiative Lock', pieces: ['Knight'], text: 'Stagger knocks targets back in the turn order. Pair it with Rally Cry and you can act again before they recover.' },
+  { name: 'Initiative Lock', pieces: ['Knight'], text: 'Stagger pushes targets later in the next round\'s turn order. Pair it with Rally Cry and you act before them two rounds running.' },
   { name: 'Shrine Anchor', pieces: ['Bishop'], text: 'Drop a Blink Mark on a shrine, go fight, then blink home when you are hurt.' },
   { name: 'Hostile Takeover', pieces: ['Bishop'], text: 'Transpose swaps places with ANY piece in diagonal sight, enemies included. Think about where that leaves them.' },
   { name: 'Barricade and Ram', pieces: ['Rook'], text: 'Raise a Rampart behind a target, then Battering Charge into them. The knockback has nowhere to go.' },

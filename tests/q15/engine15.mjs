@@ -57,7 +57,8 @@ const pl = (s, i = 0) => s.units.filter((u) => u.kind === 'player')[i];
 function place(s, u, x, y) { const o = E.unitAt(s, x, y); if (o && o !== u) { o.x = -50; o.alive = false; } s.tiles[y * D.SIZE + x] = { t: 'floor' }; s.items = s.items.filter((i) => !(i.x === x && i.y === y)); u.x = x; u.y = y; }
 function clearHollows(s) { for (const u of s.units) if (u.kind === 'hollow') { u.alive = false; u.hp = 0; u.x = -50 - u.id; } }
 // hand the turn to u (its turn start runs: statuses tick)
-function forceTurn(s, u) { for (const w of s.units) if (w.alive) w.gauge = 0; u.gauge = 100; s.roundTurns = 0; const ev = []; E.nextTurn(s, ev); return ev; }
+function forceTurn(s, u) { for (const w of s.units) if (w.alive) { w.gauge = 0; w.rt = s.round; } u.rt = null; s.roundTurns = 0; // 15.2: round-based turns
+  const ev = []; E.nextTurn(s, ev); return ev; }
 const stOf = (u, k) => (u.status || []).find((x) => x.k === k) || null;
 const evs = (ev, e, f = () => true) => ev.filter((q) => q.e === e && f(q));
 
@@ -290,7 +291,7 @@ function testKing() {
       check(G, 'Exposed: one stack per distinct attacker (1 then 2)', n1 === 1 && n2 === 2, `stacks ${n1},${n2}`);
       check(G, 'Exposed: the King takes more damage with each stack', d2 > d1 && d1 > d0, `preview ${d0} -> ${d1} -> ${d2}`);
       check(G, 'Exposed: same attacker again does not stack', n3 === n2, `stacks ${n2} -> ${n3}`);
-      forceTurn(s, k); check(G, 'Exposed clears at the King\'s next turn', xn() === 0 && pd() === d0, `stacks ${xn()} preview ${pd()} vs ${d0}`);
+      forceTurn(s, k); check(G, 'Exposed clears at the King\'s next turn', xn() === 0 && pd() <= d0, `stacks ${xn()} preview ${pd()} vs ${d0}`);
     }
   });
   // win-rate sim

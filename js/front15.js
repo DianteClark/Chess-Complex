@@ -330,7 +330,10 @@ export function pawnLineHTML(cur, skin) {
 // After the contender reveal. Lands on s.location; a tap skips straight to the landing; reduced motion shows it settled.
 export const wheelMs = () => (reduced() ? 1300 : 3100);
 let wheelOn = null;
-export function locationIntro(s, { director, sfx } = {}) {
+// 15.1 (D): driven by the Director's intro sequence: opts.hold = ms the landed card stays (default 900, the old auto
+// close), opts.onClose fires once when the wheel is gone; returns the controller { host, tap, skip, close } (tap() lands
+// a spinning wheel and returns true, or returns false once landed so the sequence advances).
+export function locationIntro(s, { director, sfx, hold, onClose } = {}) {
   const id = s && s.location; if (!id) return 0;
   const L = locations() || {}; const loc = L[id] || { name: id };
   stopWheel();
@@ -340,16 +343,24 @@ export function locationIntro(s, { director, sfx } = {}) {
   host.innerHTML = '<div class="lw-kick">World Tour</div><div class="lw-stage"></div><div class="lw-skip">Tap to skip</div>';
   ($('#s-game') || document.body).appendChild(host);
   const dur = wheelMs();
-  let landed = false, closeT = 0, ctl = null;
+  let landed = false, closed = false, closeT = 0, hangT = 0, ctl = null;
   const land = () => {
-    if (landed) return; landed = true; host.classList.add('landed');
+    if (landed || closed) return; landed = true; host.classList.add('landed');
     try { dispatchEvent(new CustomEvent('cc:wheel-landed', { detail: { id } })); } catch {}
-    clearTimeout(closeT); closeT = setTimeout(close, reduced() ? 500 : 900);
+    clearTimeout(closeT); closeT = setTimeout(close, hold ?? (reduced() ? 500 : 900));
   };
-  const close = () => { if (!host.isConnected) return; host.classList.add('out'); setTimeout(() => host.remove(), 320); if (wheelOn === ctrl) wheelOn = null; try { director && director.release && director.release(); } catch {} };
-  const skip = () => { if (ctl && typeof ctl.skip === 'function') { try { ctl.skip(); } catch {} } if (!landed) { fallbackLand(host, id, L); land(); } else close(); };
+  const close = () => {
+    if (closed) return; closed = true; clearTimeout(closeT); clearTimeout(hangT);
+    if (host.isConnected) { host.classList.add('out'); setTimeout(() => host.remove(), 320); }
+    if (wheelOn === ctrl) wheelOn = null;
+    try { director && director.release && director.release(); } catch {}
+    try { onClose && onClose(); } catch (e) { console.warn('wheel close', e); }
+  };
+  const toLand = () => { if (ctl && typeof ctl.skip === 'function') { try { ctl.skip(); } catch {} } if (!landed) { fallbackLand(host, id, L); land(); } };
+  const skip = () => { if (!landed) toLand(); else close(); };
+  const tap = () => { if (landed) return false; toLand(); return true; };
   host.addEventListener('pointerdown', (e) => { e.stopPropagation(); skip(); });
-  const ctrl = { host, skip, close }; wheelOn = ctrl;
+  const ctrl = { host, skip, close, tap }; wheelOn = ctrl;
   try { dispatchEvent(new CustomEvent('cc:wheel-start', { detail: { id } })); } catch {}
   try { director && director.hold && director.hold(dur + 1000); } catch {}
   const stage = $('.lw-stage', host);
@@ -358,8 +369,8 @@ export function locationIntro(s, { director, sfx } = {}) {
     try { ctl = WHEEL.spinWheel(stage, { target: id, reduced: reduced(), duration: dur, locations: L, onDone: land }) || null; used = true; host.classList.add('e2'); } catch (e) { console.warn('wheel', e); used = false; }
   }
   if (!used) fallbackWheel(stage, id, L, dur, land, sfx);
-  setTimeout(land, dur + 1500); // never hang
-  return dur + 900;
+  hangT = setTimeout(land, dur + 1500); // never hang
+  return ctrl;
 }
 export function stopWheel() { if (wheelOn) { const w = wheelOn; wheelOn = null; w.host.remove(); } }
 // Built-in wheel (used until / unless js/wheel.js provides spinWheel): a ring of the eight location names that spins,

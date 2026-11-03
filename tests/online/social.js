@@ -417,8 +417,8 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
       const micOff = await c.evaluate(async () => { const { voice } = await import('/js/voice.js'); return !voice.mic.getAudioTracks()[0].enabled; });
       run.check(off && micOff, `talk did not stop on release (indicator off ${off}, mic off ${micOff})`);
       // per-player mute and volume
-      const g = await host.evaluate(async (p) => { const { voice } = await import('/js/voice.js'); voice.setVolume(p, 0.5); const e = [...voice.calls.values()].find((x) => x.pid === p); const a = e && e.gain ? e.gain.gain.value : null; voice.toggleMute(p); const b = e && e.gain ? e.gain.gain.value : null; voice.toggleMute(p); return { a, b }; }, cpid);
-      run.check(g.a > 0.6 && g.a < 0.8 && g.b === 0, `host: volume/mute gains ${JSON.stringify(g)}`);
+      const g = await host.evaluate(async (p) => { const { voice } = await import('/js/voice.js'); voice.setVolume(p, 0.5); const e = [...voice.calls.values()].find((x) => x.pid === p); const a = e && e.el ? (e.el.muted ? 0 : e.el.volume) : null; voice.toggleMute(p); const b = e && e.el ? (e.el.muted ? 0 : e.el.volume) : null; voice.toggleMute(p); return { a, b }; }, cpid); // 15.2: voices play through their <audio> element
+      run.check(g.a === 0.5 && g.b === 0, `host: volume/mute levels ${JSON.stringify(g)}`);
       // into the match: voice survives, Talk button in the HUD
       await L.startMatch(run, host, { bots: 2, clients: [c] });
       const vm = await vstate(c);
