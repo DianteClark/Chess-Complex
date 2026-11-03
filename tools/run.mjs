@@ -20,9 +20,9 @@ export function play(players, seed, opts = {}, maxSteps = 40000) {
   let steps = 0;
   while (!s.over && steps < maxSteps) {
     const u = unitById(s, s.active);
-    const plan = u.kind === 'hollow' ? planHollow(s, u) : planBot(s, u);
-    for (const a of plan) { applyAction(s, u.pid, a); steps++; if (s.active !== u.id || s.over) break; }
-    if (s.active === u.id && !s.over) applyAction(s, u.pid, { type: 'end' });
+    const plan = u.kind === 'hollow' ? planHollow(s, u) : planBot(s, u), turn = s.turnNo; // 16.0 (C): stop on turnNo, not s.active (a unit that gets the next turn too, e.g. Seize or a 1v1 round wrap, had it skipped)
+    for (const a of plan) { applyAction(s, u.pid, a); steps++; if (s.turnNo !== turn || s.over) break; }
+    if (s.turnNo === turn && !s.over) applyAction(s, u.pid, { type: 'end' });
     steps++;
     for (const v of s.units) if (v.alive && (Number.isNaN(v.hp) || v.hp > stats(v).maxHp + 1)) throw new Error('bad hp ' + v.name + ' ' + v.hp);
     for (const v of s.units) if (v.alive) { const t = s.tiles[v.y * 16 + v.x].t; if (t === 'out' || t === 'wall' || t === 'pit' || t === 'rubble' || t === 'crate' || t === 'chest') throw new Error(`unit ${v.name} on ${t} (mode ${s.mode}, seed ${seed})`); }

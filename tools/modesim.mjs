@@ -1,6 +1,8 @@
 // Every mode, bot-only: termination, length, King rate; co-op modes report win rate and waves.
 // node tools/modesim.mjs [games per mode] [mode,mode,...]
-import { unitById } from '../js/engine.js';
+import * as ENG from '../js/engine.js';
+const { unitById } = ENG;
+for (const a of process.argv.slice(2).filter((x) => x.includes('='))) { const [k, v] = a.split('='); const [o, f] = k.split('.'); ENG[o][f] = +v; } // 16.0: e.g. INTEREST.per=6 OVERKILL.spill=0.4
 import { MODES } from '../js/data.js';
 import { roster, play, avg, pct } from './run.mjs';
 

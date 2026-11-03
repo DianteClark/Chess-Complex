@@ -32,7 +32,7 @@ export const LESSONS = [
       { say: 'Welcome to Chess Complex. I am the Grandmaster, and I will teach you to survive the board. Every match, everyone starts as a lowly Pawn. Including you.', next: true },
       { say: 'Your Pawn steps one tile in any direction. Tap the glowing tile to move there.', obj: 'Move to the glowing tile', mark: () => [{ x: 6, y: 8 }], check: (c) => c.me.x === 6 && c.me.y === 8 },
       { say: 'Each turn you get one move and one action, in either order. When you are done, end your turn.', obj: 'End your turn', glow: '[data-slot=end]', check: (c) => c.t.turns >= 1 },
-      { say: 'Every round each piece gets one turn, fastest SPD first. The strip at the top shows who acts next. Faster pieces also hit slower ones a little harder.', glow: '#h-order', next: true },
+      { say: 'Every round each piece gets one turn, fastest SPD first. The strip at the top shows who acts next. Each stat has a bonus rule: SPD hits slower pieces harder, ATK spills Overkill, DEF Guards against big hits, HP gives a Second Wind. Hold sends you to the back of the round.', glow: '#h-order', next: true },
       { say: 'See those cyan crystals? Promotion Shards. Walk onto them to collect them. It may take a couple of turns.', obj: 'Collect 2 shards', setup: (c) => { c.item(7, 7); c.item(8, 8); c.fresh(); }, mark: () => [{ x: 7, y: 7 }, { x: 8, y: 8 }], check: (c) => (c.me.attune || 0) >= 2 },
       { say: 'Every shard you collect also attunes you: a little more HP, ATK and DEF for the rest of the match. You spend shards to evolve, but attunement stays. Keep collecting all game.', glow: '#h-attune', next: true },
     ],

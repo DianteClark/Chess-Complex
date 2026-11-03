@@ -547,6 +547,7 @@ export function bakeLight(r, g) {
     else if (k === 'geyser') cut(x + 0.5, y + 0.5, 1.2, 0.4);
     else if (k === 'conveyor') cut(x + 0.5, y + 0.5, 0.8, 0.15);
     else if (k === 'poison') cut(x + 0.5, y + 0.5, 1.1, 0.4); // R 15.0: bog pools glow faintly
+    else if (k === 'cog' && (t.i & 3) === 0) cut(t.hx, t.hy, 1.5, 0.35); // 16.0 (L): brass gears catch the light
   }
   if (s.hill && s.tiles[(HILL.y0 + 1) * SIZE + HILL.x0 + 1].t === 'throne') { cut(HILL.x0 + 2, HILL.y0 + 2, 3.6, 0.75); for (const [px, py] of [[0, 0], [4, 0], [0, 4], [4, 4]]) cut(HILL.x0 + px, HILL.y0 + py - 0.4, 1.4, 0.7); } // B4: throne + braziers
   q.globalAlpha = 1; q.globalCompositeOperation = 'source-over';
@@ -574,7 +575,7 @@ export function drawGroundFog(r, ctx, T) {
 }
 
 // ---------- weather ----------
-const WN = { dust: 40, petals: 36, pixels: 40, embers: 46, fireflies: 26, snow: 90, bubbles: 30, stars: 30, rain: 110, ash: 60, aurora: 0, sand: 80, leaves: 30, void: 40, fog: 7 };
+const WN = { dust: 40, petals: 36, pixels: 40, embers: 46, fireflies: 26, snow: 90, bubbles: 30, stars: 30, rain: 110, ash: 60, aurora: 0, sand: 80, leaves: 30, void: 40, fog: 7, sparks: 34 }; // 16.0 (L): + sparks (Clockwork Spire)
 export class Weather {
   constructor() { this.pools = new Map(); this.splash = []; this.view = [0, 0, SIZE, SIZE]; }
   pool(kind, n) {
@@ -588,6 +589,7 @@ export class Weather {
     if (kind === 'rain') { m.vy = 11 + R() * 5; m.vx = -2.4; m.gy = y0 + R() * h; if (!any) m.y = y0 - 1 - R() * 2; }
     else if (kind === 'snow') { m.vy = m.l ? 0.7 + R() * 0.5 : 0.35 + R() * 0.25; m.vx = -0.15; }
     else if (kind === 'ash') { m.vy = 0.35 + R() * 0.35; m.vx = 0.2; }
+    else if (kind === 'sparks') { m.vy = 0.22 + R() * 0.4; m.vx = 0.08 + R() * 0.12; } // 16.0 (L): brass sparks sifting down from the clockwork
     else if (kind === 'sand') { m.vx = 6 + R() * 5; m.vy = 0.4 * (R() - 0.3); if (!any) { m.x = x0 - 0.5; m.y = y0 + R() * h; } }
     else if (kind === 'leaves' || kind === 'petals') { m.vy = 0.45 + R() * 0.35; m.vx = 0.35 + R() * 0.3; if (!any && R() < 0.5) { m.x = x0 - 0.5; m.y = y0 + R() * h; } }
     else if (kind === 'embers' || kind === 'void' || kind === 'bubbles' || kind === 'dust') { m.vy = -(0.12 + R() * (kind === 'embers' ? 0.7 : 0.25)); m.vx = 0; if (!any) m.y = y1 + 0.5; }
@@ -635,6 +637,15 @@ export class Weather {
           for (const m of P) if (m.l === lay) { const x = m.x + Math.sin(m.p * 0.9 + m.s * 6) * 0.25, rr = lay ? 0.035 + m.s * 0.03 : 0.018 + m.s * 0.012; ctx.moveTo(x + rr, m.y); ctx.arc(x, m.y, rr, 0, TAU); }
           ctx.fill();
         }
+        break;
+      }
+      case 'sparks': { // 16.0 (L): Clockwork Spire: brass filings and sparks tumbling through the light, glinting as they turn
+        ctx.globalCompositeOperation = 'lighter';
+        const sp1 = softSprite('#ffb84a');
+        if (!r.lowQ) for (const m of P) if (m.s > 0.72) { const gl = Math.pow(Math.max(0, Math.sin(m.p * 3.1 + m.s * 17)), 6); if (gl < 0.08) continue; ctx.globalAlpha = 0.55 * gl; ctx.drawImage(sp1, m.x - 0.13, m.y - 0.13, 0.26, 0.26); }
+        ctx.globalAlpha = 0.9; ctx.fillStyle = '#ffd890'; ctx.beginPath();
+        for (const m of P) { const x = m.x + Math.sin(m.p * 0.9 + m.s * 7) * 0.22, tw = Math.abs(Math.sin(m.p * 2.6 + m.s * 11)), w = 0.012 + tw * 0.03; ctx.rect(x - w / 2, m.y - 0.012, w, 0.024); }
+        ctx.fill(); ctx.globalCompositeOperation = 'source-over';
         break;
       }
       case 'ash': {

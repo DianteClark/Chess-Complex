@@ -51,7 +51,7 @@
 
 import { blitExact } from './world.js'; // R2 15.0.1: 1:1 copies of the big caustic glows
 
-export const BACKDROP_IDS = ['citadel', 'forge', 'temple', 'gardens', 'ruins', 'works', 'rift', 'bog'];
+export const BACKDROP_IDS = ['citadel', 'forge', 'temple', 'gardens', 'ruins', 'works', 'rift', 'bog', 'spire']; // 16.0 (L): + spire
 const MODS = new Map(); // id -> module default | null (missing) | 'loading'
 let FORCE = null;
 try { FORCE = new URLSearchParams(location.search).get('bd') || localStorage.getItem('cc_bd') || null; } catch {}

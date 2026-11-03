@@ -19,7 +19,7 @@ export const PIECES = {
   // 15.0 pawn line (C): pawn-shaped, single steps, keep the Pawn's equipped ability (equipFrom). cost overrides EVOLVE_COST.
   veteran:  { ult: 'warcry', name: 'Veteran',  tier: 2, cost: 3, hp: 92, atk: 14, def: 9, spd: 10, attack: 'halberd', sig: 'shieldWall', equips: [], equipFrom: 'pawn', line: 'pawn',
             moveDesc: 'Steps 1 tile in any direction. A Pawn that refused to change.' },
-  champion: { ult: 'valor',  name: 'Champion', tier: 3, cost: 6, hp: 104, atk: 17, def: 10, spd: 10, attack: 'sweep',   sig: 'heroicLeap', equips: [], equipFrom: 'pawn', line: 'pawn',
+  champion: { ult: 'valor',  name: 'Champion', tier: 3, cost: 7, hp: 98, atk: 17, def: 10, spd: 10, attack: 'sweep',   sig: 'heroicLeap', equips: [], equipFrom: 'pawn', line: 'pawn',
             moveDesc: 'Steps 1 tile in any direction. Heroic Leap covers the distance.' },
 };
 
@@ -164,14 +164,23 @@ for (const [k, v] of Object.entries({ pickpocket: 400, tripwire: 600, phalanx: 8
   blink: 400, penance: 600, consecrate: 800, blessing: 1200, hex: 1200,
   siege: 400, quake: 600, repel: 800, bombard: 800, scorch: 1000, concuss: 1400,
   checkmate: 400, gambit: 600, gravity: 800, frostNova: 1500, plague: 1200 })) ABILITIES[k].unlock = v;
+// 16.0 (C) tempo equips, built on the turn order. tempo: 'first' = you act first next round, 'last' = pieces hit act
+// last next round, 'both' = both. Engine event {e:'tempo', id, k:'first'|'last', by}.
+Object.assign(ABILITIES, {
+  seize:     { name: 'Seize',         cd: 4, unlock: 1000, tempo: 'first', desc: 'Strike one tile a knight\'s jump away without moving, then act first next round.' },
+  hourglass: { name: 'Hourglass',     cd: 4, unlock: 1200, tempo: 'last', st: ['slow'], desc: 'A bolt of sand hits the first piece on a diagonal within 5 tiles. It is slowed and acts last next round.' },
+  anchor:    { name: 'Anchor',        cd: 4, unlock: 1000, tempo: 'last', desc: 'Drop anchor: crush every adjacent tile and gain +25% DEF until your next turn. Enemies hit act last next round.' },
+  fracture:  { name: 'Time Fracture', cd: 5, unlock: 1500, tempo: 'both', desc: 'Shatter time 2 tiles around the Queen. Everything hit acts last next round, and you act first.' },
+});
+PIECES.knight.equips.push('seize'); PIECES.bishop.equips.push('hourglass'); PIECES.rook.equips.push('anchor'); PIECES.queen.equips.push('fracture');
 
 export const STAT_POINTS = 10;
 export const STAT_GAIN = { hp: 7, atk: 2, def: 1.5, spd: 1 };
 export const PRESETS = {
-  bruiser:  { name: 'Bruiser',  pts: { hp: 3, atk: 5, def: 2, spd: 0 }, passive: 'thorns',    blurb: 'Hits hard, takes a punch.' },
+  bruiser:  { name: 'Bruiser',  pts: { hp: 4, atk: 4, def: 2, spd: 0 }, /* 16.0 (C): was hp 3 atk 5 (Overkill + Thorns won 30%) */ passive: 'thorns',    blurb: 'Hits hard, takes a punch.' },
   scout:    { name: 'Scout',    pts: { hp: 3, atk: 3, def: 1, spd: 3 }, passive: 'scavenger', blurb: 'First to the loot, first to evolve.' },
   tank:     { name: 'Tank',     pts: { hp: 4, atk: 2, def: 2, spd: 2 }, passive: 'regen',     blurb: 'Outlast everyone.' },
-  assassin: { name: 'Assassin', pts: { hp: 2, atk: 5, def: 0, spd: 3 }, passive: 'first',     blurb: 'Opens fights with a devastating first blow.' },
+  assassin: { name: 'Assassin', pts: { hp: 2, atk: 4, def: 0, spd: 4 }, passive: 'first',     blurb: 'Opens fights with a devastating first blow.' },
 };
 
 export const TEAM_COLORS = ['#4dabff', '#ffd24d', '#5cff9d', '#c77dff']; // no red: red reads as danger
@@ -188,6 +197,7 @@ export const MUTATORS = {
   // 15.0 (W): location hazards
   brambles: { name: 'Overgrowth', desc: 'Thorny hedges everywhere. Landing in brambles pushes you later in the turn order.' },
   poison:   { name: 'Poison Pools', desc: 'Bubbling bog pools. Land on one or start a turn in it and you are poisoned.' },
+  cogs:     { name: 'Cogwheels', desc: 'Giant brass gears in the floor. At the end of every round they turn and carry anyone on them one tile clockwise.' }, // 16.0 (L) spire
 };
 export const PLAYER_COLORS = ['#ff4d6d', '#4dabff', '#ffd24d', '#5cff9d', '#c77dff', '#ff8f3d', '#3dfff0', '#ff6ad5'];
 
@@ -279,6 +289,7 @@ export const WORLD_EVENTS = {
   overcharge: { name: 'Overcharge',   tone: 'violet', desc: 'The machines surge. Cooldowns refresh, ultimates charge, and anyone on a belt is stunned' },
   gravityWell:{ name: 'Gravity Well', tone: 'violet', warn: 'Space is bending. Stay clear of the marked rift', desc: 'The well collapses and drags nearby pieces toward its heart' },
   toxicFog:   { name: 'Toxic Fog',    tone: 'red',    warn: 'A green fog creeps in. Leave the marked area', desc: 'The fog chokes everyone inside it with poison' },
+  reversal:   { name: 'Reversal',     tone: 'gold',   warn: 'The clock winds back. Next round the slowest act first', desc: 'Time runs backwards. For one round the slowest pieces act first' }, // 16.0 (L) spire
 };
 
 export const QUESTS = {

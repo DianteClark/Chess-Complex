@@ -1,11 +1,13 @@
 // 15.0 combat balance (C): King rate, presets, placement by final piece and by bot road, Ascension, statuses, length.
 // node tools/sim15.mjs [games] [mode] [--rand]   (--rand: random passives and equips, like abilitysim)
 // Tunables: K.<key>=v sets KING_T, P.<road>=w sets BOT_PLANS, e.g. node tools/sim15.mjs 200 royale K.hp=1.1 P.pawn=0.2
-import { unitById, ascended, KING_T, BOT_PLANS } from '../js/engine.js';
+import * as ENG from '../js/engine.js';
+const { unitById, ascended, KING_T, BOT_PLANS } = ENG;
 import { roster, play, avg, pct } from './run.mjs';
+import { PRESETS } from '../js/data.js';
 
 const args = process.argv.slice(2), flags = new Set(args.filter((a) => a.startsWith('--'))), pos = args.filter((a) => !a.startsWith('--') && !a.includes('='));
-for (const a of args.filter((x) => x.includes('='))) { const [k, v] = a.split('='); const [o, f] = k.split('.'); (o === 'K' ? KING_T : BOT_PLANS)[f] = +v; }
+for (const a of args.filter((x) => x.includes('='))) { const [k, v] = a.split('='); const [o, f, g] = k.split('.'); if (o === 'PR') { PRESETS[f].pts[g] = +v; continue; } /* PR.bruiser.atk=4 */ (o === 'K' ? KING_T : o === 'P' ? BOT_PLANS : ENG[o])[f] = +v; } // 16.0: also OVERKILL.spill=0.4 GUARD.base=60 INTEREST.per=5 SECOND_WIND.heal=0.1 HOLD.gauge=30 BOT_HOLD.chance=0.35 TEMPO_T.seize=0.8
 const N = +pos[0] || 200, mode = pos[1] || 'royale', randomize = flags.has('--rand');
 const T = { rounds: [], turns: [], kingWin: 0, crowned: 0, kingHeld: [], preset: {}, byPiece: {}, byPlan: {}, statusEv: {}, dot: 0, dmg: 0, phases: 0, warn: 0, raceWins: 0, done: 0, stalls: 0, crownBy: {} };
 const add = (o, k, place, won) => { const q = (o[k] ||= { n: 0, place: 0, win: 0, top3: 0 }); q.n++; q.place += place; q.win += won; q.top3 += place <= 3 ? 1 : 0; };

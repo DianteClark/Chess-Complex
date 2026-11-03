@@ -507,3 +507,102 @@ export class Intro {
   stop() { if (!this.on) return; this.on = false; clearTimeout(this.timer); this.endCur(); this.o = {}; this.cleanup(); }
 }
 export const intro = new Intro(director);
+
+// ---------------------------------------------------------------- 16.0 Tactics (D)
+// Stat identities, Hold, the round divider / REVERSED tag in the turn strip, Shard Interest and the callouts for
+// overkill / guard / secondwind / hold / interest / reversal. One copy of every sentence so loadout, inspect,
+// How to Play and the callouts agree. Engine contract: docs/DESIGN_16.md sections 1-2 (C), Reversal section 3 (L).
+export const STAT_EDGE = {
+  hp:  { name: 'Second Wind', line: 'Once a match, a hit that drops you under 25% HP heals 10% + 1 per HP point.', short: 'once, under 25% HP: heal 10% + 1 per point' },
+  atk: { name: 'Overkill',    line: 'Damage past a kill spills 50% into an enemy next to the victim.', short: "a kill's extra damage splashes 50% to a neighbour" },
+  def: { name: 'Guard',       line: 'No single hit can take more than 60% minus your DEF of your max HP.', short: 'one hit takes at most (60 - DEF)% of your HP' },
+  spd: { name: 'Speed Edge',  line: '+3% damage per SPD over your target, up to 15%.', short: '+3% damage per SPD over the target, max 15%' },
+};
+export const guardPctOf = (def) => Math.max(35, 60 - Math.floor(+def || 0)); // % of max HP one hit may take (spec 16.0; C's guardPct(u) wins)
+export const speedEdge = (a, b) => Math.max(-15, Math.min(15, Math.round(((+a || 0) - (+b || 0)) * 3))); // % vs a target
+// Hold: legal on your turn before you have moved or acted, once per round (C's canHold wins when the engine has it)
+export function heldThisRound(s, u) { return !!(s && u && u.held === s.round); } // C 16.0: u.held = round of the Hold
+// still waiting on a Hold (shown in the strip); the resumed turn itself is the active chip
+const waitingHeld = (s, u) => heldThisRound(s, u) && u.rt !== s.round;
+export function holdLegal(s, u, E) {
+  if (!s || !u || !u.alive || s.over) return false;
+  if (E && typeof E.canHold === 'function') { try { return !!E.canHold(s, u); } catch { return false; } }
+  const T = s.turn;
+  return !!(T && s.active === u.id && !T.moved && !T.acted && !T.used && !T.rooted && !T.stunned && !T.resumed && !heldThisRound(s, u) && s.units.some((w) => w.alive && w !== u && w.rt !== s.round));
+}
+export function holdWhy(s, u) {
+  const T = (s && s.turn) || {};
+  if (!s || !u || s.active !== u.id) return 'Only on your turn.';
+  if (heldThisRound(s, u) || T.resumed) return 'You already held this round.';
+  if (T.moved || T.acted || T.used || T.extraMoves > 0) return 'Only before you move or act.';
+  if (T.rooted || T.stunned) return 'Not while frozen or stunned.';
+  if (!s.units.some((w) => w.alive && w !== u && w.rt !== s.round)) return 'You are already last this round.';
+  return 'Not right now.';
+}
+export function holdInfoHTML(s, u, E) {
+  const why = holdLegal(s, u, E) ? '' : holdWhy(s, u);
+  return `<svg class="ab-hold" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-hold"/></svg><div><b>Hold</b><p>Wait and act last this round, after everyone still waiting. Your next round starts 3 SPD later.</p><em>Once per round - only before you move or act</em>${why ? `<div class="ab-lock">${why}</div>` : ''}</div>`;
+}
+// Turn strip extras: where the next round starts in predictOrder's list, who is holding, Reversal this / next round
+export function orderMeta(s, order, E) {
+  const m = { split: -1, held: new Set(), rev: false, revNext: false };
+  if (!s || !order || !order.length) return m;
+  let q = null; if (E && typeof E.turnQueue === 'function') { try { q = E.turnQueue(s); } catch {} }
+  const alive = s.units.filter((v) => v.alive);
+  for (const id of q && q.held ? q.held : alive.filter((v) => waitingHeld(s, v)).map((v) => v.id)) m.held.add(id);
+  const left = q ? q.now.length : alive.filter((v) => v.rt !== s.round && v.id !== s.active).length + (s.active ? 1 : 0);
+  if (left > 0 && left < order.length) m.split = left;
+  m.rev = q ? !!q.reversed : s.reversal != null && s.reversal === s.round;
+  m.revNext = q ? !!q.nextReversed : s.reversal != null && s.reversal === s.round + 1;
+  return m;
+}
+// Shard Interest preview (C's interestFor(u) when present: +1 per 5 held, max +2, not the King, not in the tutorial)
+export function interestNext(s, u, E) {
+  if (!s || !u || !u.alive || s.tutorial || s.over) return 0;
+  if (E && typeof E.interestFor === 'function') { try { return E.interestFor(u) || 0; } catch { return 0; } }
+  return u.kind === 'player' && u.piece !== 'king' ? Math.min(2, Math.floor((u.shards || 0) / 5)) : 0;
+}
+
+// Callouts. g = the game object (after, announce, feed, r, me, juice). Lanes: hero (director.say), feed, canvas floats.
+// No stacking: hero callouts only for the viewer's own moments, keyed / grouped so they merge with kill callouts.
+const word = (g, id, text, color, size = 0.95, dy = -1.2, life = 1.25) => {
+  const d = g.r && g.r.disp && g.r.disp.get(id); if (!d || !g.r.floats) return;
+  if (g.r.floats.some((f) => f.w16 === id + text && f.t < f.life * 0.6)) return; // one word per piece at a time
+  g.r.floats.push({ x: d.x + 0.5, y: d.y + dy, text, t: 0, life, color, size, w16: id + text });
+};
+export function tactics16(g, e, s, myId, E) {
+  const J = g.juice || (g.juice = {}), by = (id) => (E && E.unitById ? E.unitById(s, id) : s.units.find((v) => v.id === id));
+  const nm = (u) => `<b style="color:${u.kind === 'player' ? u.color : '#ccc'}">${esc(u.name)}</b>`;
+  if (e.e === 'overkill') {
+    const k = by(e.id), t = by(e.to); if (!k || !t) return;
+    g.after(() => word(g, t.id, `OVERKILL +${e.dmg}`, '#ff7a4d', 1.0, -1.25, 1.35), 260);
+    if (k.id === myId) g.after(() => g.announce('Overkill', `+${e.dmg} splash on ${t.name}`, '#ff7a4d', null, 2, { kicker: 'ATK edge', tier: 2, prio: 63, group: 'k' + k.id, key: 'ok' + k.id }), 650);
+    else if (t.id === myId) g.after(() => g.feed(`<b style="color:#ff7a4d">Overkill</b><span class="x">splash from</span>${nm(k)}<span class="x">-${e.dmg}</span>`, 'ok-me'), 300);
+    else g.after(() => g.feed(`${nm(k)}<span class="x">overkill</span><b style="color:#ff7a4d">+${e.dmg}</b><span class="x">on</span>${nm(t)}`, 'ok' + k.id), 300);
+  }
+  if (e.e === 'guard' && e.saved > 0) {
+    const u = by(e.id); if (!u) return;
+    const max = (E && E.stats ? E.stats(u).maxHp : u.hpMax || 100) || 100, big = e.saved >= max * 0.12;
+    const mine = u.id === myId, mineHit = J.lastSrc16 === myId;
+    if (mine || big || mineHit) g.after(() => word(g, u.id, `GUARDED ${e.saved}`, '#7fb6ff', mine ? 1.0 : 0.92, -1.2, 1.2), 200);
+    if (mine && (big || !J.guardFed)) { J.guardFed = 1; g.after(() => g.feed(`<b style="color:#7fb6ff">Guard</b><span class="x">your DEF stopped ${e.saved} damage</span>`, 'guard-me'), 300); }
+  }
+  if (e.e === 'ability' || e.e === 'turn') J.lastSrc16 = e.id; // whose action this is (a guard during my attack is mine to see)
+  if (e.e === 'secondwind') {
+    const u = by(e.id); if (!u) return;
+    g.after(() => word(g, u.id, `SECOND WIND +${e.heal}`, '#6dffa8', u.id === myId ? 1.0 : 0.92, -1.3, 1.5), 300);
+    if (u.id === myId) g.after(() => g.announce('Second Wind', `+${e.heal} HP - once per match`, '#6dffa8', null, 3, { kicker: 'HP edge', tier: 2, prio: 66, key: 'sw-me' }), 500);
+    else g.after(() => g.feed(`${nm(u)}<span class="x">caught a</span><b style="color:#6dffa8">Second Wind</b><span class="x">+${e.heal}</span>`, 'sw' + u.id), 400);
+  }
+  if (e.e === 'hold') {
+    const u = by(e.id); if (!u) return;
+    g.after(() => word(g, u.id, 'HOLD', '#e8c87a', 0.95, -1.15, 1.1), 120);
+    if (u.id === myId) g.after(() => g.feed('<b style="color:#e8c87a">Holding</b><span class="x">you act last this round</span>', 'hold-me'), 150);
+  }
+  if (e.e === 'interest' && e.id === myId && e.n > 0) J.int16 = { n: e.n, at: performance.now() }; // main.js updateHud turns the next shard "+n" into "+n interest"
+  if (e.e === 'reversal') {
+    const L = locationInfo(s.location) || {}, col = L.c || '#e8b04a';
+    if (e.on) g.after(() => director.say({ text: 'Reversal', sub: 'Slowest SPD acts first this round', kicker: L.name || 'Clockwork Spire', color: col, tier: 2, prio: 56, key: 'world', ttl: 3600, level: 3 }), 300);
+    else g.after(() => g.feed(`<b style="color:${col}">Time flows forward</b><span class="x">fastest SPD first again</span>`, 'rev-off'), 300);
+  }
+}

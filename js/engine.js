@@ -188,7 +188,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
       let [x, y] = p;
       for (let k = 0; k < (P ? 4 : 5); k++) { if (free(x, y)) set(x, y, P ? 'poison' : 'bramble'); const d = (P ? ORTH : DIRS8)[ri(s, P ? 4 : 8)]; x += d[0]; y += d[1]; }
     }
-  }
+  } else if (mut === 'cogs') spireCogsGen(s, free, set, reserved, randFree); // 16.0 (L) spire
   }
   for (let i = 0; i < Math.round(20 * sc); i++) { const p = randFree(1); if (p) set(p[0], p[1], 'crate', { hp: 1 }); }
   for (let i = 0; i < Math.round(12 * sc); i++) { const p = randFree(1); if (p) s.items.push({ x: p[0], y: p[1], k: 'shard', n: 1 }); }
@@ -501,6 +501,16 @@ export function abilityOptions(s, u, slot) {
         if (inB(cx, cy)) opt(pt(cx, cy), [pt(cx - px, cy - py), pt(cx, cy), pt(cx + px, cy + py)].filter((t) => inB(t.x, t.y)), 0.8);
       } break;
     case 'concuss': for (const [dx, dy] of ORTH) { const t = pt(u.x + dx, u.y + dy); if (inB(t.x, t.y)) opt(t, [t], 1.0); } break;
+    // ---- 16.0 (C) tempo equips ----
+    case 'seize': for (const [dx, dy] of KNIGHT) { const t = pt(u.x + dx, u.y + dy); if (inB(t.x, t.y)) opt(t, [t], TEMPO_T.seize, { util: TEMPO_T.firstUtil }); } break;
+    case 'hourglass':
+      for (const [dx, dy] of DIAG) {
+        const tl = lineTiles(s, u, dx, dy, 5, { stopAtUnit: true }); const last = tl[tl.length - 1];
+        const v = last && unitAt(s, last.x, last.y);
+        if (v && v !== u && !ally(u, v)) opt(last, tl, TEMPO_T.hourglass, { kind: 'shot' });
+      } break;
+    case 'anchor': opt(self, around8(u.x, u.y), TEMPO_T.anchor, { util: 2 }); break;
+    case 'fracture': { const tl = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if ((dx || dy) && inB(u.x + dx, u.y + dy)) tl.push(pt(u.x + dx, u.y + dy)); opt(self, tl, TEMPO_T.fracture, { util: TEMPO_T.firstUtil }); break; }
     case 'frostNova': case 'plague': { const tl = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if ((dx || dy) && inB(u.x + dx, u.y + dy)) tl.push(pt(u.x + dx, u.y + dy)); opt(self, tl, id === 'frostNova' ? 0.45 : 0.3); break; }
     case 'warcry': opt(self, around8(u.x, u.y), 1.4); break;
     case 'sweep':
@@ -546,7 +556,7 @@ export const harmed = (u) => !!(u && u.status && u.status.some((q) => STATUS[q.k
 export const ascended = (u) => !!(u && u.kind === 'player' && ASCEND[u.piece] && ((u.hone && u.hone[u.piece]) || 0) >= MAX_HONE);
 // Boss King tuning (tools/sim15.mjs sweeps these). converge/focus: how hard bots gang up on it.
 // Tuned with 300-game sweeps for ~40% King wins in 8-bot Royale (15.0). HP pool = (piece HP x hp + 5) x (1 + hpPer per rival beyond 1).
-export const KING_T = { hp: 0.92, hpPer: 0.03, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
+export const KING_T = { hp: 1.06, hpPer: 0.03, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
 export function addStatus(s, u, k, ev, o = {}) {
   if (!u || !u.alive || s.over || !STATUS[k]) return false;
   let t = Math.max(1, Math.round(o.t ?? STATUS[k].t));
@@ -697,6 +707,7 @@ function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
   let dmg = Math.max(1, Math.round(a.atk * m * 30 / (30 + d.def * defMul(tgt))));
   if (s.round < STEADFAST_ROUND && tgt.kind === 'player' && (tgt.hp >= d.maxHp || (s._guard && s._guard.has(tgt.id))) && dmg >= tgt.hp) { dmg = tgt.hp - 1; ev.push({ e: 'steadfast', id: tgt.id }); }
   if (s.round < STEADFAST_ROUND && tgt.kind === 'player' && tgt.hp >= d.maxHp) (s._guard || (s._guard = new Set())).add(tgt.id);
+  dmg = guardHit(s, tgt, dmg, ev); // 16.0 (C): DEF Guard caps a single hit
   const raw = dmg;
   dmg = soak(s, tgt, dmg, ev, src, crit); // 15.0: status shields, then Siege Brute shields
   if (raw > dmg && src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + raw - dmg; chargeUlt(src, (raw - dmg) * 0.8, ev); }
@@ -706,8 +717,8 @@ function dealDamage(s, src, tgt, mult, ev, { reflect = true } = {}) {
   if (src.kind === 'player') { src.dmgDealt = (src.dmgDealt || 0) + dmg; chargeUlt(src, dmg * 1.1, ev); }
   if (tgt.kind === 'player') chargeUlt(tgt, dmg * 0.8, ev);
   ev.push({ e: 'dmg', id: tgt.id, src: src.id, n: dmg, crit });
-  if (tgt.hp <= 0) kill(s, tgt, src, ev);
-  else adrenaline(s, tgt, ev);
+  if (tgt.hp <= 0) { const over = -tgt.hp; kill(s, tgt, src, ev); overkill(s, src, tgt, over, ev); } // 16.0 (C): ATK Overkill
+  else { secondWind(s, tgt, ev); adrenaline(s, tgt, ev); } // 16.0 (C): HP Second Wind
   if (s._act && s._act.src === src.id && !s.over) actProcs(s, src, tgt, ev);
   if (!s.over && src.alive && src.passive === 'lifesteal' && src !== tgt) heal(s, src, Math.max(1, dmg * 0.14), ev); // 15.0: 10% -> 14% (sims: weakest base ability)
   if (!s.over && tgt.alive && reflect && tgt.passive === 'thorns' && src !== tgt && cheb(src, tgt) <= 1 && src.alive && !ally(src, tgt)) {
@@ -739,6 +750,46 @@ function dmgMods(src, tgt) {
 // per point under (both capped at 15%). Turns are once per round now, so this keeps SPD worth investing in.
 export const SPEED_EDGE = { per: 0.03, cap: 0.15 };
 export const speedEdge = (a, b) => 1 + Math.max(-SPEED_EDGE.cap, Math.min(SPEED_EDGE.cap, SPEED_EDGE.per * (effSpd(a) - effSpd(b))));
+// ---------- 16.0 (C): stat identities ----------
+// ATK Overkill: damage past what a kill needed spills (spill x) into the attacker's nearest enemy next to the victim.
+// One hop, never chains, player attackers only, piece hits only (storm/hazards/DoTs use dealFixed/dot).
+// DEF Guard: one hit never takes more than (base - DEF)% of max HP, floor %. Players and the King only, piece hits only.
+// HP Second Wind: once per match, the first hit that leaves a player alive under `below` heals heal x maxHp + perPt per HP point.
+export const OVERKILL = { spill: 0.5 };
+export const GUARD = { base: 60, floor: 35 };
+export const SECOND_WIND = { below: 0.25, heal: 0.1, perPt: 1 };
+export const guardPct = (u) => (u && u.kind === 'player' ? Math.max(GUARD.floor, GUARD.base - stats(u).def) : 100);
+export const guardCap = (u) => (u && u.kind === 'player' ? Math.max(1, Math.round(stats(u).maxHp * guardPct(u) / 100)) : Infinity);
+function guardHit(s, u, dmg, ev) {
+  const cap = guardCap(u);
+  if (dmg > cap) { ev.push({ e: 'guard', id: u.id, saved: dmg - cap }); return cap; }
+  return dmg;
+}
+function secondWind(s, u, ev) {
+  if (u.kind !== 'player' || !u.alive || u.sw || s.over || u.piece === 'king') return; // the boss King has its phases instead
+  const mx = stats(u).maxHp; if (u.hp >= mx * SECOND_WIND.below) return;
+  u.sw = true; const h0 = u.hp;
+  heal(s, u, mx * SECOND_WIND.heal + SECOND_WIND.perPt * ((u.pts && u.pts.hp) || 0), ev);
+  ev.push({ e: 'secondwind', id: u.id, heal: u.hp - h0 });
+}
+function overkill(s, src, victim, over, ev) {
+  if (s.over || !src || src.kind !== 'player' || over <= 0) return;
+  const n0 = Math.max(1, Math.round(over * OVERKILL.spill));
+  const md = (w) => Math.abs(w.x - src.x) + Math.abs(w.y - src.y);
+  const w = s.units.filter((q) => q.alive && q !== src && q !== victim && !ally(src, q) && cheb(q, victim) <= 1)
+    .sort((a, b) => cheb(src, a) - cheb(src, b) || md(a) - md(b) || a.id - b.id)[0];
+  if (!w) return;
+  let n = guardHit(s, w, n0, ev);
+  if (s.round < STEADFAST_ROUND && w.kind === 'player' && w.hp >= stats(w).maxHp && n >= w.hp) { n = w.hp - 1; ev.push({ e: 'steadfast', id: w.id }); }
+  ev.push({ e: 'overkill', id: src.id, from: victim.id, to: w.id, dmg: n });
+  n = soak(s, w, n, ev, src, false);
+  if (n <= 0) return;
+  w.hp -= n;
+  src.dmgDealt = (src.dmgDealt || 0) + n; chargeUlt(src, n * 1.1, ev);
+  if (w.kind === 'player') chargeUlt(w, n * 0.8, ev);
+  ev.push({ e: 'dmg', id: w.id, src: src.id, n, overkill: true });
+  if (w.hp <= 0) kill(s, w, src, ev); else { secondWind(s, w, ev); adrenaline(s, w, ev); }
+}
 function adrenaline(s, u, ev) {
   if (u.passive !== 'adrenaline' || !u.alive || u.kind !== 'player' || (u.adrenAt && s.round < u.adrenAt)) return;
   const mx = stats(u).maxHp; if (u.hp >= mx * 0.5) return;
@@ -878,7 +929,7 @@ function mkHollow(s, x, y, extra) {
   h.hp = h.hpMax; s.units.push(h); return h;
 }
 export const isBossWave = (S, w) => !!S.gauntlet || w === S.waves || w === Math.floor(S.waves / 2);
-export const SIEGE_T = { spd: 0.4, c0: 1.2, cw: 0.3, hs: 0.1, as: 0.24, force: 4, boss: 0.74, ring: 3, pf0: 0.6, pf: 0.2, g: [1, 0.45, 0.85, 1.1, 1.4], gForce: 8, enrage: 10 };
+export const SIEGE_T = { spd: 0.4, c0: 1.5, cw: 0.3, hs: 0.1, as: 0.24, force: 4, boss: 0.84, ring: 3, pf0: 0.6, pf: 0.2, g: [1, 0.45, 0.85, 1.1, 1.4], gForce: 8, enrage: 10 };
 function siegeCleared(s, ev) {
   const S = s.siege;
   if (S.wave >= S.waves) {
@@ -1106,6 +1157,7 @@ export function useAbility(s, u, slot, anchor, ev) {
   const S = (k, x) => (v, q) => addStatus(s, v, k, ev, { ...q, ...x });
   const ST = { firebrand: S('burn'), dart: S('poison', { n: 2 }), scorch: S('burn'), concuss: S('stun'), plague: S('poison', { n: 2 }), hoarfrost: S('freeze'), warcry: S('stun'), valor: S('burn'), dominion: S('slow'),
     hex: (v, q) => { addStatus(s, v, 'poison', ev, { ...q, n: 2 }); addStatus(s, v, 'slow', ev, q); },
+    hourglass: (v, q) => { addStatus(s, v, 'slow', ev, q); setTempo(s, v, 'last', u, ev); }, anchor: (v) => setTempo(s, v, 'last', u, ev), fracture: (v) => setTempo(s, v, 'last', u, ev), // 16.0 (C)
     frostNova: (v, q) => { addStatus(s, v, 'slow', ev, q); if (cheb(u, v) <= 1) addStatus(s, v, 'freeze', ev, q); } };
   s._act = { src: u.id, id, slot, done: [], st: ST[id] || null };
   let cdOverride = null;
@@ -1214,7 +1266,10 @@ export function useAbility(s, u, slot, anchor, ev) {
     // ---- 15.0 (C) ----
     case 'skirmish': aoe(s, u, o.tiles, o.mult, ev); if (u.alive && !s.over) addStatus(s, u, 'haste', ev, { t: 2 }); break;
     case 'warcry': aoe(s, u, o.tiles, o.mult, ev); if (u.alive && !s.over) addStatus(s, u, 'haste', ev, { t: 2 }); break;
-    case 'dart': case 'hex': {
+    // 16.0 (C) tempo equips (the 'last' part is an on-hit proc in ST above)
+    case 'seize': case 'fracture': aoe(s, u, o.tiles, o.mult, ev); if (u.alive && !s.over) setTempo(s, u, 'first', u, ev); break;
+    case 'anchor': aoe(s, u, o.tiles, o.mult, ev); if (u.alive && !s.over) { u.buffs.push({ k: 'def', v: TEMPO_T.anchorDef, t: 1 }); ev.push({ e: 'buff', id: u.id, k: 'def' }); } break;
+    case 'dart': case 'hex': case 'hourglass': {
       ev.push({ e: 'aoe', id: u.id, tiles: o.tiles, kind: 'hit' });
       const last = o.tiles[o.tiles.length - 1], v = unitAt(s, last.x, last.y);
       if (v) dealDamage(s, u, v, o.mult, ev);
@@ -1243,6 +1298,7 @@ export function useAbility(s, u, slot, anchor, ev) {
   if (slot === 'ult') { u.ult = 0; u.ults = (u.ults || 0) + 1; }
   else if (slot !== 'atk' && u.piece === pieceAtCast) u.cd[slot] = cdOverride ?? abilityCd(u, id);
   if (!ABILITIES[id].free) s.turn.acted = true;
+  if (s.turn) s.turn.used = true; // 16.0 (C): no Hold after any ability, free ones included
   return true;
 }
 
@@ -1289,9 +1345,12 @@ export function applyAction(s, pid, a) {
     ok = useAbility(s, u, a.slot, { x: a.x, y: a.y }, ev);
   } else if (a.type === 'promote') {
     ok = promote(s, u, a.to, ev);
+  } else if (a.type === 'hold' && canHold(s, u)) { // 16.0 (C): Hold, go to the back of this round's queue
+    u.held = s.round; u.rt = null; ev.push({ e: 'hold', id: u.id }); s.log.push(`${u.name} held their turn`); ok = true;
   } else if (a.type === 'end') ok = true;
 
-  if (ok) {
+  if (ok && a.type === 'hold') { s.v++; if (!s.over) nextTurn(s, ev, true); syncBoss(s); }
+  else if (ok) {
     s.v++;
     const kos = ev.filter((q) => q.e === 'death' && q.by === u.id && (unitById(s, q.id) || {}).kind === 'player').length;
     if (kos >= 2) ev.push({ e: 'multi', id: u.id, n: kos });
@@ -1310,11 +1369,48 @@ export function applyAction(s, pid, a) {
 // gets two turns before someone else gets one. Tempo effects (Stagger, brambles, Haste pickups, Rally) still
 // work: they nudge u.gauge, which moves a unit up to 6 places' worth of SPD earlier or later until it acts.
 // Ties go to a seeded coin flip rolled at the start of each round, so they are fair and deterministic.
-export const initiative = (u) => effSpd(u) + Math.max(-6, Math.min(6, (u.gauge || 0) / 10));
-const beats = (a, b) => { const d = initiative(a) - initiative(b); if (Math.abs(d) > 1e-9) return d > 0; const e = effSpd(a) - effSpd(b); if (e) return e > 0; return (a.tb || 0) !== (b.tb || 0) ? (a.tb || 0) > (b.tb || 0) : a.id < b.id; };
-function nextUp(s) { let best = null; for (const u of s.units) if (u.alive && u.rt !== s.round && (!best || beats(u, best))) best = u; return best; }
-export function nextTurn(s, ev) {
-  if (s.active != null) statusTurnEnd(s, unitById(s, s.active), ev); // 15.0: freeze and stun end with the turn they spoiled
+// 16.0 (C) turn-order tactics. Within a round units act by tier, then by initiative:
+//   tier 0 = Seized (u.tempo = { k:'first', r }), 1 = everyone, 2 = Hourglassed (u.tempo k:'last'), 3 = Held this round (u.held === round).
+// Reversal hook: while s.reversal === s.round the SPD part of initiative is negated (slowest first); gauge nudges keep
+// their direction and the Speed Edge is unchanged. L's Clockwork Spire only needs to set s.reversal.
+// Hold ({type:'hold'}): legal on your own turn before you move, act or use any ability (promoting is fine), once per
+// round, not while frozen or stunned, and only while at least one other unit is still waiting this round. The held turn
+// resumes after everyone still waiting (no second turn start: no extra DoT ticks or cooldowns), and the next round
+// starts HOLD.gauge later (gauge -30 = -3 SPD).
+export const HOLD = { gauge: 30 };
+// 16.0 (C) tempo equips: hit multipliers, Anchor's DEF buff, bot value of acting first / of each enemy sent last
+export const BOT_HOLD = { minAct: 6, range: 4, chance: 0.35 };
+export const TEMPO_T = { seize: 0.8, hourglass: 0.5, anchor: 0.7, anchorDef: 1.25, fracture: 0.4, firstUtil: 4, lastUtil: 3 };
+// u.tempo = { k:'first'|'last', r }: the unit acts first / last (before tier 1 / after it, before held units) in round r
+function setTempo(s, v, k, by, ev) {
+  if (!v || !v.alive || s.over) return;
+  v.tempo = { k, r: s.round + 1 };
+  ev.push({ e: 'tempo', id: v.id, k, by: by ? by.id : null, r: s.round + 1 });
+}
+const gaugeAdj = (u) => Math.max(-6, Math.min(6, (u.gauge || 0) / 10));
+const spdSign = (s, r) => (s && s.reversal != null && s.reversal === r ? -1 : 1);
+export const initiative = (u, s = null) => spdSign(s, s && s.round) * effSpd(u) + gaugeAdj(u);
+export const turnTier = (u, r) => (u.held === r ? 3 : u.tempo && u.tempo.r === r ? (u.tempo.k === 'first' ? 0 : 2) : 1);
+// does a act before b in round r (default: the current round)?
+export function outranks(s, a, b, r = s.round) {
+  const ta = turnTier(a, r), tb = turnTier(b, r); if (ta !== tb) return ta < tb;
+  const g = spdSign(s, r), d = (g * effSpd(a) + gaugeAdj(a)) - (g * effSpd(b) + gaugeAdj(b)); if (Math.abs(d) > 1e-9) return d > 0;
+  const e = g * (effSpd(a) - effSpd(b)); if (e) return e > 0;
+  return (a.tb || 0) !== (b.tb || 0) ? (a.tb || 0) > (b.tb || 0) : a.id < b.id;
+}
+export function canHold(s, u) {
+  const T = s && s.turn;
+  return !!(T && u && !s.over && s.active === u.id && u.alive && u.kind === 'player' && !T.moved && !T.acted && !T.rooted && !T.stunned && !T.used && !T.resumed && !(T.extraMoves > 0)
+    && u.held !== s.round && s.units.some((w) => w.alive && w !== u && w.rt !== s.round));
+}
+function nextUp(s) { let best = null; for (const u of s.units) if (u.alive && u.rt !== s.round && (!best || outranks(s, u, best))) best = u; return best; }
+// a held turn resumes without a second turn start; a Freeze or Stun that landed while waiting spoils it now
+function resumeTurn(s, u) {
+  s.turn.resumed = true;
+  for (const q of u.status || []) if (!q.live && (q.k === 'freeze' || q.k === 'stun')) { q.live = true; if (q.k === 'freeze') s.turn.rooted = true; else { s.turn.stunned = true; s.turn.acted = true; } }
+}
+export function nextTurn(s, ev, held = false) {
+  if (s.active != null && !held) statusTurnEnd(s, unitById(s, s.active), ev); // 15.0: freeze and stun end with the turn they spoiled
   if (s.round === 1 && !s.tbInit) { s.tbInit = 1; for (const u of s.units) u.tb = rand(s); }
   for (let guard = 0; guard < 400 && !s.over; guard++) {
     let best = nextUp(s);
@@ -1324,15 +1420,17 @@ export function nextTurn(s, ev) {
       for (const u of s.units) u.tb = rand(s);
       best = nextUp(s); if (!best) return;
     }
-    s.pickInit = initiative(best); best.rt = s.round; best.gauge = 0;
+    const resumed = best.held === s.round; // 16.0 (C): a held turn coming back
+    s.pickInit = initiative(best, s); s.pickTier = turnTier(best, s.round); best.rt = s.round; best.gauge = resumed ? -HOLD.gauge : 0;
+    if (best.tempo && best.tempo.r <= s.round) delete best.tempo;
     s.turnNo++;
-    if (best.kind === 'player') s.roundTurns++;
+    if (best.kind === 'player' && !resumed) s.roundTurns++;
     if (!best.alive) continue;
     s.active = best.id;
     s.turn = { moved: false, acted: false, extraMoves: 0, rooted: false };
-    startTurn(s, best, ev);
+    if (resumed) resumeTurn(s, best); else startTurn(s, best, ev);
     if (!s.over) kingPhase(s, ev);
-    if (best.alive && !s.over) { ev.push({ e: 'turn', id: best.id }); return; }
+    if (best.alive && !s.over) { ev.push(resumed ? { e: 'turn', id: best.id, resumed: true } : { e: 'turn', id: best.id }); return; }
   }
 }
 
@@ -1485,7 +1583,7 @@ function matchOpts(o) {
 export function introEvents(s) { return s && s.location ? [{ e: 'location', id: s.location }] : []; }
 function locSetup(s, opts) {
   s.location = chooseLocation(s.seed, opts, opts.custom);
-  s.locWarn = null; s.sandstorm = 0;
+  s.locWarn = null; s.sandstorm = 0; s.reversal = 0; // 16.0 (L) spire: s.reversal = the round being played in reverse
   if (opts.custom.storm !== 'normal') { const r = stormRules(s.rules.first, s.rules.every, opts.custom.storm); s.rules.first = r.first; s.rules.every = r.every; }
   s.custom = opts.custom;
 }
@@ -1591,11 +1689,12 @@ function locEvent(s, kind, ev) {
     for (const u of ps) { ids.push(u.id); if (u.cd && typeof u.cd === 'object') for (const k of Object.keys(u.cd)) u.cd[k] = 0; chargeUlt(u, LOC_T.overcharge.ult, sub); }
     for (const u of s.units) if (u.alive) { const t = tileAt(s, u.x, u.y); if (t && t.t === 'conveyor' && !isVoid(s, u.x, u.y)) { stunned.push(u.id); locStatus(s, u, 'stun', sub, LOC_T.overcharge.stun, 1, 'overcharge'); } }
     ev.push({ e: 'world', kind, ids, stunned }, ...sub);
-  }
+  } else if (kind === 'reversal') spireReversalWarn(s, ev); // 16.0 (L) spire
 }
 // Called at the top of every round (from worldEvents): clear one-round flags and strike a pending telegraph.
 function locResolve(s, ev) {
   s.sandstorm = 0;
+  if (spireReversalTick(s, ev)) return; // 16.0 (L) spire: Reversal ends / strikes
   const W = s.locWarn; if (!W) return;
   s.locWarn = null;
   const tiles = (W.tiles || []).filter((t) => liveTile(s, t.x, t.y));
@@ -1648,6 +1747,72 @@ function locResolve(s, ev) {
   }
 }
 
+// ---------- 16.0 (L) spire: Clockwork Spire (Cogwheels hazard + Reversal signature event) ----------
+// Cog tiles {t:'cog', ring, i, hx, hy}: each ring is a 2x2 gear, i = 0 top-left, 1 top-right, 2 bottom-right,
+// 3 bottom-left (clockwise on screen); (hx, hy) is the hub, the corner point the four tiles share. Cogs are plain floor
+// for movement, abilities and bots. At the end of every round (hazardsTick) a piece on a cog steps to the next cog of
+// its ring if that tile is free; a ring with a piece on every cog turns as a whole. A ring loses its turn once the storm
+// swallows one of its cogs (they become floor). Events: {e:'cog', moves:[{id, fx, fy, x, y}]} then the move events.
+function spireCogsGen(s, free, set, reserved, randFree) {
+  const C = LOC_T.cogs || { rings: 4, min: 2 };
+  const nearCog = (x, y) => { for (let dy = -1; dy <= 2; dy++) for (let dx = -1; dx <= 2; dx++) { const t = tileAt(s, x + dx, y + dy); if (t && t.t === 'cog') return true; } return false; };
+  for (let k = 0, made = 0; k < 80 && made < C.rings; k++) {
+    const p = randFree(2); if (!p) break;
+    const [x, y] = p, Q = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]];
+    if (!Q.every(([qx, qy]) => free(qx, qy) && ringOf(qx, qy) >= 2) || nearCog(x, y)) continue;
+    Q.forEach(([qx, qy], i) => { set(qx, qy, 'cog', { ring: made, i, hx: x + 1, hy: y + 1 }); reserved.add(qy * SIZE + qx); });
+    made++;
+  }
+}
+function spireCogsTick(s, ev) {
+  const rings = new Map();
+  for (let i = 0; i < s.tiles.length; i++) {
+    const t = s.tiles[i]; if (t.t !== 'cog') continue;
+    const x = i % SIZE, y = (i / SIZE) | 0; if (isVoid(s, x, y)) continue;
+    let R = rings.get(t.ring); if (!R) rings.set(t.ring, (R = [null, null, null, null]));
+    R[t.i & 3] = pt(x, y);
+  }
+  const moves = [], movers = [];
+  for (const key of [...rings.keys()].sort((a, b) => a - b)) {
+    const R = rings.get(key);
+    const occ = R.map((p) => (p ? unitAt(s, p.x, p.y) : null));
+    if (!occ.some(Boolean)) continue;
+    if (R.every(Boolean) && occ.every(Boolean)) { // a full gear turns as one
+      occ.forEach((u, i) => { const to = R[(i + 1) & 3]; movers.push([u, pt(u.x, u.y)]); u.x = to.x; u.y = to.y; });
+      continue;
+    }
+    const done = new Set();
+    for (let pass = 0; pass < 4; pass++) for (let i = 0; i < 4; i++) { // riders step into free cogs; a queue advances over the passes
+      const p = R[i]; if (!p) continue;
+      const u = unitAt(s, p.x, p.y); if (!u || done.has(u.id)) continue;
+      const to = R[(i + 1) & 3]; if (!to || !canStand(s, to.x, to.y)) continue;
+      done.add(u.id); movers.push([u, pt(u.x, u.y)]); u.x = to.x; u.y = to.y;
+    }
+  }
+  if (!movers.length) return;
+  for (const [u, f] of movers) moves.push({ id: u.id, fx: f.x, fy: f.y, x: u.x, y: u.y });
+  ev.push({ e: 'cog', moves });
+  for (const [u, f] of movers) ev.push({ e: 'move', id: u.id, from: f, to: pt(u.x, u.y), how: 'cog' });
+  for (const [u] of movers) { if (s.over) return; if (u.alive) land(s, u, ev); }
+}
+// Reversal: telegraphed one round ahead (s.locWarn, no tiles), then for exactly one round the turn order runs slowest
+// SPD first (C's nextUp/predictOrder read s.reversal === s.round). Speed Edge is unchanged. s.reversal is set to the
+// coming round as soon as it is telegraphed, so predictOrder's next-round preview already shows it reversed.
+function spireReversalWarn(s, ev) {
+  s.reversal = s.round + 1;
+  s.locWarn = { kind: 'reversal', round: s.round, tiles: [] };
+  ev.push({ e: 'world', kind: 'reversal', phase: 'warn', tiles: [], round: s.reversal });
+}
+// From locResolve at the top of each round. Returns true when it consumed the pending Reversal telegraph.
+function spireReversalTick(s, ev) {
+  if (s.reversal && s.reversal < s.round) { s.reversal = 0; ev.push({ e: 'reversal', on: false }); }
+  const W = s.locWarn;
+  if (!W || W.kind !== 'reversal') return false;
+  s.locWarn = null;
+  if (s.reversal === s.round) ev.push({ e: 'reversal', on: true, round: s.round });
+  return true;
+}
+
 // ---------- 10.0: map hazards, once per round ----------
 function hazardsTick(s, ev) {
   const r = s.round;
@@ -1681,6 +1846,7 @@ function hazardsTick(s, ev) {
     if (moved) ev.push({ e: 'hazard', kind: 'conveyor', n: moved });
     if (s.over) return;
   }
+  if (mutOn(s, 'cogs')) { spireCogsTick(s, ev); if (s.over) return; } // 16.0 (L) spire
   if (mutOn(s, 'rift') && r >= 3 && r % 3 === 0) {
     const ps = alivePlayers(s).filter((u) => !isVoid(s, u.x, u.y));
     if (ps.length >= 2) {
@@ -1714,10 +1880,17 @@ function endHill(s, u, ev) {
   s.log.push(`${u.name} held the Throne`);
   ev.push({ e: 'over', winner: u.id, hill: true, team: u.team });
 }
+// 16.0 (C) Shard Interest: at the start of each round every living player gains +1 shard per INTEREST.per held (max INTEREST.max).
+export const INTEREST = { per: 5, max: 2 };
+export const interestFor = (u) => (u && u.alive && u.kind === 'player' && u.piece !== 'king' ?Math.min(INTEREST.max, Math.floor((u.shards || 0) / INTEREST.per)) : 0);
+function shardInterest(s, ev) {
+  for (const u of s.units) { const n = interestFor(u); if (n > 0) { gainShards(s, u, n, ev); ev.push({ e: 'interest', id: u.id, n }); } }
+}
 function onRound(s, ev) {
   for (const t of s.tiles) if (t.t === 'shrine' && t.cd > 0) t.cd--;
   const r = s.round;
   if (s.tutorial) return;
+  shardInterest(s, ev); // 16.0 (C)
   for (const it of s.items) if (it.k === 'soul' && r >= it.exp) { ev.push({ e: 'soulFade', of: it.id, x: it.x, y: it.y }); it.gone = true; }
   s.items = s.items.filter((i) => !i.gone);
   worldEvents(s, ev);
@@ -1769,14 +1942,20 @@ function onRound(s, ev) {
 }
 
 // Predict the next n turns (for the turn-order strip)
+// 16.0 (C): { now: [active, ...rest of this round in order], next: [next round's order], round, reversed, nextReversed,
+// held: [ids holding this round] } for the strip's round divider. Units that already acted keep their pending gauge
+// nudges into next round, a held unit carries its -HOLD.gauge, Seize/Hourglass (u.tempo) and a telegraphed Reversal apply.
+export function turnQueue(s) {
+  const alive = s.units.filter((u) => u.alive), r1 = s.round + 1;
+  const now = (s.active != null && alive.some((u) => u.id === s.active) ? [s.active] : [])
+    .concat(alive.filter((u) => u.rt !== s.round && u.id !== s.active).sort((a, b) => (outranks(s, a, b) ? -1 : 1)).map((u) => u.id));
+  const next = alive.map((u) => ({ ...u, gauge: u.rt === s.round ? u.gauge || 0 : u.held === s.round ? -HOLD.gauge : 0 })).sort((a, b) => (outranks(s, a, b, r1) ? -1 : 1)).map((u) => u.id);
+  return { now, next, round: s.round, reversed: s.reversal === s.round, nextReversed: s.reversal === r1, held: alive.filter((u) => u.held === s.round && u.rt !== s.round).map((u) => u.id) };
+}
+// Predict the next n turns (for the turn-order strip): this round, then next round's order repeated
 export function predictOrder(s, n = 8) {
-  // 15.2: rest of this round in initiative order, then the next round(s) by SPD (gauge nudges are spent on the turn)
-  const out = s.active ? [s.active] : [];
-  const alive = s.units.filter((u) => u.alive);
-  const rest = alive.filter((u) => u.rt !== s.round && u.id !== s.active).sort((a, b) => (beats(a, b) ? -1 : 1));
-  for (const u of rest) { if (out.length >= n) return out; out.push(u.id); }
-  const nextR = alive.map((u) => ({ ...u, gauge: 0 })).sort((a, b) => (beats(a, b) ? -1 : 1));
-  for (let k = 0; out.length < n && nextR.length && k < 8; k++) for (const u of nextR) { if (out.length >= n) break; out.push(u.id); }
+  const q = turnQueue(s), out = q.now.slice(0, n);
+  for (let k = 0; out.length < n && q.next.length && k < 8; k++) for (const id of q.next) { if (out.length >= n) break; out.push(id); }
   return out;
 }
 
@@ -1786,11 +1965,12 @@ export function previewDamage(src, tgt, mult, s = null) {
   const a = stats(src), d = stats(tgt);
   const m = mult * dmgMods(src, tgt) * (s && s.bloodMoon ? 1.3 : 1); // 15.0: same modifiers as dealDamage (passives, Ascension, Exposed via defMul); pass s for Blood Moon
   const k = 30 / (30 + d.def * defMul(tgt));
-  return [Math.max(1, Math.round(a.atk * m * 0.9 * k)), Math.max(1, Math.round(a.atk * m * 1.1 * k))];
+  const cap = guardCap(tgt); // 16.0 (C): Guard caps every single hit, crits included
+  return [Math.min(cap, Math.max(1, Math.round(a.atk * m * 0.9 * k))), Math.min(cap, Math.max(1, Math.round(a.atk * m * 1.1 * k)))];
 }
 
 // ---------- AI ----------
-function estDmg(src, tgt, mult) { return Math.max(1, stats(src).atk * mult * 30 / (30 + stats(tgt).def * defMul(tgt))); }
+function estDmg(src, tgt, mult) { return Math.min(guardCap(tgt), Math.max(1, stats(src).atk * mult * 30 / (30 + stats(tgt).def * defMul(tgt)))); }
 
 // Breadth-first step toward a target, so hunters walk around walls instead of getting stuck.
 function pathStep(s, u, target) {
@@ -1963,6 +2143,7 @@ export function planBot(s, u) {
   const actScore = (opts, slot) => {
     let best = null, bs = 0;
     const procs = procsFor(slot);
+    const sid = slotAbility(u, slot), tp = sid && ABILITIES[sid] ? ABILITIES[sid].tempo : null, sendsLast = tp === 'last' || tp === 'both'; // 16.0 (C)
     for (const o of opts) {
       let sc = o.util || 0;
       for (const hid of o.hits) {
@@ -1971,7 +2152,7 @@ export function planBot(s, u) {
         const prime = v.kind === 'player' || (s.siege && v.wave); // in Siege the Hollows are the enemy
         sc += Math.min(dh, v.hp) * (prime ? 1.2 : 0.8) + Math.min(d, sh) * 0.4;
         if (dh >= v.hp) sc += prime ? 45 + (v.boss ? 60 : 0) : 18 + v.shards * 6;
-        else for (const [k, n] of procs) sc += stVal(k, v, n);
+        else { for (const [k, n] of procs) sc += stVal(k, v, n); if (sendsLast && !(v.tempo && v.tempo.k === 'last' && v.tempo.r === s.round + 1)) sc += TEMPO_T.lastUtil * (prime ? 1 : 0.4); }
         if (v.piece === 'king') sc += KING_T.focus + stN(v, 'exposed') * 4; // gang up on an Exposed King
         if (bountyT && v === bountyT) sc += d >= v.hp ? 30 : 8;
       }
@@ -2000,9 +2181,14 @@ export function planBot(s, u) {
     }
     const noise = u.botLevel === 'easy' ? aiRand(s) * 30 : u.botLevel === 'hard' ? 0 : aiRand(s) * 4;
     const total = ps + as * (u.botLevel === 'easy' ? 0.6 : u.botLevel === 'hard' ? 1.25 : 1) + (m.stay ? (real.passive === 'bastion' ? 2.5 : 0.5) : 0) + noise;
-    if (total > top) { top = total; plan = { m, bestAct }; }
+    if (total > top) { top = total; plan = { m, bestAct, as }; }
   }
   real.x = ox; real.y = oy;
+  // 16.0 (C): Hold, rarely: nothing worthwhile in reach, and an enemy that could threaten us still acts after us this round
+  if (!acts.length && plan && plan.as < BOT_HOLD.minAct && u.botLevel !== 'easy' && canHold(s, real)) {
+    const threat = enemies.some((e) => (e.kind === 'player' || (s.siege && e.wave)) && e.rt !== s.round && cheb(e, real) <= BOT_HOLD.range);
+    if (threat && aiRand(s) < BOT_HOLD.chance) return [{ type: 'hold' }];
+  }
   if (plan) {
     if (!plan.m.stay) acts.push({ type: 'move', x: plan.m.x, y: plan.m.y });
     if (plan.bestAct) acts.push({ type: 'ability', slot: plan.bestAct.slot, x: plan.bestAct.o.anchor.x, y: plan.bestAct.o.anchor.y });

@@ -281,7 +281,7 @@ function testKing() {
     const s = mk(4); clearHollows(s); s.round = 9; const k = pl(s, 1), a = pl(s, 0), b = pl(s, 2); if (!crownUnit(s, k)) return; E.applyAction(s, k.pid, { type: 'end' });
     k.hp = E.stats(k).maxHp; k.status = (k.status || []).filter((q) => q.k !== 'exposed');
     // Exposed scales DEF inside the damage formula (defMul), so measure it as preview damage from a fixed probe attacker
-    const probe = pl(s, 3) || a; const pd = () => E.previewDamage(probe, k, 50)[1]; const xn = () => { const q = stOf(k, 'exposed'); return q ? q.n || 1 : 0; };
+    const probe = pl(s, 3) || a; const pd = () => E.previewDamage(probe, k, 1.5)[1]; /* 16.0 (C): was x50, which Guard now caps */ const xn = () => { const q = stOf(k, 'exposed'); return q ? q.n || 1 : 0; };
     const d0 = pd();
     const hit = (u, dx) => { place(s, u, k.x + dx, k.y + 1); forceTurn(s, u); const r = E.applyAction(s, u.pid, { type: 'ability', slot: 'atk', x: k.x, y: k.y }); if (!s.over && s.active === u.id) E.applyAction(s, u.pid, { type: 'end' }); return r.ok; };
     hit(a, -1); const d1 = pd(), n1 = xn(); hit(b, 1); const d2 = pd(), n2 = xn(); hit(a, -1); const d3 = pd(), n3 = xn();
@@ -319,13 +319,13 @@ let L = null;
 async function testLocations() {
   const G = 'LO';
   try { L = await import('../../js/locations.js'); } catch (e) { pending(G, 'js/locations.js', 'not importable: ' + e.message.split('\n')[0]); }
-  const IDS = ['citadel', 'forge', 'temple', 'gardens', 'ruins', 'works', 'rift', 'bog'];
+  const IDS = ['citadel', 'forge', 'temple', 'gardens', 'ruins', 'works', 'rift', 'bog', 'spire']; // 16.0 (L): + Clockwork Spire
   const WEATHER = Object.keys(Function('return ' + ((/const WN = (\{[^}]*\})/.exec(src('js/world.js')) || [])[1] || '{}'))());
   const THEMES = [...src('js/music.js').matchAll(/^ {2}([a-zA-Z0-9_]+): \{/gm)].map((m) => m[1]);
   if (L) {
     const T = L.LOCATIONS; check(G, 'LOCATIONS export', T && typeof T === 'object');
     if (!T) return;
-    const ids = Object.keys(T); check(G, 'exactly the 8 spec locations', IDS.every((i) => T[i]) && ids.length === 8, ids.join(','));
+    const ids = Object.keys(T); check(G, `exactly the ${IDS.length} spec locations`, IDS.every((i) => T[i]) && ids.length === IDS.length, ids.join(','));
     for (const id of ids) {
       const l = T[id]; const w = [].concat(l.weather || []), hz = [].concat(l.hazards || l.hazardPool || []), evp = l.events || l.eventPool || {};
       const evIds = Array.isArray(evp) ? evp.map((e) => (typeof e === 'string' ? e : e.id || e.k)) : Object.keys(evp);
@@ -354,7 +354,7 @@ async function testLocations() {
     check(G, 'same seed -> same location (240 seeds)', a.every((v, i) => v === b[i]));
     check(G, 'every pick is a LOCATIONS id', a.every((v) => T[v]), [...new Set(a)].join(','));
     metric('location_spread', cnt); const vals = Object.values(cnt);
-    check(G, 'all 8 locations reachable from seeds, none dominant (>25%)', Object.keys(cnt).length === 8 && Math.max(...vals) / 240 < 0.25, JSON.stringify(cnt));
+    check(G, `all ${Object.keys(T).length} locations reachable from seeds, none dominant (>25%)`, Object.keys(cnt).length === Object.keys(T).length && Math.max(...vals) / 240 < 0.25, JSON.stringify(cnt));
   });
   safe(G, 'host pick (Custom)', () => {
     for (const id of Object.keys(T)) { const s = E.createMatch(players(4), 77, { mode: 'royale', location: id }); check(G, `opts.location=${id} honoured`, s.location === id, 'got ' + s.location); }
@@ -373,7 +373,7 @@ async function testLocations() {
   safe(G, 'hazards and events come from the location', () => {
     const hzBad = [], evBad = {}, sig = {}, got = {};
     for (let i = 0; i < 64; i++) {
-      const id = Object.keys(T)[i % 8]; const loc = T[id]; const s = E.createMatch(players(6, { seed: i }), 3000 + i, { mode: i % 2 ? 'royale' : 'blitz', location: id });
+      const id = Object.keys(T)[i % Object.keys(T).length]; const loc = T[id]; const s = E.createMatch(players(6, { seed: i }), 3000 + i, { mode: i % 2 ? 'royale' : 'blitz', location: id });
       const pool = [].concat(loc.hazards || loc.hazardPool || []); const used = s.mutators || [s.mutator];
       for (const m of used) if (m !== 'none' && !pool.includes(m) && !(m === 'chaos')) hzBad.push(`${id}:${m}`);
       const evp = loc.events || loc.eventPool || {}; const evIds = Array.isArray(evp) ? evp.map((e) => (typeof e === 'string' ? e : e.id || e.k)) : Object.keys(evp);
@@ -392,10 +392,38 @@ async function testLocations() {
     check(G, 'every location fires its signature event in play', Object.values(sigShare).every((v) => v > 0), JSON.stringify(sigShare)); metric('location_status_sources', Object.keys(sig));
   });
   safe(G, 'signature events', () => {
-    const want = { Blizzard: 'freeze', Eruption: 'burn', Flood: 'slow', 'Toxic Fog': 'poison', Bloom: null, Sandstorm: null, Overcharge: null, 'Gravity Well': null };
+    const want = { Blizzard: 'freeze', Eruption: 'burn', Flood: 'slow', 'Toxic Fog': 'poison', Bloom: null, Sandstorm: null, Overcharge: null, 'Gravity Well': null, Reversal: null }; // 16.0 (L): + Reversal
     for (const [nm, st] of Object.entries(want)) { const id = Object.keys(D.WORLD_EVENTS).find((k) => D.WORLD_EVENTS[k].name === nm); if (!id) { pending(G, `WORLD_EVENTS '${nm}'`, 'not in data.js yet'); continue; }
       check(G, `'${nm}' (${id}) is in a location pool`, Object.values(T).some((l) => { const p = l.events || l.eventPool || {}; return Array.isArray(p) ? p.some((e) => (e.id || e) === id) : p[id]; }));
       if (st) check(G, `'${nm}' desc mentions ${st}`, new RegExp(st === 'freeze' ? 'freez|frozen' : st === 'burn' ? 'burn|fire|alight' : st === 'slow' ? 'slow' : 'poison', 'i').test(D.WORLD_EVENTS[id].desc), D.WORLD_EVENTS[id].desc); }
+  });
+  safe(G, 'Clockwork Spire: cogwheels and Reversal', () => { // 16.0 (L)
+    if (!T.spire) return pending(G, 'spire location', 'not in LOCATIONS yet');
+    let rings = 0, cogEv = 0, badMove = 0, warn = 0, on = 0, off = 0, badRev = 0, foreign = 0, gens = 0;
+    for (let i = 0; i < 12; i++) {
+      const s = E.createMatch(players(8, { seed: i }), 4100 + i * 17, { mode: 'royale', location: 'spire' }); gens++;
+      const cogs = s.tiles.map((t, k) => ({ t, x: k % 16, y: (k / 16) | 0 })).filter((q) => q.t.t === 'cog');
+      const byRing = {}; for (const q of cogs) (byRing[q.t.ring] ||= []).push(q);
+      rings += Object.keys(byRing).length;
+      for (const R of Object.values(byRing)) if (R.length !== 4 || new Set(R.map((q) => q.t.i)).size !== 4 || R.some((q) => Math.max(Math.abs(q.x + 0.5 - q.t.hx), Math.abs(q.y + 0.5 - q.t.hy)) !== 0.5)) badMove++;
+      if (cogs.some((q) => E.isSolid(s, q.x, q.y))) badMove++;
+      for (let st = 0; st < 6000 && !s.over; st++) {
+        const u = E.unitById(s, s.active); const turn = s.turnNo; const plan = u.kind === 'hollow' ? E.planHollow(s, u) : E.planBot(s, u);
+        const all = []; for (const a of plan) { if (s.over || s.turnNo !== turn) break; all.push(...E.applyAction(s, u.pid, a).ev); }
+        if (!s.over && s.turnNo === turn) all.push(...E.applyAction(s, u.pid, { type: 'end' }).ev);
+        for (const q of all) {
+          if (q.e === 'cog') { cogEv++; for (const m of q.moves || []) { const a = s.tiles[m.fy * 16 + m.fx], b = s.tiles[m.y * 16 + m.x]; if (!(Math.abs(m.x - m.fx) + Math.abs(m.y - m.fy) === 1) || (a.t === 'cog' && b.t === 'cog' && (a.ring !== b.ring || ((a.i + 1) & 3) !== b.i))) badMove++; } }
+          if (q.e === 'world' && q.kind === 'reversal' && q.phase === 'warn') { warn++; if (s.reversal !== s.round + 1) badRev++; }
+          if (q.e === 'reversal') { if (q.on) { on++; if (s.reversal !== s.round) badRev++; } else off++; }
+        }
+      }
+    }
+    for (const id of Object.keys(T)) if (id !== 'spire') { const s = E.createMatch(players(6), 5, { mode: 'royale', location: id }); if (s.tiles.some((t) => t.t === 'cog')) foreign++; }
+    metric('spire', { rings: +(rings / gens).toFixed(2), cogEv, warn, on, off });
+    check(G, 'spire: cog rings are 2x2 gears around a hub, never solid', rings >= gens * 2 && badMove === 0, `rings ${rings} bad ${badMove}`);
+    check(G, 'spire: cogs carry pieces one step clockwise in their ring', cogEv > 0 && badMove === 0, `cog events ${cogEv}`);
+    check(G, 'spire: Reversal telegraphed (s.reversal = next round), on at its round, then off', warn > 0 && on > 0 && off > 0 && badRev === 0 && on <= warn, `warn ${warn} on ${on} off ${off} bad ${badRev}`);
+    check(G, 'cog tiles only at the Clockwork Spire', foreign === 0, String(foreign));
   });
   safe(G, 'location reveal event', () => {
     const s = E.createMatch(players(4), 12, { mode: 'royale' });

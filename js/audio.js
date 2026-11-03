@@ -449,7 +449,7 @@ function bump(k, win) { const t = now(); chain[k] = t - chain[k + 'T'] < win ? c
 // ---------------------------------------------------------------- sound table
 const UI = new Set(['tap', 'hover', 'select', 'back', 'tick', 'error', 'buy', 'purchase', 'levelup', 'quest', 'emote', 'coin', 'toggle', 'toggle:on', 'toggle:off', 'tab', 'open', 'close', 'confirm', 'deny', 'equip', 'unlock', 'notify', 'swipe', 'count', 'countgo', 'slider', 'win', 'lose', 'turn', 'xp', 'rankup', 'claim']);
 const WORLD = new Set(['storm', 'storm:crack', 'storm:collapse', 'storm:warn', 'meteorfall', 'meteor', 'firework', 'shrine', 'ice', 'ice:skid', 'portal', 'sizzle', 'lava', 'hollowrise', 'waveclear', 'crownspawn', 'chest', 'chest:open', 'supply', 'shardrain', 'bloodmoon', 'bramble', 'wind', 'eclipse', 'warn', 'geyser:warn', 'geyser:erupt', 'crumble:crack', 'crumble:collapse', 'rift', 'conveyor', 'earthquake', 'manasurge', 'bounty', 'frenzy', 'restless', 'hill:score', 'hill:contested',
-  'crown:warn', 'blizzard', 'eruption', 'flood', 'bloom', 'royalbounty', 'sandstorm', 'wardrums', 'overcharge', 'gravitywell', 'toxicfog', 'pool', 'pool:hurt', 'blizzard:warn', 'eruption:warn', 'flood:warn', 'gravitywell:warn', 'toxicfog:warn', 'locwarn']);
+  'crown:warn', 'blizzard', 'eruption', 'flood', 'bloom', 'royalbounty', 'sandstorm', 'wardrums', 'overcharge', 'gravitywell', 'toxicfog', 'pool', 'pool:hurt', 'blizzard:warn', 'eruption:warn', 'flood:warn', 'gravitywell:warn', 'toxicfog:warn', 'locwarn', 'reversal:on', 'reversal:off', 'reversal:warn', 'cog']);
 const catOf = (n) => (n.startsWith('announce:') || n === 'stinger' || n.startsWith('voice:') ? 'voice' : UI.has(n) || /^(reveal|ui|party|wheel|loc):/.test(n) ? 'ui' : WORLD.has(n) || n.startsWith('world:') || n.startsWith('hazard:') ? 'world' : 'combat');
 const VARI = { ui: 0.25, combat: 0.7, world: 0.5, voice: 0 };
 
@@ -688,11 +688,50 @@ const LOCS = {
   ruins: () => { [0, 0.18, 0.27, 0.45].forEach((a, i) => (i % 2 ? lib.click({ v: 0.15, f: 2600, at: a }) : K(140, 80, 0.12, { v: 0.3, at: a }))); T(330, 1.2, { type: 'sawtooth', v: 0.035, at: 0.5, vib: [5, 0.03], lp: { f: 1800 }, hall: 0.4 }); T(349, 0.3, { type: 'sawtooth', v: 0.03, at: 0.5, lp: { f: 1800 } }); N(1.6, { c: 'white', ft: 'highpass', f: 3000, v: 0.06, a: 0.7 }); },
   works: () => { [0, 0.12, 0.24].forEach((a) => FM(349, 0.35, { ratio: 1.41, idx: 3.5, v: 0.06, at: a, room: 0.4 })); lib.impact(0.8, { at: 0.36, sub: 100, bright: 0.6 }); N(0.6, { c: 'white', ft: 'highpass', f: 2500, v: 0.12, at: 0.4, a: 0.02 }); },
   rift: () => { T(311, 1.6, { v: 0.05, a: 0.6, hall: 0.6 }); T(466, 1.6, { v: 0.04, a: 0.7, hall: 0.6 }); T(698, 1.6, { v: 0.03, a: 0.8, hall: 0.6 }); lib.sparkle(10, { at: 0.4, gap: 0.06 }); lib.bell(1245, 1.4, { v: 0.05, at: 0.8 }); },
+  spire: () => { [0, 0.25, 0.5, 0.75].forEach((a, i) => lib.click({ v: 0.12 + (i % 2) * 0.05, f: i % 2 ? 2100 : 3200, at: a })); [659, 831, 740, 494].forEach((f, i) => lib.bell(f, 1.4, { v: 0.05, at: 0.9 + i * 0.28 })); FM(117, 2.6, { ratio: 1.41, idx: 1.6, v: 0.08, at: 2.05, hall: 0.6 }); chord([233, 294, 349], 1.4, { type: 'sawtooth', v: 0.035, at: 2.05, lp: { f: 1400, to: 500 }, hall: 0.5 }); }, // 16.0 (L): escapement ticks, a Westminster chime, the tower bell
   bog: () => { lib.choir([123, 131], 1.6, { v: 0.06, vowel: 'u', a: 0.5 }); for (let i = 0; i < 3; i++) T(110, 0.07, { type: 'square', v: 0.03, to: 70, at: 0.5 + i * 0.1, lp: { f: 800 } }); N(1.4, { c: 'pink', ft: 'bandpass', f: 300, q: 3, v: 0.12, a: 0.6, hall: 0.4 }); },
 };
 let lastReveal = -9;
 const locReveal = (id) => { lastReveal = now(); CUR.bus = 'ui'; lib.whoosh(0.25, { f: 400, to: 3500, v: 0.1, bus: 'ui' }); K(110, 40, 0.4, { v: 0.3, at: 0.2 }); CUR.t0 += 0.2; (LOCS[id] || LOCS.citadel)(); duck(0.5, 1.6); };
 for (const id of Object.keys(LOCS)) S['loc:' + id] = () => locReveal(id);
+
+// ---- V 16.0 "Tactics": stat identities, Hold, Shard Interest, Reversal, Cogwheels, tempo equips (voiced from the engine
+// event objects in evSound below; names are playable directly too)
+Object.assign(S, {
+  // ATK Overkill: the spill zaps across (0-0.22 s), then a bright impact on the splash target
+  overkill: () => { lib.zap({ f: 1800, v: 0.05 }); lib.whoosh(0.22, { f: 900, to: 4200, v: 0.14, peak: 0.8 }); lib.impact(0.85, { at: 0.22, bright: 1.25 }); FM(440, 0.35, { ratio: 2.01, idx: 3, v: 0.04, at: 0.22, room: 0.3 }); },
+  // DEF Guard: a shield clang (inharmonic steel ring over a short thud)
+  guard: () => { lib.click({ v: 0.3, f: 2500 }); FM(620, 0.65, { ratio: 2.76, idx: 2.2, iEnd: 0.2, v: 0.09, room: 0.4 }); FM(931, 0.45, { ratio: 1.41, idx: 1.5, v: 0.05, pan: 0.2 }); K(180, 70, 0.12, { v: 0.25 }); N(0.08, { c: 'white', ft: 'bandpass', f: 3200, q: 2, v: 0.12 }); },
+  // HP Second Wind: an updraft and a rising chime
+  secondwind: () => { lib.whoosh(0.5, { f: 300, to: 3200, v: 0.14, peak: 0.7, hall: 0.3 }); T(392, 0.6, { type: 'triangle', v: 0.05, to: 784, glide: 0.4, hall: 0.3 }); lib.chime([784, 988, 1319], { at: 0.15, v: 0.05, roll: 0.07, d: 0.9 }); lib.sparkle(4, { at: 0.3 }); },
+  // Shard Interest: one quiet glassy coin tick (gated, so eight players in a round stay one tick)
+  interest: () => { FM(3300, 0.08, { ratio: 2.4, idx: 1, v: 0.025 }); FM(4400, 0.07, { ratio: 2.4, idx: 1, v: 0.018, at: 0.05 }); },
+  // Hold: a soft tick-tock and the sand turning over
+  hold: () => { N(0.025, { c: 'white', ft: 'bandpass', f: 2400, q: 6, v: 0.18 }); N(0.025, { c: 'white', ft: 'bandpass', f: 1700, q: 6, v: 0.15, at: 0.16 }); N(0.35, { c: 'pink', ft: 'bandpass', f: 2200, to: 900, q: 3, v: 0.05, a: 0.12, at: 0.05 }); T(1175, 0.15, { type: 'triangle', v: 0.02, at: 0.34, hall: 0.3 }); },
+  // Reversal on: reversed clock ticks (swelling attack, hard cut) racing backwards, a tape-rewind glide, then a low bell
+  'reversal:on': () => {
+    let a = 0; for (let i = 0; i < 7; i++) { N(0.012, { c: 'white', ft: 'bandpass', f: 2600 - i * 170, q: 5, v: 0.2, a: 0.08, at: a, room: 0.3 }); a += 0.17 - i * 0.017; }
+    T(1600, 0.9, { type: 'sawtooth', v: 0.028, to: 180, lp: { f: 3000, to: 500 }, vib: [18, 0.03], hall: 0.4, at: 0.1 });
+    lib.whoosh(0.9, { f: 3000, to: 250, v: 0.12, peak: 0.3, hall: 0.3 });
+    T(196, 1.1, { type: 'triangle', v: 0.06, a: 0.85, hall: 0.5 }); lib.bell(392, 1.3, { at: 0.95, v: 0.06, ratio: 2.76 }); K(90, 40, 0.3, { v: 0.3, at: 0.95 }); duck(0.45, 1.2);
+  },
+  // Reversal telegraph (a round ahead): a slow tick-tock that skips back a beat, under a low dissonant hum
+  'reversal:warn': () => { [0, 0.32, 0.64].forEach((a, i) => N(0.03, { c: 'white', ft: 'bandpass', f: i === 2 ? 1500 : 2200, q: 6, v: 0.15, a: i === 2 ? 0.06 : 0.001, at: a, room: 0.3 })); T(147, 1.1, { type: 'triangle', v: 0.05, a: 0.3, hall: 0.4 }); T(156, 1.1, { type: 'triangle', v: 0.04, a: 0.35, hall: 0.4 }); },
+  // Reversal off: forward ticks speeding up, a rising sweep, the bell resolves upward
+  'reversal:off': () => {
+    let a = 0; for (let i = 0; i < 5; i++) { N(0.05, { c: 'white', ft: 'bandpass', f: 1800 + i * 200, q: 5, v: 0.16, a: 0.001, at: a, room: 0.3 }); a += 0.13 - i * 0.015; }
+    lib.whoosh(0.5, { f: 300, to: 2800, v: 0.1, hall: 0.3 }); lib.bell(587, 0.9, { at: 0.55, v: 0.05, ratio: 2.76 }); lib.bell(784, 0.9, { at: 0.62, v: 0.04, ratio: 2.76 });
+  },
+  // Cogwheels: a ratcheting gear grind, then the cog locks
+  cog: () => {
+    N(0.5, { c: 'brown', ft: 'bandpass', f: 500, to: 900, q: 4, v: 0.25, a: 0.05, room: 0.3 }); N(0.45, { c: 'white', ft: 'bandpass', f: 3500, q: 6, v: 0.04, a: 0.1 });
+    for (let i = 0; i < 10; i++) lib.click({ v: 0.08 + R() * 0.05, f: 1800 + R() * 600, at: i * 0.045 });
+    FM(140, 0.3, { ratio: 2.76, idx: 2, v: 0.08, at: 0.48, room: 0.4 }); K(120, 50, 0.15, { v: 0.2, at: 0.48 });
+  },
+  // tempo equips: 'first' surges forward (rising whoosh + bright arpeggio), 'last' is a tape-stop slow-down
+  'tempo:first': () => { lib.whoosh(0.3, { f: 600, to: 5000, v: 0.16, peak: 0.85 }); chord([659, 988, 1319], 0.35, { type: 'triangle', v: 0.05, roll: 0.04, at: 0.12, hall: 0.3 }); lib.bell(1760, 0.6, { at: 0.24, v: 0.04 }); },
+  'tempo:last': () => { T(523, 0.9, { type: 'sawtooth', v: 0.04, to: 92, glide: 0.85, lp: { f: 2600, to: 300 }, vib: [9, 0.025], hall: 0.4 }); T(784, 0.8, { type: 'triangle', v: 0.035, to: 131, glide: 0.75, hall: 0.4 }); N(0.7, { c: 'pink', ft: 'bandpass', f: 1800, to: 250, q: 2, v: 0.08, a: 0.05 }); lib.bell(196, 1, { at: 0.7, v: 0.05, ratio: 2.76 }); },
+});
 
 // Location wheel: F fires 'cc:wheel-start' {id} when it opens and 'cc:wheel-landed' {id} when it stops. We spin a
 // decelerating ratchet in between, unless the wheel drives its own ticks (sfx['wheel:tick'](speed 0..1) per segment).
@@ -732,6 +771,11 @@ function evSound(e) {
   if (k === 'exposed') return playNamed('exposed:' + clamp(+e.n || +e.stacks || 1, 1, 6));
   if (k === 'ascend' || k === 'ascended') return playNamed('ascend');
   if (k === 'veteran' || k === 'champion') return playNamed(k);
+  // V 16.0
+  if (k === 'overkill' || k === 'guard' || k === 'secondwind' || k === 'interest' || k === 'hold') return playNamed(k);
+  if (k === 'reversal') return playNamed(e.on === false ? 'reversal:off' : 'reversal:on');
+  if (k === 'cog') return e.moves && e.moves.length ? playNamed('cog') : undefined;
+  if (k === 'tempo') return playNamed(e.k === 'last' ? 'tempo:last' : 'tempo:first');
 }
 
 // ---- rarity-tiered reveal
@@ -921,7 +965,7 @@ function killSound(id) {
 
 // ---------------------------------------------------------------- router
 const gateT = new Map(), burst = new Map();
-const MIN_GAP = { tick: 0.02, hover: 0.04, coin: 0.025, firework: 0.06, xp: 0.02, heartbeat: 0.5, kill: 0, hit: 0.02, 'wheel:tick': 0.025 };
+const MIN_GAP = { tick: 0.02, hover: 0.04, coin: 0.025, firework: 0.06, xp: 0.02, heartbeat: 0.5, kill: 0, hit: 0.02, 'wheel:tick': 0.025, interest: 0.4, guard: 0.06, cog: 0.3 };
 for (const k of Object.keys(ST)) { MIN_GAP['st:' + k] = 0.08; MIN_GAP['dot:' + k] = 0.06; } // a storm of statuses in an 8-player round stays readable
 function play(name, fn) {
   if (settings.sfx === 0) return;

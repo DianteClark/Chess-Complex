@@ -591,3 +591,48 @@ body.bigtext .ib-line { font-size: 15px; } body.bigtext .ib-row span { font-size
 #s-game .card-name .pl-rank { font-size: 11px; letter-spacing: .04em; text-transform: none; color: rgba(240,232,214,.75); font-weight: 600; }
 @media (max-height: 520px) { .intro-bar { justify-content: flex-start; padding-left: calc(14px + env(safe-area-inset-left, 0px)); } } /* landscape: the dots stay clear of the wheel's kicker */
 #m-promote .popt .skip { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- 16.0 Tactics (D) */
+/* action bar: Hold and End share the last cell (6-column grid, the five others span 2) so the bar keeps 2 rows */
+#s-game .actions { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+#s-game .actions .act { grid-column: span 2; min-width: 0; }
+#s-game .actions .act.hold, #s-game .actions .act.end { grid-column: span 1; padding-left: 2px; padding-right: 2px; }
+#s-game .actions .act.hold .a-k, #s-game .actions .act.end .a-k { letter-spacing: .03em; }
+#s-game .actions .act.hold, #s-game .actions .act.end { white-space: nowrap; }
+#s-game .actions .act.hold .a-i, #s-game .actions .act.end .a-i { width: 10px; height: 10px; margin-right: 2px; }
+#s-game .act.hold { border-color: rgba(232,200,122,.28); }
+#s-game .act.hold:not(.used) .a-i { opacity: .8; color: #e8c87a; }
+#s-game .actions:not(.wait) .act.hold:not(.used) .a-k { color: #e8c87a; }
+#s-game .act.end[data-s]::after { top: -1px; right: -1px; }
+.actions.myturn .act:nth-child(7) { animation-delay: .18s; }
+.abinfo .ab-hold { width: 96px; height: 96px; padding: 18px; box-sizing: border-box; fill: #e8c87a; color: #e8c87a; background: radial-gradient(circle, rgba(232,200,122,.16), transparent 70%); border-radius: 8px; }
+
+/* turn strip: round divider, held marker, REVERSED tag */
+#s-game .order .o-rd { flex: none; align-self: stretch; display: flex; align-items: flex-end; justify-content: center; width: 18px; margin: 0 1px; position: relative; }
+#s-game .order .o-rd::before { content: ''; position: absolute; left: 50%; top: 2px; bottom: 15px; width: 2px; margin-left: -1px; border-radius: 1px; background: linear-gradient(180deg, rgba(255,255,255,0), rgba(255,217,138,.75)); }
+#s-game .order .o-rd span { font-size: 11px; line-height: 13px; font-weight: 800; letter-spacing: .02em; color: rgba(255,232,180,.85); }
+#s-game .order .o-rd.rev::before { background: linear-gradient(180deg, rgba(255,255,255,0), #ff9a5a); }
+#s-game .order .o-rd.rev span { color: #ffb27a; }
+#s-game .order .o-rd.rev { width: 26px; }
+#s-game .order .o.held img { filter: saturate(.55) brightness(.9); }
+#s-game .order .o .o-held { position: absolute; left: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 7px; background: #2a2114 center / 10px 10px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23ffd98a' d='M6 2h12v5l-4 5 4 5v5H6v-5l4-5-4-5zm2 2v2.3L12 11l4-4.7V4z'/%3E%3C/svg%3E"); box-shadow: 0 0 0 1px #e8c87a; z-index: 2; }
+#s-game .order .o-rev { order: -1; flex: none; align-self: center; font-size: 11px; font-weight: 900; letter-spacing: .08em; color: #1a0f05; background: linear-gradient(180deg, #ffc27a, #ff8a3d); padding: 2px 5px; border-radius: 4px; margin-right: 2px; box-shadow: 0 0 10px rgba(255,138,61,.45); }
+body:not(.reduced) #s-game .order .o-rev { animation: revPulse 1.6s ease-in-out infinite; }
+@keyframes revPulse { 50% { box-shadow: 0 0 2px rgba(255,138,61,.2); filter: brightness(.9); } }
+
+/* Shard Interest: next-round preview pill + a quiet "+n interest" tick on the counter */
+#s-game .int-pill { font-size: 11px; font-weight: 700; white-space: nowrap; color: #ffd98a; padding: 1px 6px; border: 1px solid rgba(255,217,138,.35); border-radius: 8px; background: rgba(255,210,77,.07); }
+#s-game .int-pill.hidden { display: none; }
+#s-game .sh-gain.int { color: #ffd98a; white-space: nowrap; animation-duration: 1.4s; top: -1px; left: 26px; padding: 0 5px; border-radius: 7px; background: rgba(20,16,10,.92); box-shadow: 0 0 0 1px rgba(255,217,138,.4); }
+#s-game #h-shards.tick { animation: shTick .5s ease-out; }
+@keyframes shTick { 30% { color: #ffd98a; text-shadow: 0 0 8px rgba(255,217,138,.8); } }
+
+/* stat identities: loadout rows, inspect, How to Play */
+.alloc .alloc-edge { grid-column: 1 / -1; margin-top: -3px; font-size: 11px; line-height: 1.35; color: rgba(236,228,214,.72); }
+.alloc .alloc-edge b { font-size: 11px; letter-spacing: .04em; color: var(--c); font-weight: 800; display: inline; }
+#s-game .inspect .ins-edge { display: block; font-size: 11px; line-height: 1.35; color: rgba(236,228,214,.8); margin-top: 1px; }
+#s-game .inspect .ins-edge i { font-style: normal; font-weight: 800; color: #e8c87a; }
+.ht-edges { margin: 6px 0 0; padding-left: 18px; }
+.ht-edges li { margin: 4px 0; line-height: 1.45; }
+.ht-edges .e-spd { color: #ffe04d; } .ht-edges .e-atk { color: #ff6b6b; } .ht-edges .e-def { color: #7fb6ff; } .ht-edges .e-hp { color: #5cff9d; }
+#s-game .inspect { width: max-content; max-width: min(340px, 92vw); } /* absolute + left 50% shrank the box to half the screen */

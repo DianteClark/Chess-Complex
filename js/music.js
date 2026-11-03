@@ -241,9 +241,11 @@ const LOC = {
   ruins: { key: 52, scale: 'phrygdom', prog: ['I', 'bII', 'I', 'bvii', 'iv', 'bII', ['bvii', 'bII'], 'I'], pad: { wave: 'sawtooth', cut: 800, lfo: 0.08 }, bassWave: 'triangle', arpWave: 'pluck', leadWave: ['sawtooth', 'triangle'], rev: 0.3, dly: 0.2, swing: 0.05, vib: 22, color: 'darbuka', bed: { type: 'highpass', f: 3200, q: 0.7, v: 0.03, lfo: 0.13, depth: 1400 } },
   works: { key: 53, scale: 'aeolian', prog: ['i', 'i', 'bVI', 'bVII', 'i', 'i', 'iv', ['V', 'V7']], pad: { wave: 'sawtooth', cut: 650, lfo: 0.04 }, bassWave: 'square', arpWave: 'square', leadWave: ['square', 'sawtooth'], rev: 0.2, dly: 0.16, swing: 0, color: 'clank', bed: { type: 'lowpass', f: 140, q: 6, v: 0.08, lfo: 0.5, depth: 20 } },
   rift: { key: 51, scale: 'lydian', prog: ['IM7', 'II', 'IM7', 'II', 'vi', 'II', 'V', ['IM7', 'II']], pad: { wave: 'sawtooth', cut: 2000, lfo: 0.18 }, bassWave: 'sine', arpWave: 'bell', leadWave: ['sine', 'triangle'], rev: 0.5, dly: 0.34, swing: 0, color: 'shimmer', bed: { type: 'bandpass', f: 5200, q: 3, v: 0.018, lfo: 0.04, depth: 2500 } },
+  // 16.0 (L): Clockwork Spire: brass over a ticking escapement, a chime phrase every 8 bars, a tower bell on the downbeat
+  spire: { key: 46, scale: 'dorian', prog: ['i', 'bVII', 'bVI', 'bVII', 'i', 'iv', 'bVI', ['V', 'V7']], pad: { wave: 'sawtooth', cut: 900, lfo: 0.05 }, bassWave: 'triangle', arpWave: 'bell', leadWave: ['sawtooth', 'triangle'], rev: 0.38, dly: 0.22, swing: 0, brass: true, color: 'clock', bed: { type: 'bandpass', f: 260, q: 1.4, v: 0.05, lfo: 0.03, depth: 60 } },
   bog: { key: 47, scale: 'harmonic', prog: ['i', 'bVI', 'i', 'V', 'iv', 'bVI', 'iio', 'V'], pad: { wave: 'triangle', cut: 520, lfo: 0.1 }, bassWave: 'sine', arpWave: 'pluck', leadWave: ['triangle', 'sawtooth'], rev: 0.4, dly: 0.3, swing: 0.1, vib: 18, color: 'croak', bed: { type: 'lowpass', f: 320, q: 1.2, v: 0.07, lfo: 0.06, depth: 120 } },
 };
-const LOC_ALIAS = { frost: 'citadel', volcano: 'forge', volcanic: 'forge', sunken: 'temple', royal: 'gardens', garden: 'gardens', desert: 'ruins', iron: 'works', ironworks: 'works', astral: 'rift', witchwood: 'bog', swamp: 'bog' };
+const LOC_ALIAS = { frost: 'citadel', volcano: 'forge', volcanic: 'forge', sunken: 'temple', royal: 'gardens', garden: 'gardens', desert: 'ruins', iron: 'works', ironworks: 'works', astral: 'rift', witchwood: 'bog', swamp: 'bog', clockwork: 'spire', clock: 'spire' }; // 16.0 (L): + spire
 // themes whose harmony stays their own under a location (only key, instruments and colour change)
 const KEEP_HARMONY = new Set(['duel', 'final', 'boss', 'king']);
 const MATCH_THEMES = new Set(['royale', 'blitz', 'duel', 'squads', 'siege', 'boss', 'final', 'king']);
@@ -604,6 +606,14 @@ class Music {
         g.setValueAtTime(0, t); g.linearRampToValueAtTime(0.018, t + d * 0.6); g.linearRampToValueAtTime(0, t + d);
       }
       if (r < 0.03) this.bell(tone(pos, 36), t, 1.2, 0.012, this.L.color.in);
+    } else if (kind === 'clock') { // 16.0 (L) spire: escapement tick-tock, a ratchet at high energy, Westminster-ish chimes, tower bell
+      if (pos % 8 === 0) this.blip(3300, 3000, t, 0.014, 0.05 + e * 0.02, 'square');
+      else if (pos % 8 === 4) this.blip(2100, 1900, t, 0.016, 0.042 + e * 0.02, 'square');
+      if (pos % 4 === 0) this.noiseHit(this.fx.rim, t, 0.05 + e * 0.04, 0.008, 0.03);
+      if (e > 0.55 && pos % 2 === 1 && pos % 4 !== 3) this.noiseHit(this.fx.hat, t, 0.018 + e * 0.012, 0.006, 0.03);
+      if (pos === 14 && bar % 2 === 1) this.metal(tone(1, 24), t, 0.3, 0.022, 3.5, 2);
+      if (bar % 8 === 0 && pos % 4 === 0) this.bell(tone([2, 0, 1, 3][pos / 4], 12), t, 1.8, 0.05, this.L.color.in);
+      if (bar % 8 === 4 && pos === 0) this.metal(this.bassRoot(ch) - 12, t, 3.4, 0.06, 1.41, 1.6);
     } else if (kind === 'croak') { // bog frogs and a wobbling drone
       if (r < 0.03 && pos % 4 === 2) for (let i = 0; i < 2 + (rnd() * 2 | 0); i++) { const [o, g] = this.osc('square', 95 + rnd() * 30, t + i * 0.09, t + i * 0.09 + 0.08, this.L.color.in); g.setValueAtTime(0, t + i * 0.09); g.linearRampToValueAtTime(0.012, t + i * 0.09 + 0.01); g.setTargetAtTime(0, t + i * 0.09 + 0.03, 0.015); o.frequency.setTargetAtTime(70, t + i * 0.09, 0.03); }
       if (pos === 0 && bar % 4 === 0) { const d = 4 * 16 * this.six, [o, g] = this.osc('triangle', mtof(this.bassRoot(ch)), t, t + d, this.L.color.in); o.detune.setValueAtTime(-30, t); o.detune.linearRampToValueAtTime(25, t + d * 0.5); o.detune.linearRampToValueAtTime(-20, t + d); g.setValueAtTime(0, t); g.linearRampToValueAtTime(0.05, t + d * 0.3); g.linearRampToValueAtTime(0, t + d); }

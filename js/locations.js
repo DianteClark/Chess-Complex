@@ -6,12 +6,12 @@
 // music and background scenery. The player's equipped store board is still drawn as the board surface on top.
 //
 // Fields:
-//   name, blurb        UI copy (location wheel, intro card, codex)
+//   name, blurb        UI copy (location wheel, intro card, codex); expect (optional) = the intro card's gameplay line
 //   weather            [primary, secondary|null] weather ids that world.js already draws
 //   hazards            pool of MUTATORS ids; one is rolled per match (Chaos stacks the location's pick plus one more)
 //   events             weights over WORLD_EVENTS kinds (missing = 1 for a generic event, 0 for another location's
 //                      signature event); signature events first
-//   music              music theme id for AU (music.js); falls back to the mode theme if AU has none
+//   music              music.js location theme id (= the location id; music.js reads s.location)
 //   backdrop           backdrop id for E1/E2 (js/backdrops/<id>.js)
 //   board              default board look (BOARDS id) used when the player has no board of their own equipped
 //   mood               colour hints for backdrops, lighting and the wheel: sky top/bottom, fog, key light, accent
@@ -20,57 +20,67 @@ export const LOCATIONS = {
     name: 'Frost Citadel', blurb: 'A fortress of ice under a frozen sky. Blizzards freeze anyone caught in the open.',
     weather: ['snow', 'aurora'], hazards: ['ice'],
     events: { blizzard: 5, shardRain: 2, supply: 2, eclipse: 1.5 },
-    music: 'loc_citadel', backdrop: 'citadel', board: 'frostcourt',
+    music: 'citadel', backdrop: 'citadel', board: 'frostcourt',
     mood: { sky: ['#1b2a4a', '#060a16'], fog: 'rgba(200,230,255,0.10)', light: '#cfe8ff', accent: '#7fe0ff' },
   },
   forge: {
     name: 'Volcanic Forge', blurb: 'A foundry carved into a living volcano. The mountain erupts and sets the board alight.',
     weather: ['embers', 'ash'], hazards: ['lava', 'geysers'],
     events: { eruption: 5, meteor: 2.5, bloodMoon: 1.5, earthquake: 1.5 },
-    music: 'loc_forge', backdrop: 'forge', board: 'hellgate',
+    music: 'forge', backdrop: 'forge', board: 'hellgate',
     mood: { sky: ['#3a0e06', '#0a0302'], fog: 'rgba(255,110,40,0.08)', light: '#ffb070', accent: '#ff5a1f' },
   },
   temple: {
     name: 'Sunken Temple', blurb: 'Drowned halls of an old order. The tide rises and drags at every step.',
     weather: ['rain', 'fog'], hazards: ['geysers', 'portals'],
     events: { flood: 5, manaSurge: 2, shardRain: 1.5, eclipse: 1.5 },
-    music: 'loc_temple', backdrop: 'temple', board: 'stormpeak',
+    music: 'temple', backdrop: 'temple', board: 'stormpeak',
     mood: { sky: ['#0e2a33', '#03090c'], fog: 'rgba(60,200,230,0.10)', light: '#a8f0ff', accent: '#3ddcff' },
   },
   gardens: {
     name: 'Royal Gardens', blurb: 'The palace gardens in full bloom. Thorny hedges, a generous spring and a price on the leader.',
     weather: ['petals', 'leaves'], hazards: ['brambles'],
     events: { bloom: 4, bounty: 3, supply: 2, shardRain: 1.5, meteor: 0.5 },
-    music: 'loc_gardens', backdrop: 'gardens', board: 'grove',
+    music: 'gardens', backdrop: 'gardens', board: 'grove',
     mood: { sky: ['#2a4a3a', '#0a1410'], fog: 'rgba(255,220,235,0.06)', light: '#fff2c8', accent: '#9be3b4' },
   },
   ruins: {
     name: 'Desert Ruins', blurb: 'A buried kingdom in the dunes. Sandstorms blind the board and the ground gives way.',
     weather: ['sand', 'dust'], hazards: ['crumble'],
     events: { sandstorm: 4, earthquake: 3, supply: 1.5, bloodMoon: 1.5 },
-    music: 'loc_ruins', backdrop: 'ruins', board: 'dunes',
+    music: 'ruins', backdrop: 'ruins', board: 'dunes',
     mood: { sky: ['#6a4220', '#1a0f06'], fog: 'rgba(230,180,110,0.10)', light: '#ffd9a0', accent: '#e8b04a' },
   },
   works: {
     name: 'Iron Works', blurb: 'A roaring factory of belts and pistons. War drums pound and the machines overcharge.',
     weather: ['ash', 'fog'], hazards: ['conveyor'],
     events: { overcharge: 4, frenzy: 3, supply: 1.5, meteor: 1.5 },
-    music: 'loc_works', backdrop: 'works', board: 'clocktower',
+    music: 'works', backdrop: 'works', board: 'clocktower',
     mood: { sky: ['#2a2a30', '#08080a'], fog: 'rgba(180,170,150,0.10)', light: '#ffcf8a', accent: '#ff9a3d' },
   },
   rift: {
     name: 'Astral Rift', blurb: 'A shattered island adrift in the stars. Mana surges and gravity bends toward the void.',
     weather: ['stars', 'void'], hazards: ['portals', 'rift'],
     events: { gravityWell: 4, manaSurge: 3, eclipse: 1.5, shardRain: 1.5 },
-    music: 'loc_rift', backdrop: 'rift', board: 'eventhorizon',
+    music: 'rift', backdrop: 'rift', board: 'eventhorizon',
     mood: { sky: ['#1a1450', '#02010a'], fog: 'rgba(180,140,255,0.08)', light: '#d8c8ff', accent: '#b04dff' },
   },
   bog: {
     name: 'Witchwood Bog', blurb: 'A rotten marsh where the dead do not rest. Poison pools and choking fog.',
     weather: ['fog', 'fireflies'], hazards: ['poison'],
     events: { toxicFog: 4, restless: 3, eclipse: 1.5, shardRain: 1.5 },
-    music: 'loc_bog', backdrop: 'bog', board: 'crypt',
+    music: 'bog', backdrop: 'bog', board: 'crypt',
     mood: { sky: ['#1a2418', '#050805'], fog: 'rgba(140,200,90,0.12)', light: '#c8e8a0', accent: '#8cff5a' },
+  },
+  // 16.0 (L): the ninth stop. Cogwheel tiles carry pieces clockwise each round; Reversal runs one round backwards
+  // (slowest SPD acts first). War Drums (frenzy) fits the tempo theme, so it is the strong secondary event.
+  spire: {
+    name: 'Clockwork Spire', blurb: 'The heart of a colossal clock tower. Brass gears turn the floor beneath you, and when the great bell tolls, time runs backwards.',
+    expect: 'Cogwheels carry pieces clockwise every round. During a Reversal the slowest pieces act first.',
+    weather: ['sparks', 'dust'], hazards: ['cogs'],
+    events: { reversal: 4, frenzy: 2.5, manaSurge: 1.5, supply: 1.5 },
+    music: 'spire', backdrop: 'spire', board: 'clocktower',
+    mood: { sky: ['#2c1e12', '#07050a'], fog: 'rgba(255,196,120,0.08)', light: '#ffd8a0', accent: '#f5c76a' },
   },
 };
 export const LOCATION_IDS = Object.keys(LOCATIONS);
@@ -85,6 +95,7 @@ export const LOC_EVENTS = {
   overcharge:  { at: 'works' },
   gravityWell: { at: 'rift', hostile: true, tele: true },
   toxicFog:    { at: 'bog', hostile: true, tele: true },
+  reversal:    { at: 'spire', tele: true },  // 16.0 (L): warn this round, the next round runs slowest-first
 };
 // Tuning for the location events (engine.js reads these).
 export const LOC_T = {
@@ -97,6 +108,8 @@ export const LOC_T = {
   gravityWell: { radius: 5, pull: 2, dmg: 0.08 },
   toxicFog: { poison: 1, t: 3 },
   poisonPool: { poison: 1, t: 3 },           // start a turn on, or land on, a bog pool: +1 poison stack
+  reversal: { rounds: 1 },                   // 16.0 (L): one round with the turn order reversed (s.reversal = that round)
+  cogs: { rings: 4, min: 2 },                // 16.0 (L): Cogwheel gears (2x2 rings) per map, fewer if space runs out
 };
 
 // ---------- deterministic pick ----------

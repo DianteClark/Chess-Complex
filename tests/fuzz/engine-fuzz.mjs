@@ -37,7 +37,7 @@ const MALFORMED = (r, s) => {
     { type: 'ability', slot: 'atk', x: 1e9, y: -1e9 }, { type: 'ability', slot: 'ult', x, y }, { type: 'ability', slot: 'sig' },
     { type: 'ability', slot: 'atk', x: null, y: undefined }, { type: 'promote', to: 'king' }, { type: 'promote', to: 'queen' },
     { type: 'promote', to: '__proto__' }, { type: 'promote', to: 'constructor' }, { type: 'promote', to: 'hollow' }, { type: 'promote' },
-    { type: 'emote', k: 'x' }, { type: 'END' }, { type: 'toString' }, { type: 'move', x, y, __proto__: { type: 'end' } },
+    { type: 'emote', k: 'x' }, { type: 'END' }, { type: 'toString' }, { type: 'HOLD' }, { type: 'hold', x, y }, { type: 'hold', __proto__: { type: 'end' } }, { type: 'move', x, y, __proto__: { type: 'end' } },
   ]);
 };
 
@@ -46,6 +46,7 @@ function randomLegal(r, s, u) {
   if (E.canMove(s, u)) for (const m of E.legalMoves(s, u)) c.push({ type: 'move', x: m.x, y: m.y });
   for (const slot of ['atk', 'sig', 'eq', 'ult']) if (E.canUse(s, u, slot)) for (const o of E.abilityOptions(s, u, slot)) c.push({ type: 'ability', slot, x: o.anchor.x, y: o.anchor.y });
   if (u.kind === 'player') for (const o of E.promoteOptions(u)) if (o.cost <= u.shards) c.push({ type: 'promote', to: o.to });
+  if (E.canHold && E.canHold(s, u)) c.push({ type: 'hold' }); // 16.0
   c.push({ type: 'end' });
   return pick(r, c);
 }
@@ -98,7 +99,7 @@ function play(cfg) {
     try { res = E.applyAction(s, pid, a); } catch (e) { fails.push(`step ${steps} applyAction threw on ${kind} ${JSON.stringify(a)} by ${pid}: ${e.message} @ ${(e.stack.split('\n')[1] || '').trim()}`); return { ok: false, threw: true }; }
     log.push([pid, a === undefined ? '__undef' : a]);
     if (!res.ok) { rejected++; if (before && snap(s) !== before) fails.push(`step ${steps} rejected ${kind} action ${JSON.stringify(a)} mutated state`); }
-    else if (kind === 'malformed') { malformedAccepted++; if (typeof a !== 'object' || a == null || !['move', 'ability', 'promote', 'end'].includes(a.type)) fails.push(`step ${steps} malformed action accepted: ${JSON.stringify(a)}`); }
+    else if (kind === 'malformed') { malformedAccepted++; if (typeof a !== 'object' || a == null || !['move', 'ability', 'promote', 'end', 'hold'].includes(a.type)) fails.push(`step ${steps} malformed action accepted: ${JSON.stringify(a)}`); }
     for (const q of res.ev || []) { evCounts[q.e] = (evCounts[q.e] || 0) + 1; for (const [k, v] of Object.entries(q)) if (typeof v === 'number' && !Number.isFinite(v)) fails.push(`step ${steps} event ${q.e}.${k}=${v}`); }
     const inv = invariants(s, `step ${steps} after ${kind} ${JSON.stringify(a)}`); if (inv.length) fails.push(...inv.slice(0, 3));
     steps++;

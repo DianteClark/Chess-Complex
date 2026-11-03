@@ -6,7 +6,7 @@
 // Everything is in world units (1 = one tile). lowQ drops secondary layers; reduced motion slows flows.
 import { ROLES, unitById, ringOf, HILL } from './engine.js';
 
-export const TILES = { throne: 1, geyser: 1, conveyor: 1, crumble: 1, pit: 1, poison: 1 }; // R 15.0: + Witchwood Bog poison pools
+export const TILES = { throne: 1, geyser: 1, conveyor: 1, crumble: 1, pit: 1, poison: 1, cog: 1 }; // R 15.0: + Witchwood Bog poison pools; 16.0 (L): + Clockwork Spire cogs
 const SIZE = 16, TAU = Math.PI * 2;
 const isT = (s, x, y, k) => x >= 0 && y >= 0 && x < SIZE && y < SIZE && s.tiles[y * SIZE + x].t === k;
 const mkC = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; };
@@ -493,6 +493,7 @@ export function tile(r, ctx, t, x, y, T) {
   else if (t.t === 'conveyor') drawConveyor(r, ctx, t, x, y, T);
   else if (t.t === 'pit') drawPit(r, ctx, x, y, T);
   else if (t.t === 'poison') drawPool(r, ctx, x, y, T);
+  else if (t.t === 'cog') drawCog(r, ctx, t, x, y, T); // 16.0 (L)
   else if (t.t === 'crumble' && t.hp <= 1) { // ember glow in the gaps and loose grit trembling over a breaking tile
     ctx.globalCompositeOperation = 'lighter'; dot(ctx, '#ff8a3a', x + 0.5, y + 0.5, 0.55, 0.16 + 0.1 * Math.sin(T * (r.reduced ? 1.5 : 4) + x + y)); ctx.globalCompositeOperation = 'source-over';
     if (r.lowQ) { ctx.globalAlpha = 1; return; }
@@ -531,6 +532,93 @@ function drawPool(r, ctx, x, y, T) {
   }
   if (!r.lowQ) { ctx.globalCompositeOperation = 'lighter'; dot(ctx, '#7dff4a', x + 0.5, y + 0.5, 0.75, 0.1 + 0.05 * Math.sin(T * 2 * sp + x + y)); ctx.globalCompositeOperation = 'source-over'; }
   ctx.globalAlpha = 1;
+}
+
+// ---------- 16.0 (L): Clockwork Spire cogwheels (tile t:'cog', { ring, i, hx, hy }) ----------
+// Each ring of 4 cog tiles is one 2x2 brass gear turning on the hub (the corner the four share). Per frame: the four
+// sockets (1:1 cached blits) and one rotated gear sprite, drawn from the ring's first live tile (the others draw nothing,
+// so later tiles never paint over the gear). The gear idles with a slow clockwise drift and makes a quarter turn on
+// every {e:'cog'} event, in step with the pieces it carries. A ring the storm has partly swallowed is clipped to the
+// cogs that remain. lowQ drops the specular sheen; reduced motion slows the drift and the quarter turn.
+const COG_OFF = [[-1, -1], [0, -1], [0, 0], [-1, 0]]; // tile i's top-left relative to the hub
+function cogSocket(i) {
+  return sprite('cogsock' + i, 1, 1, 0, 0, (g) => {
+    const [ox, oy] = COG_OFF[i], hx = -ox, hy = -oy; // hub in this tile's coords
+    g.save(); g.beginPath(); g.rect(0, 0, 1, 1); g.clip();
+    g.fillStyle = 'rgba(0,0,0,0.55)'; g.beginPath(); g.arc(hx, hy, 1.02, 0, TAU); g.fill(); // bevel shadow into the floor
+    const gr = g.createRadialGradient(hx, hy, 0.2, hx, hy, 1); gr.addColorStop(0, '#0c0806'); gr.addColorStop(0.8, '#1a110a'); gr.addColorStop(1, '#2a1a0e');
+    g.fillStyle = gr; g.beginPath(); g.arc(hx, hy, 0.99, 0, TAU); g.fill();
+    g.strokeStyle = '#8a6430'; g.lineWidth = 0.035; g.beginPath(); g.arc(hx, hy, 0.985, 0, TAU); g.stroke(); // brass bezel
+    g.strokeStyle = 'rgba(255,220,150,0.35)'; g.lineWidth = 0.012; g.beginPath(); g.arc(hx, hy, 1.0, 0, TAU); g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 0.02; g.beginPath(); g.arc(hx, hy, 0.955, 0, TAU); g.stroke();
+    g.restore();
+  });
+}
+function cogGear(v) {
+  return sprite('coggear' + v, 2, 2, 1, 1, (g) => {
+    const n = 16, R = 0.93, Rr = 0.82, tw = 0.42; // teeth, tip radius, root radius, tooth width (fraction of pitch)
+    g.beginPath();
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * TAU, p = TAU / n, a0 = a - p * 0.5, a1 = a - p * tw * 0.5, a2 = a + p * tw * 0.5;
+      g.arc(0, 0, Rr, a0, a1 - p * 0.06); g.arc(0, 0, R, a1, a2); g.arc(0, 0, Rr, a2 + p * 0.06, a + p * 0.5);
+    }
+    g.closePath();
+    g.fillStyle = '#3a240c'; g.save(); g.translate(0.025, 0.035); g.fill(); g.restore(); // drop edge
+    const body = g.createRadialGradient(-0.3, -0.35, 0.05, 0, 0, 1); body.addColorStop(0, v ? '#f7d98a' : '#ffe39a'); body.addColorStop(0.45, v ? '#c4902e' : '#d29b34'); body.addColorStop(1, '#6a4512');
+    g.fillStyle = body; g.fill();
+    g.strokeStyle = 'rgba(60,34,8,0.85)'; g.lineWidth = 0.018; g.stroke();
+    // spoke windows (the socket shows through)
+    g.save(); g.globalCompositeOperation = 'destination-out';
+    for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU + 0.3; g.beginPath(); g.arc(0, 0, 0.66, a, a + 0.86); g.arc(0, 0, 0.34, a + 0.86 - 0.08, a + 0.1, true); g.closePath(); g.fill(); }
+    g.restore();
+    g.strokeStyle = 'rgba(80,46,10,0.9)'; g.lineWidth = 0.03;
+    for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU + 0.3; g.beginPath(); g.arc(0, 0, 0.66, a, a + 0.86); g.arc(0, 0, 0.34, a + 0.86 - 0.08, a + 0.1, true); g.closePath(); g.stroke(); }
+    // rim rings and engraved clockwise arrows between the spokes
+    g.strokeStyle = 'rgba(255,236,170,0.55)'; g.lineWidth = 0.014; g.beginPath(); g.arc(0, 0, 0.775, 0, TAU); g.stroke();
+    g.strokeStyle = 'rgba(70,40,8,0.7)'; g.lineWidth = 0.02; g.beginPath(); g.arc(0, 0, 0.7, 0, TAU); g.stroke();
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * TAU, r0 = 0.738;
+      g.strokeStyle = 'rgba(60,32,6,0.85)'; g.lineWidth = 0.034; g.lineCap = 'round';
+      g.beginPath(); g.arc(0, 0, r0, a, a + 0.62); g.stroke();
+      const e = a + 0.66, ex = Math.cos(e) * r0, ey = Math.sin(e) * r0, tx = -Math.sin(e), ty = Math.cos(e), nx = Math.cos(e), ny = Math.sin(e);
+      g.fillStyle = 'rgba(60,32,6,0.9)'; g.beginPath(); g.moveTo(ex + tx * 0.07, ey + ty * 0.07); g.lineTo(ex - tx * 0.03 + nx * 0.05, ey - ty * 0.03 + ny * 0.05); g.lineTo(ex - tx * 0.03 - nx * 0.05, ey - ty * 0.03 - ny * 0.05); g.closePath(); g.fill();
+    }
+    g.lineCap = 'butt';
+    // hub boss with a hex bolt
+    const hb = g.createRadialGradient(-0.06, -0.08, 0.01, 0, 0, 0.3); hb.addColorStop(0, '#fff0b8'); hb.addColorStop(0.5, '#c08a2a'); hb.addColorStop(1, '#5a3a10');
+    g.fillStyle = hb; g.beginPath(); g.arc(0, 0, 0.29, 0, TAU); g.fill(); g.strokeStyle = 'rgba(60,34,8,0.9)'; g.lineWidth = 0.02; g.stroke();
+    g.fillStyle = '#4a3010'; g.beginPath(); for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; g.lineTo(Math.cos(a) * 0.11, Math.sin(a) * 0.11); } g.closePath(); g.fill();
+    g.fillStyle = '#d8b060'; g.beginPath(); g.arc(0, 0, 0.045, 0, TAU); g.fill();
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + 0.5; g.fillStyle = '#5a3a10'; g.beginPath(); g.arc(Math.cos(a) * 0.21, Math.sin(a) * 0.21, 0.022, 0, TAU); g.fill(); }
+  });
+}
+function cogSheen() { // fixed key light over the turning gear (does not rotate, so the brass reads as metal)
+  return sprite('cogsheen', 2, 2, 1, 1, (g) => {
+    const gr = g.createRadialGradient(-0.35, -0.4, 0, -0.2, -0.25, 1.0); gr.addColorStop(0, 'rgba(255,246,210,0.42)'); gr.addColorStop(0.5, 'rgba(255,220,150,0.1)'); gr.addColorStop(1, 'rgba(255,220,150,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 0.93, 0, TAU); g.fill();
+    const sh = g.createLinearGradient(0, -0.9, 0, 0.95); sh.addColorStop(0, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(20,10,0,0.35)');
+    g.fillStyle = sh; g.beginPath(); g.arc(0, 0, 0.93, 0, TAU); g.fill();
+  });
+}
+const isCog = (s, x, y, ring) => x >= 0 && y >= 0 && x < SIZE && y < SIZE && s.tiles[y * SIZE + x].t === 'cog' && s.tiles[y * SIZE + x].ring === ring && ringOf(x, y) >= s.storm.ring;
+function drawCog(r, ctx, t, x, y, T) {
+  const s = r.state, hx = t.hx, hy = t.hy, ring = t.ring;
+  const live = COG_OFF.map(([ox, oy]) => isCog(s, hx + ox, hy + oy, ring));
+  const first = live.indexOf(true); if (first < 0 || (t.i & 3) !== first) return; // the ring is drawn once, from its first live tile
+  for (let i = 0; i < 4; i++) if (live[i]) blit(ctx, cogSocket(i), hx + COG_OFF[i][0], hy + COG_OFF[i][1]);
+  const hz = r.hz || {}, slow = r.reduced ? 0.02 : 0.06, dur = r.reduced ? 0.9 : 0.55;
+  const k = hz.cogT0 != null ? Math.min(1, Math.max(0, (r.time - hz.cogT0) / dur)) : 1, ease = 1 - Math.pow(1 - k, 3);
+  const turns = hz.cogN ? hz.cogN - 1 + ease : 0;
+  const a = T * slow + ring * 0.7 + turns * Math.PI / 2 + (k < 1 && !r.reduced ? Math.sin(k * Math.PI) * 0.04 : 0);
+  const all = live.every(Boolean);
+  ctx.save();
+  if (!all) { ctx.beginPath(); for (let i = 0; i < 4; i++) if (live[i]) ctx.rect(hx + COG_OFF[i][0], hy + COG_OFF[i][1], 1, 1); ctx.clip(); }
+  ctx.translate(hx, hy); ctx.rotate(a); ctx.drawImage(cogGear(ring & 1).c, -1, -1, 2, 2);
+  ctx.restore();
+  if (!r.lowQ) { const ga = ctx.globalAlpha; ctx.globalAlpha = ga * 0.9; if (all) blit(ctx, cogSheen(), hx, hy); ctx.globalAlpha = ga; }
+  if (k < 1 && !r.lowQ) { // the turn: a brief warm glint on the hub
+    ctx.globalCompositeOperation = 'lighter'; dot(ctx, '#ffc870', hx, hy, 0.9, 0.35 * Math.sin(k * Math.PI)); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  }
 }
 
 // ---------- R 15.0: telegraphed location events (W: s.locWarn = { kind, round, tiles, area?, rings?, centers?, center?,
@@ -572,6 +660,7 @@ export function lights(r, ctx, T) {
 // ---------- events (render.js default branch, at playback time) ----------
 export function event(r, e, at) {
   const hz = r.hz || (r.hz = {});
+  if (e.e === 'cog') { hz.cogN = (hz.cogN || 0) + 1; hz.cogT0 = r.time; for (const m of e.moves || []) r.light(m.x + 0.5, m.y + 0.5, '#ffc870', 1.3, 0.5, 0.5); return; } // 16.0 (L): gears make a quarter turn
   if (e.e === 'hill' && e.phase === 'score') { const u = unitById(r.state, e.id); hz.pulse = { t0: r.time, col: (u && u.color) || GOLD }; r.light(HILL.x0 + 2, HILL.y0 + 2, (u && u.color) || GOLD, 3.6, 0.9, 0.9); }
   else if (e.e === 'hill' && e.phase === 'contested') hz.pulse = { t0: r.time, col: '#ff4d6d' };
   if (e.e !== 'hazard') return;

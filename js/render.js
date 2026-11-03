@@ -362,13 +362,13 @@ export class Renderer {
     const ultEv = events.find((q) => q.e === 'ability' && q.slot === 'ult' && q.id === actor);
     if (box && !ultEv) this.camAt(0, () => cd.act(box, actor, { quick, hitsMe }));
     // the camera leads a wide action by a beat (up to ~0.3 s) so the piece never runs out of frame
-    let t = box && !ultEv ? Math.min(0.3, cd.actLead(box, actor) * 0.55) * quick : 0; let hits = 0; let lastAb = null;
+    let t = box && !ultEv ? Math.min(0.3, cd.actLead(box, actor) * 0.55) * quick : 0; let hits = 0; let lastAb = null; let cogAt = -1; // V 16.0: start of the current cog turn
     for (const e of events) {
       if (e.e === 'move') {
         const d = this.disp.get(e.id); if (!d) continue;
         const dist = Math.hypot(e.to.x - d.tx, e.to.y - d.ty);
-        const dur = e.how === 'jump' ? 0.38 : e.how === 'blink' || e.how === 'swap' ? 0.22 : e.how === 'dash' ? 0.12 + dist * 0.025 : e.how === 'push' ? 0.16 : e.how === 'ice' ? 0.09 + dist * 0.05 : e.how === 'portal' ? 0.01 : 0.13 + dist * 0.045;
-        const start = t;
+        const dur = e.how === 'jump' ? 0.38 : e.how === 'blink' || e.how === 'swap' ? 0.22 : e.how === 'dash' ? 0.12 + dist * 0.025 : e.how === 'push' ? 0.16 : e.how === 'ice' ? 0.09 + dist * 0.05 : e.how === 'portal' ? 0.01 : e.how === 'cog' ? (this.reduced ? 0.9 : 0.55) : 0.13 + dist * 0.045; // V 16.0: cog riders move with L's quarter turn
+        const start = e.how === 'cog' && cogAt >= 0 ? cogAt : t; if (e.how === 'cog' && cogAt < 0) cogAt = t; // every rider of one cog event moves at once
         this.later(start, () => {
           d.sx = d.x; d.sy = d.y; d.tx = e.to.x; d.ty = e.to.y; d.t0 = this.time; d.how = e.how; d.dur = dur;
           if (e.how !== 'push' && e.to.x !== e.from.x) d.face = e.to.x < e.from.x ? -1 : 1;
@@ -381,11 +381,11 @@ export class Renderer {
             this.fx.burst(e.to.x + 0.5, e.to.y + 0.5, col, 20, 3); this.fx.ring(e.to.x + 0.5, e.to.y + 0.75, col, 1.8, 0.5, 0.08); this.fx.pillar(e.to.x + 0.5, e.to.y + 0.86, col, 0.5, 0.5, 3);
           }
           if ((e.how === 'conveyor' || e.how === 'pull') && this.fx.moveFx) this.fx.moveFx(e);
-          this.sfx(e.how === 'jump' ? 'jump' : e.how === 'step' || e.how === 'push' ? 'step' : e.how === 'dash' ? 'whoosh' : e.how === 'blink' || e.how === 'swap' ? 'blink' : e.how === 'ice' ? 'ice:skid' : e.how === 'portal' ? 'portal' : e.how === 'pull' ? 'pull' : e.how === 'conveyor' ? 'conveyor' : 'slide');
+          this.sfx(e.how === 'jump' ? 'jump' : e.how === 'step' || e.how === 'push' ? 'step' : e.how === 'dash' ? 'whoosh' : e.how === 'blink' || e.how === 'swap' ? 'blink' : e.how === 'ice' ? 'ice:skid' : e.how === 'portal' ? 'portal' : e.how === 'pull' ? 'pull' : e.how === 'conveyor' ? 'conveyor' : e.how === 'cog' ? null : 'slide'); // V 16.0: the cog event carries the grind
         });
         if (e.how === 'jump') this.later(start + dur, () => { this.fx.burst(e.to.x + 0.5, e.to.y + 0.85, '#d9cfb8', 12, 2, 'dust'); this.fx.ring(e.to.x + 0.5, e.to.y + 0.86, '#ffffff', 1.2, 0.35, 0.05); d.squash = 1; this.kick(3); this.sfx('land'); });
         else if (e.how !== 'push') this.later(start + dur, () => { d.squash = 0.5; if (!this.lowQ && e.how !== 'portal') this.fx.burst(e.to.x + 0.5, e.to.y + 0.86, '#d9cfb8', 3, 0.9, 'dust'); });
-        t += e.how === 'push' ? dur * 0.6 : dur * 0.8;
+        if (e.how === 'cog') t = Math.max(t, start + dur * 0.8); else t += e.how === 'push' ? dur * 0.6 : dur * 0.8;
       } else if (e.e === 'ability') {
         hits = 0; lastAb = e.ab;
         const d = this.disp.get(e.id);
@@ -461,6 +461,18 @@ export class Renderer {
       } else if (e.e === 'world' && e.kind === 'meteor' && e.phase === 'strike') {
         this.later(t, () => this.onFx(e));
         t += 0.75;
+      } else if (e.e === 'overkill') { // V 16.0: the spill arc travels victim -> splash target; the splash dmg that follows lands on arrival
+        this.later(t, () => this.onFx(e));
+        t += 0.22;
+      } else if (e.e === 'cog') { // V 16.0: L's gears turn and the grind plays now; the {move how:'cog'} events after it slide every rider together
+        cogAt = t; this.later(t, () => this.onFx(e));
+      } else if (e.e === 'secondwind') { // V 16.0: heal at once (the HP bar follows unless the engine also sent a heal event)
+        const sw = events.some((q) => q.e === 'heal' && q.id === e.id);
+        this.later(t, () => { const d = this.disp.get(e.id); if (d && !sw && e.heal) d.hp += e.heal; this.onFx(e); });
+        t += 0.12;
+      } else if (e.e === 'reversal') {
+        this.later(t, () => this.onFx(e));
+        t += e.on !== false ? 0.45 : 0.25;
       } else {
         this.later(t, () => this.onFx(e));
       }
@@ -716,6 +728,13 @@ export class Renderer {
         break;
       case 'steadfast': { const [x, y] = at(e.id); this.floats.push({ x, y: y - 1.5, text: 'STEADFAST', t: 0, life: 1.4, color: '#9df3ff', size: 0.6 }); fx.glyph(x, y - 0.3, '#9df3ff', 'shield', 1); fx.ring(x, y + 0.8, '#9df3ff', 1.8, 0.6); this.sfx('steadfast'); break; }
       case 'bramble': { const [x, y] = at(e.id); this.floats.push({ x, y: y - 1.2, text: 'SLOWED', t: 0, life: 0.9, color: '#d58bea', size: 0.5 }); break; }
+      // V 16.0: world-space effects only (callouts/banners are D's Director lanes); sounds come from this.sfx(e) above
+      case 'overkill': { fx.event(e, at); const b = this.disp.get(e.to); if (b) this.later(0.22, () => { this.light(b.x + 0.5, b.y + 0.5, '#ff6a2a', 2, 0.4); this.hitstop(0.04); if (e.to === this.myId) this.haptic([20, 20, 40]); }); break; }
+      case 'guard': { fx.event(e, at); const [x, y] = at(e.id); this.light(x, y + 0.3, '#bcd7ff', 1.4, 0.3, 0.7); if (e.id === this.myId) this.haptic(18); break; }
+      case 'secondwind': { fx.event(e, at); const [x, y] = at(e.id); this.light(x, y + 0.5, '#6dffa8', 2.4, 0.9); if (e.id === this.myId) this.haptic([20, 30, 20]); break; }
+      case 'interest': { fx.event(e, at); const [x, y] = at(e.id), tt = this.tagTopOf(e.id); this.floats.push({ x: x + 0.05, y: Math.min(y - 0.6, tt != null ? tt : 1e9) - 0.3, text: '+' + (e.n || 1), t: 0, life: 0.9, color: '#9df3ff', size: 0.42 }); break; }
+      case 'hold': case 'tempo': case 'cog': fx.event(e, at); if (e.e === 'cog') HZ.event(this, e, at); break; // 16.0 (L): HZ turns the cog gear art
+      case 'reversal': { const B = this.bounds, cx = B ? (B.x0 + B.x1 + 1) / 2 : SIZE / 2, cy = B ? (B.y0 + B.y1 + 1) / 2 : SIZE / 2, rad = B ? Math.min(B.x1 - B.x0 + 1, B.y1 - B.y0 + 1) * 0.46 : SIZE * 0.46; if (fx.reversal) fx.reversal(e.on !== false, cx, cy, rad); this.light(cx, cy, e.on !== false ? '#a98bff' : '#ffd24d', 2.5, e.on !== false ? 1.2 : 0.7, 0.6); this.kick(e.on !== false ? 5 : 2); break; }
       default: { // A6 fx.event draws A9's hazard / world / siege-role events
         if (this.fx.event) this.fx.event(e, at);
         HZ.event(this, e, at); // B4 10.1: tile-anchored hazard art (eruption columns, rift tears, throne pulses, pit collapses)

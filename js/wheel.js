@@ -20,7 +20,7 @@ const shade = (h, k) => `rgb(${hex(h).map((v) => Math.round(k >= 0 ? v + (255 - 
 const mkC = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const FONT_D = "'Cinzel', 'Trajan Pro', Georgia, serif", FONT_U = "'Chakra Petch', system-ui, sans-serif";
-const MOODS = { citadel: '#7fe0ff', forge: '#ff5a1f', temple: '#3ddcff', gardens: '#9be3b4', ruins: '#e8b04a', works: '#ff9a3d', rift: '#b04dff', bog: '#8cff5a' };
+const MOODS = { citadel: '#7fe0ff', forge: '#ff5a1f', temple: '#3ddcff', gardens: '#9be3b4', ruins: '#e8b04a', works: '#ff9a3d', rift: '#b04dff', bog: '#8cff5a', spire: '#f5c76a' }; // 16.0 (L): + spire
 
 // ---------- location previews: the real backdrop layers painted small, with a miniature board ----------
 const PREV = new Map(); // `${id}|${w}x${h}` -> canvas | Promise
@@ -93,6 +93,13 @@ const EMBLEM = {
   ruins(g) { g.beginPath(); g.arc(0, -0.15, 0.32, Math.PI, 0); g.fill(); g.lineCap = 'round'; for (let i = 0; i < 7; i++) { const a = Math.PI + (i / 6) * Math.PI; g.beginPath(); g.moveTo(Math.cos(a) * 0.45, -0.15 + Math.sin(a) * 0.45); g.lineTo(Math.cos(a) * 0.72, -0.15 + Math.sin(a) * 0.72); g.stroke(); } g.fillRect(-0.85, -0.08, 1.7, 0.1); g.beginPath(); g.moveTo(-0.28, 0.02); g.lineTo(-0.24, 0.62); g.lineTo(0.24, 0.62); g.lineTo(0.26, 0.2); g.lineTo(0.05, 0.12); g.lineTo(0.28, 0.02); g.fill(); g.fillRect(-0.42, 0.62, 0.84, 0.14); },
   works(g) { g.beginPath(); const n = 10; for (let i = 0; i < n * 2; i++) { const a0 = (i / (n * 2)) * TAU, r = i % 2 ? 0.62 : 0.8; g.arc(0, 0, r, a0, a0 + TAU / (n * 2)); } g.closePath(); g.fill(); g.save(); g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(0, 0, 0.3, 0, TAU); g.fill(); g.restore(); },
   rift(g) { g.beginPath(); for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU - Math.PI / 2, r = i % 2 ? 0.2 : 0.82; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); } g.closePath(); g.fill(); g.beginPath(); g.ellipse(0, 0, 0.9, 0.34, -0.5, 0, TAU); g.stroke(); },
+  spire(g) { // 16.0 (L): a clock face with hands at ten to two inside a cog ring
+    g.beginPath(); const n = 12; for (let i = 0; i < n * 2; i++) { const a0 = (i / (n * 2)) * TAU, r = i % 2 ? 0.7 : 0.84; g.arc(0, 0, r, a0, a0 + TAU / (n * 2)); } g.closePath(); g.fill();
+    g.save(); g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(0, 0, 0.58, 0, TAU); g.fill(); g.restore();
+    g.lineCap = 'round'; for (let i = 0; i < 12; i++) { const a = (i / 12) * TAU, r0 = i % 3 ? 0.46 : 0.38; g.lineWidth = i % 3 ? 0.06 : 0.1; g.beginPath(); g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * 0.53, Math.sin(a) * 0.53); g.stroke(); }
+    g.lineWidth = 0.12; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.sin(-1.05) * 0.3, -Math.cos(-1.05) * 0.3); g.moveTo(0, 0); g.lineTo(Math.sin(1.05) * 0.42, -Math.cos(1.05) * 0.42); g.stroke();
+    g.beginPath(); g.arc(0, 0, 0.08, 0, TAU); g.fill();
+  },
   bog(g) { g.beginPath(); g.arc(0, -0.05, 0.62, 0, TAU); g.arc(0.26, -0.2, 0.52, 0, TAU, true); g.fill('evenodd'); g.beginPath(); g.arc(0.38, 0.42, 0.13, 0, TAU); g.fill(); g.globalAlpha *= 0.5; g.beginPath(); g.arc(0.38, 0.42, 0.24, 0, TAU); g.fill(); },
 };
 function drawEmblem(g, id, x, y, r, col, plate = true) {

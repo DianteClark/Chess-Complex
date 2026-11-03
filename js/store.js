@@ -78,7 +78,7 @@ const DESC = {
   emote: (t) => Object.values(t.emotes).map((e) => `"${e}"`).join('  '),
   banner: (t) => `Profile banner${t.pattern ? `, ${t.pattern} pattern` : ''}. Shows behind your name card.`,
 };
-const LOC_NAMES = { citadel: 'Frost Citadel', forge: 'Volcanic Forge', temple: 'Sunken Temple', gardens: 'Royal Gardens', ruins: 'Desert Ruins', works: 'Iron Works', rift: 'Astral Rift', bog: 'Witchwood Bog' };
+const LOC_NAMES = { citadel: 'Frost Citadel', forge: 'Volcanic Forge', temple: 'Sunken Temple', gardens: 'Royal Gardens', ruins: 'Desert Ruins', works: 'Iron Works', rift: 'Astral Rift', bog: 'Witchwood Bog', spire: 'Clockwork Spire' }; // 16.0 (L): + spire
 export const locName = (id) => LOC_NAMES[id] || '';
 export function item(p, kind, id) {
   const t = KINDS[kind].table[id];

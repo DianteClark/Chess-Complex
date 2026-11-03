@@ -1,5 +1,16 @@
 # Changelog
 
+## 16.0 "Tactics" (November 2026)
+- **Stat edges:** every stat now has a named secondary rule. SPD: Speed Edge (15.2). ATK: **Overkill**, damage past a kill spills 50% into the attacker's nearest enemy adjacent to the victim (players only, one hop). DEF: **Guard**, a single hit takes at most (60 - DEF)% of max HP, floor 35% (players and the King; not ticks, storm or Hollows). HP: **Second Wind**, once per match a hit that leaves you under 25% heals 10% max HP + 1 per HP point (not the crowned King). Damage previews and bot estimates respect Guard.
+- **Hold:** `{type:'hold'}` on your turn before moving, acting or using an ability, once per round, not while frozen or stunned: you act after everyone still waiting; next round starts 3 SPD later. Held turns don't re-tick statuses or cooldowns. Bots hold ~2% of turns.
+- **Shard Interest:** +1 shard per 5 held at the start of each round (max +2; not the King).
+- **Tempo equips:** Seize (Knight, 1000 Marks), Hourglass (Bishop, 1200), Anchor (Rook, 1000), Time Fracture (Queen, 1500).
+- **Clockwork Spire** (9th location): clock-tower backdrop, spire music theme, sparks weather, **Cogwheels** hazard (2x2 gears carry pieces one step clockwise at round end) and the **Reversal** signature event (slowest first for one round, telegraphed a round early).
+- **UI:** Hold button (H key), turn strip round dividers, held badges and REVERSED tag; Overkill / Guarded / Second Wind / Hold / Reversal callouts through the director lanes; interest shown on the shard counter; stat edges on the loadout, inspect panel, Codex and How to Play.
+- **FX/audio** for every new event (overkill arc, guard plate, second wind updraft, hourglass, rewind sweep, gear grind), reduced-motion and low-quality variants.
+- **Balance** (800 8-bot Royales): roads Pawn 14.5%, Rook 13.3%, Ascend 11.5%, Queen 11.5%; King 38.3%; presets 22-27%. KING_T.hp 1.06; Champion cost 7, HP 98; Assassin 2/4/0/4; Bruiser 4/4/2/0; Siege c0 1.5, boss 0.84.
+- **Tools:** sim runner no longer skips back-to-back turns (affected Siege/Gauntlet baselines); new tests/q16/engine16.mjs; Hold and Reversal in tests/turns/order.mjs.
+
 ## 15.2 (November 2026)
 - **Turns (Engine):** the speed-gauge system let fast pieces act twice before slow ones acted once, and every match started with a random 0-40% gauge, so a slow piece could move first. Turns are now round-based: every living unit acts exactly once per round, highest SPD first, ties broken by a seeded coin flip each round. Stagger, brambles, Haste pickups, Rally and revives still nudge order (up to 6 SPD's worth) until the unit acts. New test tests/turns/order.mjs: 0 double turns and 0 order inversions over 14k turns in every mode.
 - **Speed Edge:** with one turn per round, SPD lost most of its value (0-SPD Bruiser won 32% vs ~22% for the rest). SPD now also gives +3% damage per point over the target and -3% per point under (cap 15%). Presets now win 24-27% each.

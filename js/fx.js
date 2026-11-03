@@ -192,6 +192,7 @@ export class FX {
     // 15.0: status auras, crown telegraph, boss aura, finisher actors
     this.st = new Map(); this.stLog = new Map(); this.known = new Map(); this.kingId = null; this.kingRage = 0; this.warn = null;
     this.crystals = []; this.tentacles = []; this.skulls = []; this.flyCrowns = []; this.wings = []; this.halos = []; this.sweeps = [];
+    this.fx16 = []; // 16.0: hourglass flips, guard caps, Reversal clock sweeps, tempo streaks / ripples, interest shards
   }
   after(t, fn) { if (t <= 0) fn(); else this.pending.push({ at: this.time + t, fn }); }
   get calm() { if (this.reduced != null) return !!this.reduced; return typeof document !== 'undefined' && !!document.body && document.body.classList.contains('reduced'); }
@@ -1067,6 +1068,7 @@ export class FX {
   event(e, at = () => [0, 0]) {
     const base = (id) => { const [x, y] = at(id); return [x, y + 0.86]; };
     this.at = at;
+    if (this.event16(e, at)) return true;
     if (this.event15(e, at)) return true;
     switch (e.e) {
       case 'hazard':
@@ -1948,7 +1950,7 @@ Object.assign(FX.prototype, {
       if (w.t > 240) this.warn = null;
     }
     const step = (a) => { let n = 0; for (const p of a) { p.t += dt; if (p.t < p.life) a[n++] = p; } a.length = n; };
-    step(this.crystals); step(this.tentacles); step(this.skulls); step(this.wings); step(this.halos); step(this.sweeps);
+    step(this.crystals); step(this.tentacles); step(this.skulls); step(this.wings); step(this.halos); step(this.sweeps); step(this.fx16);
     for (const c of this.flyCrowns) {
       c.t += dt; if (c.t < 0) continue;
       c.x += c.vx * dt; c.y += c.vy * dt; c.vy += 11 * dt; c.rot += c.vr * dt;
@@ -1991,6 +1993,7 @@ Object.assign(FX.prototype, {
       ctx.globalAlpha = 0.5 * pulse; ctx.drawImage(glowSprite('#ffd24d'), w.x - 1.3, w.y - 0.55, 2.6, 1.1);
     }
     ctx.restore();
+    if (this.fx16.length) this.drawGround16(ctx);
   },
   drawAbove15(ctx) { // status auras, the crown telegraph column
     const T = this.time, calm = this.calm, lowQ = this.lowQ;
@@ -2050,6 +2053,7 @@ Object.assign(FX.prototype, {
       ctx.save(); ctx.translate(w.x, w.y - 1.35 + bob); ctx.scale(0.9, 0.9); crownShape(ctx, !this.lowQ, 0.75); ctx.restore();
     }
     ctx.restore();
+    if (this.fx16.length) this.drawAbove16(ctx);
   },
   drawActors15(ctx) {
     const T = this.time, lowQ = this.lowQ;
@@ -2447,5 +2451,174 @@ const FIN15 = {
     });
   },
 };
+
+// ---------------------------------------------------------------------------------------------------------------
+// V 16.0 "Tactics": stat identities (Overkill, Guard, Second Wind), Hold, Shard Interest, tempo equips, the Clockwork
+// Spire's Reversal and Cogwheels. Everything here is transient (fx16 items live 0.4-1.6 s); nothing draws per frame
+// unless an item is alive. Reduced motion: no spins / sweeps (static glyphs fade in and out), fewer particles.
+const OVK = '#ff6a2a', OVK2 = '#ffd27a', GUARD = '#bcd7ff', WIND = '#6dffa8', SHARD = '#9df3ff', BRASS = '#e8b04a', TEMPO1 = '#ffd24d', TEMPO2 = '#a98bff';
+Object.assign(FX.prototype, {
+  // world y just above the unit's head and its screen-space name tag (R's tagTop), like the 15.0 head glyphs
+  head16(id, b) { const tt = id != null && this.tagTop ? this.tagTop(id) : null; return Math.min(b - 1.42, tt != null ? tt : 1e9) - 0.05; },
+  base16(id) { const p = this.posOf(id); return p ? [p[0], p[1] + 0.86] : null; },
+  event16(e) {
+    switch (e.e) {
+      case 'overkill': this.overkill(e); return true;
+      case 'guard': { const p = this.base16(e.id); if (p) this.guardCap(p[0], p[1], e.saved || 0); return true; }
+      case 'secondwind': { const p = this.base16(e.id); if (p) this.secondWind(p[0], p[1]); return true; }
+      case 'interest': { const p = this.base16(e.id); if (p) this.interest(p[0], p[1], e.n || 1, e.id); return true; }
+      case 'hold': { const p = this.base16(e.id); if (p) this.hourglass(p[0], p[1], e.id); return true; }
+      case 'reversal': this.reversal(e.on !== false); return true;
+      case 'world': if (e.kind === 'reversal') { if (e.phase === 'warn') this.fx16.push({ k: 'clock', x: SIZE / 2, y: SIZE / 2, r: SIZE * 0.46, dir: -0.06, t: 0, life: 1.3, col: TEMPO2 }); return true; } return false; // the telegraph: a faint dial, the hand twitches back
+      case 'cog': for (const m of e.moves || []) this.cogMove(m); return true;
+      case 'tempo': { const p = this.base16(e.id); if (p) (e.k === 'last' ? this.tempoLast : this.tempoFirst).call(this, p[0], p[1]); return true; }
+    }
+    return false;
+  },
+  // ATK Overkill: the spill leaves the victim as an energy arc and slams into the splash target
+  overkill(e) {
+    const a = this.base16(e.from), b = this.base16(e.to); if (!a || !b) return;
+    const A = { x: a[0], y: a[1] - 0.55 }, Bp = { x: b[0], y: b[1] - 0.5 }, d = Math.hypot(Bp.x - A.x, Bp.y - A.y), arc = Math.min(1.1, 0.45 + d * 0.25), life = 0.22;
+    this.flare(A.x, A.y, OVK2, 1.3, 0.2); this.burst(A.x, A.y, OVK, 12, 3); this.ring(a[0], a[1], OVK, 1.4, 0.35, 0.07);
+    this.proj(A, Bp, OVK, life, arc, 0.16);
+    if (!this.lowQ) { this.ribbon((k) => ({ x: A.x + (Bp.x - A.x) * k, y: A.y + (Bp.y - A.y) * k - Math.sin(k * Math.PI) * arc }), '#ffffff', life, 0.06, 10, 0); this.stream(A, Bp, OVK2, 8, life + 0.08, 0.25); }
+    this.after(life, () => {
+      this.impact(Bp.x, Bp.y, OVK, 0.9); this.spray(Bp.x, Bp.y, OVK2, 12, 4, Math.atan2(Bp.y - A.y, Bp.x - A.x), 0.7);
+      this.ring(b[0], b[1], OVK, 1.8, 0.4, 0.08); this.light(b[0], b[1] - 0.3, OVK, 1.8, 0.4); this.impactFrame(Bp.x, Bp.y, OVK2, 0.12, 18); this.kickCam(4);
+    });
+  },
+  // DEF Guard: the hit meets a ceiling: a steel plate slams down over the defender, sparks shear off it
+  guardCap(x, b, saved = 0) {
+    const y = b - 1.05, w = 0.42 + Math.min(0.2, saved / 60);
+    this.fx16.push({ k: 'cap', x, y, w, t: 0, life: 0.55 });
+    this.glyph(x, b - 0.6, GUARD, 'shield', 0.5); this.flare(x, y, '#ffffff', 0.9, 0.14);
+    for (const s of [-1, 1]) this.spray(x + s * w, y, '#e8f2ff', 5, 3.2, s > 0 ? -0.3 : Math.PI + 0.3, 0.5);
+    this.light(x, y, GUARD, 1.3, 0.25); this.kickCam(2);
+  },
+  // HP Second Wind: a green updraft lifts the piece back up
+  secondWind(x, b) {
+    const N = this.n(this.calm ? 10 : 22);
+    for (let i = 0; i < N; i++) this.spawn({ kind: 'spark', x: x + rnd(-0.38, 0.38), y: b - rnd(0, 0.3), vx: rnd(-0.15, 0.15), vy: -rnd(1.6, 3.2), g: -1.2, drag: 0.6, life: rnd(0.55, 0.95), color: i % 3 ? WIND : '#eafff2', size: rnd(0.03, 0.055), t: -Math.random() * 0.25 });
+    if (!this.calm) this.orbit(x, b - 0.2, WIND, 8, 0.45, 0.9, -1.4, 7);
+    this.pillar(x, b, WIND, 0.55, 0.8, 4); this.ring(x, b, WIND, 1.8, 0.5, 0.08); this.ring(x, b, '#eafff2', 1.1, 0.4, 0.05, 0.12);
+    this.glyph(x, b - 1.1, WIND, 'heal', 0.8); this.flare(x, b - 0.7, '#eafff2', 1, 0.25);
+  },
+  // Shard Interest: a quiet shard tick over each player that earned it
+  interest(x, b, n = 1, id = null) {
+    const hy = this.head16(id, b);
+    this.fx16.push({ k: 'shard', x, y: hy - 0.12, n, t: 0, life: 0.8 });
+    this.burst(x - 0.25, hy - 0.15, SHARD, 2 + n, 0.8, 'spark');
+  },
+  // Hold: an hourglass flips over the piece (it goes to the back of the round)
+  hourglass(x, b, id = null) {
+    this.fx16.push({ k: 'glass', id, x, y: this.head16(id, b) - 0.42, t: 0, life: 1.2 });
+    this.ring(x, b, BRASS, 1.3, 0.5, 0.05, 0, true);
+    if (!this.lowQ) this.after(0.35, () => this.burst(x, this.head16(id, b) - 0.42, '#ffe9a8', 4, 0.6, 'dust'));
+  },
+  // Reversal on: a clock hand sweeps the board backwards (anticlockwise); off: it sweeps forward and the order rights itself
+  reversal(on, cx = SIZE / 2, cy = SIZE / 2, r = SIZE * 0.46) { // cx/cy/r: the playable board (render passes the arena bounds)
+    this.fx16.push({ k: 'clock', x: cx, y: cy, r, dir: on ? -1 : 1, t: 0, life: on ? 1.5 : 1.1, col: on ? TEMPO2 : TEMPO1, on });
+    this.ring(cx, cy, on ? TEMPO2 : TEMPO1, r * 1.6, on ? 1 : 0.7, 0.12, 0, on);
+    if (on) this.flash(0.18, '#3a2a6a');
+    this.kickCam(on ? 4 : 2);
+  },
+  // Cogwheels: the piece rides one cog clockwise; brass teeth grind under it
+  cogMove(m) {
+    const ax = m.fx + 0.5, ay = m.fy + 0.86, bx = m.x + 0.5, by = m.y + 0.86;
+    // (the gear itself is L's tile art in hazards10.js, which makes a quarter turn on the same event)
+    const ang = Math.atan2(by - ay, bx - ax);
+    this.spray(ax, ay - 0.05, '#ffd27a', 6, 2.6, ang + Math.PI, 0.6); this.burst(ax, ay, '#b9a27e', 4, 0.8, 'dust');
+    this.after(this.calm ? 0.85 : 0.5, () => { this.spray(bx, by - 0.05, '#ffd27a', 5, 2.2, ang, 0.6); this.burst(bx, by, '#b9a27e', 3, 0.7, 'dust'); });
+  },
+  // tempo equips: 'first' = a golden forward streak (acts first next round), 'last' = a violet slow-down ripple
+  tempoFirst(x, b) {
+    const N = this.n(this.calm ? 6 : 14);
+    for (let i = 0; i < N; i++) { const yy = b - rnd(0.15, 1.2); this.spawn({ kind: 'spark', x: x - rnd(0.6, 1.2), y: yy, vx: rnd(6, 9), vy: 0, g: 0, drag: 2.5, life: rnd(0.25, 0.4), color: i % 3 ? TEMPO1 : '#ffffff', size: rnd(0.03, 0.05), t: -Math.random() * 0.15 }); }
+    this.fx16.push({ k: 'streak', x, y: b, t: 0, life: 0.6 });
+    this.flare(x, b - 0.7, '#fff2c0', 1.2, 0.22); this.glyph(x, b - 1.2, TEMPO1, 'speed', 0.7); this.ring(x, b, TEMPO1, 1.6, 0.35, 0.07);
+  },
+  tempoLast(x, b) {
+    for (let i = 0; i < 3; i++) this.ring(x, b, i ? TEMPO2 : '#e2d6ff', 1.5 + i * 0.6, 1 + i * 0.25, 0.06 - i * 0.012, i * 0.22);
+    this.fx16.push({ k: 'ripple', x, y: b, t: 0, life: 1.3 });
+    this.glyph(x, b - 1.2, TEMPO2, 'slow', 0.9);
+    const N = this.n(this.calm ? 4 : 10);
+    for (let i = 0; i < N; i++) this.spawn({ kind: 'spark', x: x + rnd(-0.4, 0.4), y: b - rnd(0.3, 1.3), vx: 0, vy: rnd(0.15, 0.4), g: 0, drag: 0.4, life: rnd(0.8, 1.2), color: i % 2 ? TEMPO2 : '#e2d6ff', size: rnd(0.03, 0.05) });
+  },
+  drawGround16(ctx) {
+    const calm = this.calm, lowQ = this.lowQ, T = this.time;
+    ctx.save();
+    for (const f of this.fx16) {
+      if (f.t < 0) continue;
+      const k = f.t / f.life, fade = Math.min(1, k * 6) * (k > 0.7 ? (1 - k) / 0.3 : 1);
+      if (f.k === 'clock') { // board-wide clock face: 12 ticks, a hand sweeping (anticlockwise for Reversal) with a fading wedge
+        const r = f.r, e = calm ? 0 : (1 - Math.pow(1 - Math.min(1, k / 0.85), 3)), a0 = -Math.PI / 2, a = a0 + f.dir * e * TAU;
+        ctx.save(); ctx.translate(f.x, f.y);
+        ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = f.col; ctx.lineCap = 'round';
+        ctx.globalAlpha = fade * 0.3; ctx.lineWidth = 0.08; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+        for (let i = 0; i < 12; i++) { const an = i / 12 * TAU, L = i % 3 ? 0.45 : 0.9; ctx.globalAlpha = fade * (i % 3 ? 0.45 : 0.75); ctx.lineWidth = i % 3 ? 0.08 : 0.16; ctx.beginPath(); ctx.moveTo(Math.cos(an) * (r - L), Math.sin(an) * (r - L)); ctx.lineTo(Math.cos(an) * r, Math.sin(an) * r); ctx.stroke(); }
+        if (!calm) {
+          if (!lowQ) { const span = Math.min(1.4, e * TAU); ctx.globalAlpha = fade * 0.2; ctx.fillStyle = f.col; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, r, a, a - f.dir * span, f.dir > 0); ctx.closePath(); ctx.fill(); }
+          ctx.globalAlpha = fade * 0.85; ctx.lineWidth = 0.22; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); ctx.stroke();
+          ctx.globalAlpha = fade * 0.6; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.05; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); ctx.stroke();
+        } else { ctx.globalAlpha = fade * 0.5; ctx.lineWidth = 0.12; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -r * 0.8); ctx.moveTo(0, 0); ctx.lineTo(r * 0.45 * -f.dir, 0); ctx.stroke(); }
+        ctx.globalAlpha = fade * 0.8; ctx.fillStyle = f.col; ctx.beginPath(); ctx.arc(0, 0, 0.18, 0, TAU); ctx.fill();
+        ctx.restore();
+      } else if (f.k === 'ripple') { // slow time: a soft violet pool under the piece
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = fade * 0.35; ctx.drawImage(glowSprite(TEMPO2), f.x - 0.9, f.y - 0.38, 1.8, 0.76);
+      } else if (f.k === 'streak') {
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = fade * 0.4; ctx.drawImage(glowSprite(TEMPO1), f.x - 0.8, f.y - 0.34, 1.6, 0.68);
+      }
+    }
+    ctx.restore();
+  },
+  drawAbove16(ctx) {
+    const calm = this.calm, lowQ = this.lowQ;
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const f of this.fx16) {
+      if (f.t < 0) continue;
+      const k = f.t / f.life, fade = Math.min(1, k * 8) * (k > 0.65 ? (1 - k) / 0.35 : 1);
+      if (f.k === 'cap') { // a plate slams down to the cap line, flashes white, then settles
+        const drop = calm ? 0 : Math.max(0, 1 - k / 0.12) * 0.35, y = f.y - drop, hot = Math.max(0, 1 - k / 0.3);
+        if (!lowQ) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = fade * (0.35 + 0.5 * hot); ctx.drawImage(glowSprite(GUARD), f.x - f.w * 1.6, y - 0.3, f.w * 3.2, 0.6); }
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = fade;
+        ctx.fillStyle = hot > 0.4 ? '#ffffff' : '#dbe8ff'; ctx.strokeStyle = '#3a4a6a'; ctx.lineWidth = 0.025;
+        ctx.beginPath(); ctx.moveTo(f.x - f.w, y - 0.05); ctx.lineTo(f.x + f.w, y - 0.05); ctx.lineTo(f.x + f.w - 0.06, y + 0.05); ctx.lineTo(f.x - f.w + 0.06, y + 0.05); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = GUARD; ctx.lineWidth = 0.035; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(f.x + s * f.w, y - 0.14); ctx.lineTo(f.x + s * f.w, y + 0.12); ctx.stroke(); }
+      } else if (f.k === 'glass') { // hourglass: flips 180 degrees, sand pours into the top half
+        const flip = calm ? 1 : Math.min(1, Math.max(0, (k - 0.1) / 0.3)), e = flip * flip * (3 - 2 * flip), rot = e * Math.PI, sand = Math.min(1, Math.max(0, (k - 0.4) / 0.5));
+        if (f.id != null) { const p = this.posOf(f.id); if (p) { f.x = p[0]; f.y = this.head16(f.id, p[1] + 0.86) - 0.42; } } // follows the piece and its tag
+        ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(rot); ctx.scale(1.55, 1.55);
+        if (!lowQ) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = fade * 0.45; ctx.drawImage(glowSprite(BRASS), -0.4, -0.4, 0.8, 0.8); }
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = fade;
+        // glass body
+        ctx.fillStyle = 'rgba(30,22,40,0.75)'; ctx.strokeStyle = '#fff1d0'; ctx.lineWidth = 0.025;
+        ctx.beginPath(); ctx.moveTo(-0.13, -0.2); ctx.lineTo(0.13, -0.2); ctx.lineTo(0.02, 0); ctx.lineTo(0.13, 0.2); ctx.lineTo(-0.13, 0.2); ctx.lineTo(-0.02, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+        // sand starts in the local bottom half; once flipped (local bottom = screen top) it drains through the neck into
+        // the local top half (= screen bottom), piling against that cap
+        ctx.fillStyle = '#ffd27a';
+        const top = calm ? 0.45 : sand, bot = calm ? 0.55 : 1 - sand; // local "top" half is y<0
+        if (top > 0.02) { const h = 0.17 * top; ctx.beginPath(); ctx.moveTo(-0.12, -0.19); ctx.lineTo(0.12, -0.19); ctx.lineTo(0.12 - 0.09 * top, -0.19 + h); ctx.lineTo(-0.12 + 0.09 * top, -0.19 + h); ctx.closePath(); ctx.fill(); }
+        if (bot > 0.02) { const h = 0.17 * bot; ctx.beginPath(); ctx.moveTo(-0.015, 0.01); ctx.lineTo(0.015, 0.01); ctx.lineTo(0.11 * bot + 0.02, 0.01 + h); ctx.lineTo(-0.11 * bot - 0.02, 0.01 + h); ctx.closePath(); ctx.fill(); }
+        if (!calm && flip >= 1 && sand < 1) { ctx.fillRect(-0.008, -0.18, 0.016, 0.18); }
+        // brass caps
+        ctx.fillStyle = BRASS; ctx.fillRect(-0.17, -0.24, 0.34, 0.05); ctx.fillRect(-0.17, 0.19, 0.34, 0.05);
+        ctx.restore();
+      } else if (f.k === 'shard') { // tiny rising shard diamond + "+n"
+        const y = f.y - (calm ? 0 : k * 0.35);
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = fade * 0.95; ctx.fillStyle = SHARD; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.015;
+        ctx.beginPath(); ctx.moveTo(f.x - 0.32, y - 0.1); ctx.lineTo(f.x - 0.25, y - 0.2); ctx.lineTo(f.x - 0.18, y - 0.1); ctx.lineTo(f.x - 0.25, y + 0.02); ctx.closePath(); ctx.fill(); ctx.stroke(); // the "+n" is render's float beside it
+      } else if (f.k === 'streak' && !calm) { // three gold speed lines wipe forward through the piece
+        ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = TEMPO1;
+        for (let i = 0; i < 3; i++) { const kk = Math.min(1, Math.max(0, k * 1.6 - i * 0.12)), x1 = f.x - 0.9 + kk * 1.8, L = 0.7 * Math.sin(kk * Math.PI), yy = f.y - 0.35 - i * 0.32; ctx.globalAlpha = fade * 0.9 * Math.sin(kk * Math.PI); ctx.lineWidth = 0.06 - i * 0.012; ctx.beginPath(); ctx.moveTo(x1 - L, yy); ctx.lineTo(x1, yy); ctx.stroke(); }
+      } else if (f.k === 'ripple' && !lowQ) { // slow-down: a violet clock dial behind the piece, its hand dragging to a stop
+        const a = -Math.PI / 2 + (calm ? 0 : (1 - Math.pow(1 - Math.min(1, k / 0.8), 4)) * Math.PI * 0.8), cy = f.y - 0.75;
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = fade * 0.5; ctx.strokeStyle = TEMPO2; ctx.lineWidth = 0.035;
+        ctx.beginPath(); ctx.ellipse(f.x, cy, 0.5, 0.5, 0, 0, TAU); ctx.stroke();
+        ctx.globalAlpha = fade * 0.75; ctx.lineWidth = 0.05; ctx.beginPath(); ctx.moveTo(f.x, cy); ctx.lineTo(f.x + Math.cos(a) * 0.4, cy + Math.sin(a) * 0.4); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  },
+});
 
 export { skinOf };
