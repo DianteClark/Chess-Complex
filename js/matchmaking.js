@@ -42,6 +42,7 @@ export function onScreen(name) {
   if (name === 'host') { const r = $('#mm-pub-row'); if (r) r.classList.add('hidden'); }
   if (name !== 'join' && name !== 'game' && Q.active) stop(); // left the Quick Play lobby (Back -> leave-lobby already parted)
   if (name === 'join' && !Q.active) clearCard();
+  if (name === 'title' || name === 'play') { partyNote('', 'mm-host-note', ''); partyNote('', 'mm-join-note', ''); } // 17.1.1: never left over in a later (PeerJS) lobby
 }
 // Play screen: Quick Play only for party-playable modes (not Daily)
 export function onPlay(mode) {
@@ -127,6 +128,9 @@ export function lobby(sess, m) {
     return;
   }
   if (Q.active && Q.code === m.code) { Q.active = false; Q.cdAt = 0; clearCard(); } // the match ended: now a normal party
+  // 17.1.1: a party that came from Quick Play says so (same players, private, nobody new is matched into it)
+  partyNote('#s-host .code-panel', 'mm-host-note', m.fromQp && sess.lead ? 'Your Quick Play group: same players, now a private party. Start a rematch when everyone is ready, or switch to Public to fill the open seats.' : '');
+  partyNote('#join-lobby-panel', 'mm-join-note', m.fromQp && !sess.lead ? 'Your Quick Play group: same players, now a private party. Ready up for a rematch, or tap Back and Quick Play again.' : '');
   const row = $('#mm-pub-row'), btn = $('#mm-pub'), note = $('#mm-pub-note');
   if (!row) return;
   const show = !!(sess.cloud && sess.lead);
@@ -134,6 +138,13 @@ export function lobby(sess, m) {
   const live = !!(m.party && m.party.live);
   btn.setAttribute('aria-checked', String(!!m.pub)); btn.classList.toggle('on', !!m.pub); btn.disabled = live;
   note.textContent = m.pub ? 'Public: listed in Browse. Anyone can join while seats are free.' : 'Private: only players with the code can join.';
+}
+function partyNote(parentSel, id, text) {
+  let n = document.getElementById(id);
+  if (!text) { if (n) n.remove(); return; }
+  const host = $(parentSel); if (!host) return;
+  if (!n) { n = document.createElement('p'); n.id = id; n.className = 'mm-party-note'; n.setAttribute('role', 'status'); const lbl = host.querySelector('.lbl'); host.insertBefore(n, lbl ? lbl.nextSibling : host.firstChild); }
+  n.textContent = text;
 }
 function paintCd() {
   const el = $('#mm-cd'); if (!el || !Q.cdAt) return;

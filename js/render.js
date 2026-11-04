@@ -14,6 +14,7 @@ import { NET } from './net.js'; // R 15.1: NET.backlog lets the host's bots wait
 const ease = (t) => 1 - Math.pow(1 - t, 3);
 // R2 17.0 (player: "speeding past attacks and damage dealt, we miss that info"): readout timing, in timeline seconds
 const READ_MIN = 1.6, READ_NUM = 2.1, READ_HOLD = 0.85, READ_STACK = 4;
+const READ_MERGE = 0.6; // 17.2 (D3): same-kind numbers on one piece within this many timeline s merge into one
 const READ_EV = { dmg: 1, heal: 1, status: 1, stagger: 1, secondwind: 1, guard: 1, overkill: 1, resist: 1, steadfast: 1 };
 const easeBack = (t) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -237,8 +238,32 @@ export class Renderer {
   // unit at once: a newer one sends the oldest into its fade, so a multi-hit never piles a tower of numbers
   read(id, f) {
     f.t = 0; f.ro = 1; f.uid = id; f.life = Math.max(f.life || 0, READ_NUM); f.L = 1;
+    // 17.2 (D3): one number per target per action. A number of the same kind (prefix + colour) on this piece within
+    // READ_MERGE s adds into it (x2 tag); a tag-only holder (GUARD / OVERKILL arrive before their hit) takes the number
+    const m = /^(\D*?)(\d+)$/.exec(f.text || '');
+    if (m) {
+      const mk = m[1] + f.color;
+      for (let i = this.floats.length - 1; i >= 0; i--) {
+        const q = this.floats[i]; if (q.uid !== id || !q.ro || q.t > READ_MERGE) continue;
+        if (q.mk === mk) { q.n += +m[2]; q.hits = (q.hits || 1) + 1; q.text = m[1] + q.n; q.size = Math.max(q.size, f.size); q.t = Math.min(q.t, 0.06); q.crit = q.crit || f.crit; this.tag(id, '', null, q); return; }
+        if (q.hold && !q.text) { Object.assign(q, { text: f.text, color: f.color, size: f.size, rot: f.rot, crit: f.crit, mk, n: +m[2], t: 0, hold: 0 }); return; }
+      }
+      f.mk = mk; f.n = +m[2];
+    }
     let n = 0; for (let i = this.floats.length - 1; i >= 0; i--) { const q = this.floats[i]; if (q.uid === id && q.ro && q.t < q.life - 0.35 && ++n >= READ_STACK) q.t = q.life - 0.35; }
     this.floats.push(f);
+  }
+  // 17.2 (D3): a small tag (CRIT, GUARD 14, OVERKILL, SECOND WIND, EXPOSED x2, HOLD...) under this piece's latest
+  // readout instead of a float of its own; no live readout yet = a tag-only holder the next number moves into.
+  // text '' + q = refresh the hit-count tag of q. Max 3 tags; a tag with the same word replaces the older one.
+  tag(id, text, color, q, pre) {
+    if (!q) for (let i = this.floats.length - 1; i >= 0; i--) { const f = this.floats[i]; if (f.uid === id && f.ro && (pre ? f.hold || f.t < 0.05 : f.t < 1.2)) { q = f; break; } }
+    if (!q) { const d = this.disp.get(id); if (!d) return; q = { x: d.x + 0.5, y: d.y - 0.9, text: '', t: 0, life: READ_NUM, color: '#fff', size: 1, hold: 1 }; this.read(id, q); }
+    const tg = q.tags || (q.tags = []);
+    if (!text) { if (q.hits > 1) { const o = tg.find((x) => x.k === 'hits'); if (o) o.text = 'x' + q.hits; else tg.unshift({ k: 'hits', text: 'x' + q.hits, color: '#ffe9a8' }); } return; }
+    const k = text.split(' ')[0], o = tg.find((x) => x.k === k);
+    if (o) { o.text = text; o.color = color; } else if (tg.length < 3) tg.push({ k, text, color });
+    if (q.t > 0.5) q.t = 0.5; // a fresh tag keeps the cluster up a little longer
   }
   // R2 17.0: is a hit readout still being read (camdir keeps the pace at 1x while one is up)
   readoutOn() { for (const f of this.floats) if (f.ro && f.t < f.life - 0.4) return true; return false; }
@@ -493,7 +518,7 @@ export class Renderer {
         this.later(t, () => this.onFx(e));
       }
     }
-    if (hits >= 2 && lastAb) this.later(t, () => { const a = events.find((q) => q.e === 'ability'); if (a) this.floats.push({ x: a.anchor.x + 0.5, y: a.anchor.y - 1, text: `${hits} HITS`, t: 0, life: 1.1, color: '#ffd24d', size: 0.75 }); });
+    // 17.2 (D3): the "N HITS" float is gone: each target's number carries its own x-count and the action line the total
     // safety sync after the sequence plays
     this.later(t + 0.15, () => {
       if (this.fx.statusSync) this.fx.statusSync(this.state.units, this.state); // V 15.0 (R: in step with the sequence)
@@ -535,7 +560,7 @@ export class Renderer {
     const big = e.crit || e.n >= 25;
     this.read(e.id, { x: x + (n > 1 ? (Math.random() - 0.5) * 0.4 : 0), y: y - 0.9, text: String(e.n), t: 0, life: 1.15, color: e.lava ? '#ff9a3d' : e.trap ? '#ffb86b' : e.storm ? '#ff6b6b' : e.thorns ? '#b6ff7a' : e.crit ? '#ffd24d' : '#ffffff', size: big ? 1.4 : 1, crit: e.crit, rot: (Math.random() - 0.5) * 0.3 });
     if (e.lava) { fxHit(); this.light(x, y + 0.6, '#ff8a3d', 1.6, 0.35); this.hitFlash.set(e.id, 1); d.recoil = null; this.kick(3); this.sfx('sizzle'); if (e.id === this.myId) { this.haptic(30); this.hurt = 1; } return; }
-    if (e.crit) this.floats.push({ x, y: y - 1.45, text: 'CRITICAL', t: 0, life: 1.9, L: 1, color: '#ffd24d', size: 0.55 }); // R2 17.0: a tag on the number, not a readout of its own (does not count toward the stack cap)
+    if (e.crit) this.tag(e.id, 'CRIT', '#ffd24d'); // 17.2 (D3): a tag under the (merged) number
     this.hitFlash.set(e.id, 1);
     d.recoil = { t0: this.time, src: e.src };
     fxHit();
@@ -571,6 +596,8 @@ export class Renderer {
     this.sfx(e); // AU 15.0: audio.js voices the new event objects (status, boss King, location...) and ignores the rest
     const fx = this.fx, s = this.state;
     const at = (id) => { const d = this.disp.get(id); return d ? [d.x + 0.5, d.y] : [0, 0]; };
+    // 17.2 (D3): the 16.0 edge words ride as tags on the piece's number (guard / overkill come before their hit: pre)
+    if (e.e === 'guard' && e.saved > 0) this.tag(e.id, 'GUARD ' + e.saved, '#8fc0ff', null, 1); else if (e.e === 'overkill') this.tag(e.to, 'OVERKILL', '#ff8a5c', null, 1); else if (e.e === 'secondwind') this.tag(e.id, 'SECOND WIND', '#6dffa8'); else if (e.e === 'hold') this.tag(e.id, 'HOLD', '#e8c87a');
     switch (e.e) {
       case 'heal': { const [x, y] = at(e.id); const d = this.disp.get(e.id); if (d) d.hp += e.n; this.read(e.id, { x, y: y - 0.9, text: '+' + e.n, t: 0, life: 1, color: '#6dffa8', size: 0.9 }); fx.burst(x, y + 0.4, '#6dffa8', 10, 1.5, 'up'); if (e.id === this.myId) this.sfx('heal'); break; }
       case 'aoe': for (const t of e.tiles) fx.flashTile(t.x, t.y, e.kind === 'hit' ? '#ff5d5d' : '#7fe0ff'); break;
@@ -609,7 +636,7 @@ export class Renderer {
           this.kick(14); this.sfx('storm'); this.haptic([60, 40, 120]);
         } else { this.kick(5); this.sfx(e.phase === 'crack' ? 'storm:crack' : 'warn'); }
         break;
-      case 'stagger': { const [x, y] = at(e.id); this.read(e.id, { x, y: y - 1.25, text: 'STAGGERED', t: 0, life: 1.8, color: '#c9a6ff', size: 0.55 }); break; }
+      case 'stagger': { this.tag(e.id, 'STAGGERED', '#c9a6ff'); break; } // 17.2 (D3): tag on the hit
       case 'buff': { const [x, y] = at(e.id); fx.ring(x, y + 0.8, e.k === 'atk' ? '#ff4a2a' : e.k === 'def' ? '#7fb6ff' : e.k === 'spd' || e.k === 'move' ? '#ffe04d' : e.k === 'heal' ? '#6dffa8' : '#ffffff', 1.5, 0.6); this.sfx('buff'); break; }
       case 'rampart': fx.burst(e.x + 0.5, e.y + 0.6, '#b8b2c8', 14, 3, 'chunk'); fx.shock(e.x + 0.5, e.y + 0.6, 'rgba(200,190,220,0.4)', 0.9); this.kick(5); this.sfx('rampart'); break;
       case 'crownSpawn': this.light(e.x + 0.5, e.y + 0.5, '#ffd24d', 4, 1.6); fx.crownSpawn(e.x + 0.5, e.y + 0.62); this.kick(6); this.sfx('crownspawn'); break;
@@ -759,7 +786,7 @@ export class Renderer {
           if (d) { this.shot(d.x, d.y, 1.22, 1.1, 'shot', e.id); this.light(d.x + 0.5, d.y + 0.6, hard ? '#ff2a3a' : '#ffb03d', 4.2, 1.1); this.floats.push({ x: d.x + 0.5, y: d.y - 1.6, text: hard ? 'FINAL PHASE' : 'PHASE TWO', t: 0, life: 1.6, color: hard ? '#ff5a5a' : '#ffc46b', size: 0.8 }); }
           this.kick(hard ? 14 : 10); this.hitstop(0.1); this.slowmo(0.35, 0.8); this.punch = Math.max(this.punch, 0.14); this.fx.flash(hard ? 0.45 : 0.3, hard ? '#ff2a3a' : '#ffb03d'); this.haptic([60, 40, 100]);
         }
-        if (e.e === 'status' && e.k === 'exposed' && e.on !== false) { const d = this.disp.get(e.id); if (d) this.read(e.id, { x: d.x + 0.5, y: d.y - 1.3, text: `EXPOSED x${e.n || 1}`, t: 0, life: 1.8, color: '#ff6b6b', size: 0.6 }); }
+        if (e.e === 'status' && e.k === 'exposed' && e.on !== false) { this.tag(e.id, `EXPOSED x${e.n || 1}`, '#ff6b6b'); } // 17.2 (D3): tag on the hit
         const SN = { split: 'split', shieldBreak: 'shieldbreak', summon: 'summon', bountyClaim: 'bountyclaim', enrage: 'enrage' };
         if (e.e === 'hazard' && e.kind) this.sfx('hazard:' + e.kind + ':' + (e.phase || 'go'));
         else if (e.e === 'hill') this.sfx(e.contested ? 'hill:contested' : 'hill:score');
@@ -1044,21 +1071,32 @@ export class Renderer {
       const [sx, sy0] = this.toScreen(f.x, f.y - ease(Math.min(1, f.t / 0.55)) * 0.6);
       const pop = f.t < 0.14 ? 1 + (1 - f.t / 0.14) * 0.7 : 1;
       const px = Math.max(f.size >= 0.75 ? 14 : 11, Math.max(12, z * 0.42) * f.size) * pop;
+      // 17.2 (D3): tags (CRIT, GUARD 14, x2...) as one small row under the number; a tag-only holder draws just the row
+      const tg = f.tags && f.tags.length ? f.tags : null, tpx = tg ? Math.max(11, Math.min(14, (px / pop) * 0.5)) : 0;
+      let tagW = 0;
+      if (tg) { ctx.font = `800 ${tpx}px "Chakra Petch", system-ui, sans-serif`; for (const q of tg) { q.w = ctx.measureText(q.text).width; tagW += q.w + 6; } tagW -= 2; }
       ctx.font = `800 ${px}px "Chakra Petch", system-ui, sans-serif`;
-      const tw = ctx.measureText(f.text).width + 4;
+      const tw = Math.max(f.text ? ctx.measureText(f.text).width + 4 : 0, tagW), th = (f.text ? px : 0) + (tg ? tpx + 3 : 0);
+      if (!th) continue;
       let lift = f.lift || 0;
-      const box = { x: sx + ox - tw / 2 + (f.dx || 0), y: sy0 + oy - px * 0.5 - lift, w: tw, h: px };
+      const box = { x: sx + ox - tw / 2 + (f.dx || 0), y: sy0 + oy - px * 0.5 - lift, w: tw, h: th };
       // R2 17.0: a new float that lands on another first tries the free side (right, then left) at the same height, so
       // a multi-hit fans out beside the piece instead of building a tower into the HUD; the side is kept for its life
-      if (f.dx == null) { f.dx = 0; if (placed.some((q) => hit(q, box))) for (const c of [1, -1]) { const d = c * (tw * 0.5 + 18), b2 = { x: box.x + d, y: box.y, w: tw, h: px }; if (!placed.some((q) => hit(q, b2))) { f.dx = d; box.x = b2.x; break; } } }
+      if (f.dx == null) { f.dx = 0; if (placed.some((q) => hit(q, box))) for (const c of [1, -1]) { const d = c * (tw * 0.5 + 18), b2 = { x: box.x + d, y: box.y, w: tw, h: th }; if (!placed.some((q) => hit(q, b2))) { f.dx = d; box.x = b2.x; break; } } }
       for (let i = 0; i < 6; i++) { const p = placed.find((q) => hit(q, box)); if (!p) break; lift += box.y + box.h - p.y + 3; box.y = sy0 + oy - px * 0.5 - lift; }
       f.lift = lift; placed.push(box);
       if (occ && occ.some((o) => hit(o, box))) continue;
       const sy = sy0 - lift;
       ctx.save(); ctx.translate(sx + ox + (f.dx || 0), sy + oy); ctx.rotate((f.rot || 0) * (1 - k));
       ctx.globalAlpha = rest < 0.4 ? Math.max(0, rest / 0.4) : 1;
-      ctx.lineWidth = Math.max(3, px * 0.2); ctx.strokeStyle = 'rgba(8,6,14,0.92)'; ctx.lineJoin = 'round'; ctx.strokeText(f.text, 0, 0);
-      ctx.fillStyle = f.color; ctx.fillText(f.text, 0, 0);
+      ctx.lineWidth = Math.max(3, px * 0.2); ctx.strokeStyle = 'rgba(8,6,14,0.92)'; ctx.lineJoin = 'round';
+      if (f.text) { ctx.strokeText(f.text, 0, 0); ctx.fillStyle = f.color; ctx.fillText(f.text, 0, 0); }
+      if (tg) { // 17.2 (D3)
+        ctx.font = `800 ${tpx}px "Chakra Petch", system-ui, sans-serif`; ctx.textAlign = 'left'; ctx.lineWidth = Math.max(2.5, tpx * 0.24);
+        let tx = -tagW / 2; const ty = f.text ? px * 0.5 + tpx * 0.55 + 2 : 0;
+        for (const q of tg) { ctx.strokeText(q.text, tx, ty); ctx.fillStyle = q.color || '#fff'; ctx.fillText(q.text, tx, ty); tx += q.w + 6; }
+        ctx.textAlign = 'center';
+      }
       ctx.restore();
     }
     ctx.globalAlpha = 1;

@@ -197,7 +197,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
         const a = await L.advancing(host, 3000); const hOver = await host.evaluate(() => window.__ccHost().s.over); run.check(a.moved || hOver, `match ${k}: host stalled after c1 left for the lobby ${JSON.stringify(a)}`);
         if (!a.moved) run.note('stall diag ' + JSON.stringify(await host.evaluate(() => { const h = window.__ccHost(), s = h.s, u = s.units.find((q) => q.id === s.active); return { over: s.over, active: u && { pid: u.pid, kind: u.kind, alive: u.alive, bot: !!u.isBot, name: u.name }, introUntil: h.introUntil, fast: h.fast, deadline: h.deadline && h.deadline - Date.now(), screen: document.querySelector('.screen.active').id, humans: s.units.filter((q) => q.kind === 'player' && !q.isBot).map((q) => [q.pid, q.alive]) }; })));
         await L.killAllExcept(host, ['me']);
-        run.check(await waitResults(host, 15000), `match ${k}: host no results`);
+        run.check(await waitResults(host, 25000), `match ${k}: host no results`);
         await sleep(1200);
         if (k === 3) break;
         await tap(host, '#btn-rematch'); await sleep(500);
@@ -211,7 +211,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
         continue;
       }
       await L.killAllExcept(host, ['me']);
-      run.check(await waitResults(host, 15000), `match ${k}: host no results`); run.check(await waitResults(c, 15000), `match ${k}: c1 no results`);
+      run.check(await waitResults(host, 25000), `match ${k}: host no results`); run.check(await waitResults(c, 25000), `match ${k}: c1 no results`);
       await sleep(1200);
       if (k === 3) break;
       // match 1: leader taps Back to Party first; match 2: the member does
@@ -239,12 +239,12 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     run.check(await L.waitDead(c, 15000), 'c1: dead modal never appeared');
     await tap(c, '#m-dead [data-act="results"]'); await sleep(600);
     await tap(c, '#btn-rematch'); await sleep(600);
-    if (when === 'over') { await L.killAllExcept(host, ['me']); run.check(await waitResults(host, 15000), 'host: no results'); await sleep(800); }
+    if (when === 'over') { await L.killAllExcept(host, ['me']); run.check(await waitResults(host, 25000), 'host: no results'); await sleep(800); }
     await c.evaluate(async () => (await import('/js/net.js')).NET.drop(1500));
     await sleep(9000);
     let cp = await party(c);
     run.check(cp.screen === 's-join' && cp.inParty, `c1 pulled out of the party lobby by the reconnect ${JSON.stringify(cp)}`);
-    if (when === 'live') { await L.killAllExcept(host, ['me']); run.check(await waitResults(host, 15000), 'host: no results'); await sleep(800); }
+    if (when === 'live') { await L.killAllExcept(host, ['me']); run.check(await waitResults(host, 25000), 'host: no results'); await sleep(800); }
     await tap(host, '#btn-rematch'); await sleep(800);
     cp = await party(c);
     run.check(cp.screen === 's-join' && cp.ready && !cp.ready.hidden && !cp.ready.dis, `c1 cannot ready up for the next match ${JSON.stringify(cp)}`);
@@ -256,7 +256,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     await autoplay(host); await autoplay(c);
     const a = await L.advancing(c, 5000); run.check(a.moved, `c1: match 2 not advancing ${JSON.stringify(a)}`);
     await L.killAllExcept(host, ['me']);
-    run.check(await waitResults(c, 15000), 'c1: no results in match 2');
+    run.check(await waitResults(c, 25000), 'c1: no results in match 2');
   };
   // A link that drops right as the match ends: the reconnect resends the final state without its 'over' event.
   S['P5d-over-without-event'] = async (run) => {
@@ -264,7 +264,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     // c1 misses the state carrying 'over' (simulated), then gets the final state again the way a reconnect sends it
     await c.evaluate(() => { const g = window.__cc.game, o = g.onMsg.bind(g); g.onMsg = (m) => { if (m.t === 'state' && (m.ev || []).some((e) => e.e === 'over')) return; o(m); }; });
     await L.killAllExcept(host, ['me']);
-    run.check(await waitResults(host, 15000), 'host: no results');
+    run.check(await waitResults(host, 25000), 'host: no results');
     if (process.env.CC_CLOUD) await c.evaluate(() => window.__cc.session.client.send({ t: 'sync' })); // 17.0 (N2): the Room resends the final state as a snap
     else await host.evaluate(() => window.__ccHost().publish([]));
     run.check(await waitResults(c, 10000), 'c1: final state without the over event left it on a dead board');
@@ -310,7 +310,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
   for (const vr of ['a', 'b', 'c', 'd']) S[`P6${vr}-reconnect-next-match`] = async (run) => {
     const { host, c } = await match(run, { bots: 2 });
     await L.killAllExcept(host, ['me']);
-    run.check(await waitResults(host, 15000), 'host: no results'); run.check(await waitResults(c, 15000), 'c1: no results');
+    run.check(await waitResults(host, 25000), 'host: no results'); run.check(await waitResults(c, 25000), 'c1: no results');
     await sleep(1000);
     await tap(host, '#btn-rematch'); await tap(c, '#btn-rematch'); await sleep(600);
     for (const p of [host, c]) await net(p, { dead: 4000, retry: 1000, hb: 1000 });

@@ -22,6 +22,7 @@ export const T = {
   saveGap: 2000,        // persist when the next timer is further away than this (idle points)
   qpWait: 45000,        // 17.1 (MM): Quick Play lobby countdown once 2+ humans are in (empty seats -> bots)
   qpFull: 3000,         // 17.1 (MM): ... and when every seat is a human
+  leadGrace: 8000,      // 17.1.1 (MM): a dropped leader keeps leading this long (brief app switch) before it passes on
 };
 const VER = protoVer();
 const PIECE_ORDER = ['pawn', 'knight', 'bishop', 'rook', 'queen'];
@@ -129,6 +130,10 @@ export class RoomCore {
   fixLeader() {
     const R = this.R, cur = this.player(R.leader);
     if (cur && !cur.isBot && (this.online(cur.pid) || !this.humans().some((p) => p.pid !== cur.pid && this.online(p.pid)))) return;
+    // 17.1.1 (MM): a leader whose link just dropped (phone app switch, network blip) keeps leading for T.leadGrace; before,
+    // leadership flipped at once and both phones' screens swapped (member pushed onto Host, leader onto Join): after a
+    // Quick Play match that read as "Back to Party reset the game". Gone longer -> passes (R.t.lead alarm), as before.
+    if (cur && !cur.isBot && cur.away && this.now < cur.away + this.T.leadGrace) { const at = cur.away + this.T.leadGrace; if (!R.t.lead || R.t.lead > at) R.t.lead = at; return; }
     const next = this.humans().find((p) => this.online(p.pid)) || this.humans()[0] || null;
     R.leader = next ? next.pid : null;
   }
@@ -151,7 +156,7 @@ export class RoomCore {
   lobbyMsg() {
     const R = this.R;
     const players = R.players.map((p) => { const o = { pid: p.pid, name: p.name, skin: p.skin, isBot: !!p.isBot, title: p.title || '', st: this.memberState(p) }; if (p.avatar) o.avatar = p.avatar; return o; });
-    return { t: 'lobby', players, code: R.code, mode: R.gameMode, maxP: R.maxP, leader: R.leader, party: this.partyPub(), pub: !!R.pub, qp: !!R.qp, cd: R.t.qp && !this.live() ? Math.max(0, R.t.qp - this.now) : 0 }; // 17.1 (MM): pub/qp/cd (ms to the Quick Play start)
+    return { t: 'lobby', players, code: R.code, mode: R.gameMode, maxP: R.maxP, leader: R.leader, party: this.partyPub(), pub: !!R.pub, qp: !!R.qp, fromQp: !!R.fromQp && !R.qp, cd: R.t.qp && !this.live() ? Math.max(0, R.t.qp - this.now) : 0 }; // 17.1 (MM): pub/qp/cd (ms to the Quick Play start)
   }
   lobby() { this.qpCheck(); this.bcast(this.lobbyMsg()); this.dirty = true; this.lobbyChanged = true; this.mmSync(); }
 
@@ -254,6 +259,7 @@ export class RoomCore {
     if (t.turn && t.turn <= now) { t.turn = 0; this.timeout(); }
     if (t.bot && t.bot <= now) { t.bot = 0; this.botStep(); }
     if (t.away && t.away <= now) { t.away = 0; this.awayExpire(); }
+    if (t.lead && t.lead <= now) { t.lead = 0; const was = R.leader; this.fixLeader(); if (this.R && R.leader !== was) this.lobby(); } // 17.1.1 (MM): leader grace over
     if (t.say && t.say.length) { const due = t.say.filter((x) => x.at <= now); t.say = t.say.filter((x) => x.at > now); for (const x of due) this.chat(x.pid, { k: x.k }); }
     this.cpu.alarm.push(performance.now() - t0); if (this.cpu.alarm.length > 4000) this.cpu.alarm.splice(0, 2000);
     await this.flush();
@@ -560,7 +566,7 @@ export class RoomCore {
     this.bcast({ t: 'h', v: s.v, x: stateHash(s) });
     this.bcast({ t: 'over', mid: m.mid, v: s.v, winner: s.winner });
     for (const p of R.players) if (p.left) { const h = m.hum && m.hum[p.pid]; if (h) h.left = true; p.left = false; }
-    if (R.qp) { R.qp = false; R.pub = false; } // 17.1 (MM): after its match a Quick Play room is a normal private party of the same players (Back to Party works; the leader may list it again)
+    if (R.qp) { R.qp = false; R.pub = false; R.fromQp = true; } // 17.1.1: fromQp = lobby note "same players as your Quick Play match" // 17.1 (MM): after its match a Quick Play room is a normal private party of the same players (Back to Party works; the leader may list it again)
     this.lobby();
     this.ended();
   }

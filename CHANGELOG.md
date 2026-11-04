@@ -1,5 +1,10 @@
 # Changelog
 
+## 17.2 (November 2026)
+- **Combat info hierarchy** (announcer.js, ui10.css, small render/main edits): one action line per turn that replaces the previous one (feed rows gone), merged per-target damage numbers with small tags, center callouts only for the viewer's moments and headline events, minor callouts skipped when a newer turn starts, callouts on the board's playback clock, tips only when the board is quiet, tap-open Match Log by round. Busiest moment clutter 14 -> 7-8 elements; overlap test 0.
+- **Quick Play Back to Party**: app switch no longer ends the cloud session (pagehide), dropped leader keeps leadership 8 s, Rejoin Party when the link is lost, online results never start a solo match, post-QP party is private and unlisted. mm.e2e 37/37.
+- Action line is a 40 px tap target and hides behind results; online tests wait up to 25 s for results (they follow the board's playback).
+
 ## 17.1 (November 2026)
 - **Quick Play + Browse** (server/src/match.js Matchmaker DO, mmcore.js, js/matchmaking.js): public online matches without a code; fullest open lobby for the mode (region preferred) or a new one; 45 s countdown with 2+ humans, bots fill, 3 s when full; Public/Private switch for hosts; per-IP limits; stale cleanup. Tests 9 + 21 e2e.
 - **Taps**: the tile above your piece is no longer swallowed by the piece's sprite (128/128 in tests/tap/above.cjs, was 25/96 failing).

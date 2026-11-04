@@ -226,7 +226,7 @@ export function clearMember(s) {
   $('#s-join').classList.remove('in-party');
   if (s) { s.lobby = []; s.lobbyMsg = null; s.party = null; s.amReady = false; }
   // results: no way back to a party that no longer exists; say so on the card
-  const rb = $('#btn-rematch'); if (rb && s && s.mode === 'client') rb.classList.add('hidden');
+  const rb = $('#btn-rematch'); if (rb && s && s.mode === 'client') { if (s.cloud && s.byeReason === 'lost') { rb.textContent = 'Rejoin Party'; rb.classList.remove('hidden'); } else rb.classList.add('hidden'); } // 17.1.1 (MM): a cloud room outlives this phone's link: offer the way back (main.js rejoinCloud)
   if (s && s.byeReason && s.mode === 'client') resultsNote(s.byeReason === 'lost' ? 'Lost connection to the party.' : s.byeReason === 'kicked' ? 'The leader removed you from the party.' : 'The party leader left, so the party has closed.');
 }
 export function resultsNote(text) {
@@ -248,6 +248,7 @@ export function rematchButton(s, st, liveSpec) {
   if (!s || s.mode === 'solo' || s.mode === 'tutorial') show = !liveSpec;
   else if (s.mode === 'host') show = !!(st && st.over) && !liveSpec;
   else { const me = st && st.units.find((u) => u.pid === s.myPid); show = !s.byeReason && !!st && (st.over || !me || !me.alive || !!s.benched); }
+  if (s && s.cloud && s.mode === 'client' && s.byeReason === 'lost') { show = true; b.textContent = 'Rejoin Party'; } // 17.1.1 (MM)
   b.classList.toggle('hidden', !show);
 }
 

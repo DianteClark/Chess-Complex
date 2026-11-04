@@ -162,6 +162,19 @@ await check('after a Quick Play match: party of the same players, Private, unlis
   closeAll([A, B]);
 });
 
+await check('17.1.1 leader grace: a brief drop keeps the leader (no screen swap); a long one passes it on', async () => {
+  await reset();
+  const code = await newRoom(); const A = await join(code, 'Lead'), B = await join(code, 'Mem');
+  const aTok = A.tok, aPid = A.myPid;
+  A.close(); await B.wait((c) => c.lobby && (c.lobby.players.find((p) => p.pid === aPid) || {}).st === 'away', 5000, 'A away');
+  assert(B.lobby.leader === aPid, 'leadership flipped on a brief drop');
+  const A2 = new Client(code, { tok: aTok, name: 'Lead' }); await A2.open(); await A2.waitMsg('welcome', 5000);
+  await A2.wait((c) => c.lobby, 5000, 'A2 lobby'); await sleep(300); assert(B.lobby.leader === aPid && A2.lobby.leader === aPid, 'leader after return: ' + B.lobby.leader);
+  A2.test('set', { T: { leadGrace: 1500 } }); await sleep(200);
+  A2.close(); await B.wait((c) => c.lobby && c.lobby.leader === B.myPid, 6000, 'handoff after the grace');
+  closeAll([A2, B]);
+});
+
 const ok = results.filter((r) => r.ok).length;
 console.log(`\n${ok}/${results.length} passed`);
 process.exit(ok === results.length ? 0 : 1);

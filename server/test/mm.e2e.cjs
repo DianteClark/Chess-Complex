@@ -10,19 +10,98 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = (p, b) => fetch(SITE + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.json());
 const list = (mode) => fetch(SITE + '/mm/list' + (mode ? '?mode=' + mode : '')).then((r) => r.json()).then((j) => j.rooms);
 let pass = 0, fail = 0; const ok = (c, m) => { if (c) { pass++; console.log('ok  ', m); } else { fail++; console.log('FAIL', m); } };
-async function clear(page) { for (let i = 0; i < 6; i++) { const any = await page.evaluate(() => { const s = document.querySelector('.sequel'); if (s) { s.click(); return 1; } for (const x of document.querySelectorAll('.modal:not(.hidden)')) { if (x.id === 'm-settings') continue; const b = x.querySelector('#lg-claim, [data-close], .btn'); if (b) { b.click(); return 1; } } return 0; }); if (!any) break; await page.waitForTimeout(400); } }
+async function clear(page) { for (let i = 0; i < 6; i++) { const any = await page.evaluate(() => { const s = document.querySelector('.sequel'); if (s) { s.click(); return 1; } for (const x of document.querySelectorAll('.modal:not(.hidden)')) { if (x.id === 'm-settings' || x.id === 'm-results') continue; const b = x.querySelector('#lg-claim, [data-close], .btn'); if (b) { b.click(); return 1; } } return 0; }); if (!any) break; await page.waitForTimeout(400); } }
 const go = (page, s) => page.evaluate((s) => { const b = document.createElement('button'); b.dataset.go = s; b.style.display = 'none'; document.querySelector('#s-title').appendChild(b); b.click(); b.remove(); }, s);
 const until = async (page, fn, arg, ms = 15000, what = 'condition') => { const t0 = Date.now(); for (;;) { const v = await page.evaluate(fn, arg).catch(() => null); if (v) return v; if (Date.now() - t0 > ms) throw new Error('timeout: ' + what); await sleep(200); } };
 const errs = [];
 async function open(browser, vp, name, q = '') {
   const ctx = await browser.newContext({ viewport: vp, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
-  const page = await ctx.newPage();
+  const page = await ctx.newPage(); page._nav = 0; page.on('framenavigated', (f) => { if (f === page.mainFrame()) page._nav++; });
   page.on('pageerror', (e) => errs.push(name + ': ' + String(e)));
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|peerjs|ERR_|Failed to load resource|fonts|WebSocket/i.test(m.text())) errs.push(name + ': ' + m.text()); });
   await page.addInitScript(() => { if (!sessionStorage.getItem('seeded')) { localStorage.clear(); localStorage.setItem('cc_seen_version', '99'); sessionStorage.setItem('seeded', '1'); } });
   await page.goto(SITE + '/' + q, { waitUntil: 'load' }); await page.waitForTimeout(1500); await clear(page);
   await page.evaluate((n) => { const p = window.__cc.profile; p.name = n; p.mode = 'royale'; }, name);
   return { ctx, page };
+}
+
+// ---- 17.1.1: after a Quick Play match (player report: Back to Party "reset the game")
+const sess = (p) => p.evaluate(() => { const s = window.__cc.session; return s ? { code: s.code, lead: !!s.lead, bye: s.byeReason || null, mid: s.mid || null, pid: s.myPid, screen: document.querySelector('.screen.active').id, lm: s.lobbyMsg ? { qp: !!s.lobbyMsg.qp, pub: !!s.lobbyMsg.pub, fromQp: !!s.lobbyMsg.fromQp, live: !!(s.lobbyMsg.party || {}).live, cd: s.lobbyMsg.cd || 0, hum: s.lobbyMsg.players.filter((x) => !x.isBot).map((x) => x.name + ':' + x.st).join(',') } : null } : { screen: document.querySelector('.screen.active').id, none: true }; });
+const killIn = (p, o) => p.evaluate((o) => { const s = window.__cc.game.s, me = window.__cc.session; for (const u of s.units) if (u.kind === 'player' && u.alive && (o.only ? o.only.includes(u.name) : !o.except.includes(u.name))) me.client.send({ t: 'test', op: 'kill', pid: u.pid }); }, o);
+async function toResults(p) { // open the results card (an eliminated player is spectating: tap Results) and wait for the party button
+  for (let i = 0; i < 120; i++) {
+    await clear(p);
+    const t = await p.evaluate(() => { if (document.querySelector('#m-results').classList.contains('hidden')) { const sb = document.querySelector('#spec-bar'), r = sb && sb.querySelector('[data-act="results"]'); if (sb && !sb.classList.contains('hidden') && r) r.click(); } const rb = document.querySelector('#btn-rematch'); return !document.querySelector('#m-results').classList.contains('hidden') && rb && !rb.classList.contains('hidden') && rb.textContent; }).catch(() => null);
+    if (t) return t; await sleep(500);
+  }
+  throw new Error('results never showed a party button');
+}
+async function inGame(p, notMid) { return until(p, (m) => document.querySelector('#s-game.active') && window.__cc.game.s && window.__cc.session && window.__cc.session.mid && window.__cc.session.mid !== m && window.__cc.session.mid, notMid || '', 30000, 'in game'); }
+async function afterMatch(browser) {
+  const A = await open(browser, { width: 390, height: 844 }, 'Cara'), B = await open(browser, { width: 844, height: 390 }, 'Dima');
+  try {
+    for (const X of [A, B]) { await go(X.page, 'play'); await X.page.waitForTimeout(500); }
+    await A.page.click('#btn-quick'); await until(A.page, () => window.__cc.session && window.__cc.session.myPid, null, 25000, 'Cara in lobby');
+    await A.page.evaluate(() => window.__cc.session.client.send({ t: 'test', op: 'set', T: { qpWait: 2500 } }));
+    await sleep(300); await B.page.click('#btn-quick');
+    const mid1 = await inGame(A.page); await inGame(B.page);
+    const code = (await sess(A.page)).code; ok((await sess(B.page)).code === code, 'after-match: both in Quick Play room ' + code);
+    await sleep(1500);
+    // member eliminated while the match runs: Back to Party now (match still live)
+    await killIn(A.page, { only: ['Dima'] });
+    ok(/Back to Party/.test(await toResults(B.page)), 'eliminated member: results offer Back to Party');
+    await B.page.click('#btn-rematch'); await sleep(1500);
+    let b = await sess(B.page); ok(b.screen === 's-join' && b.code === code && !b.bye, 'member Back to Party mid-match: party lobby of the same room ' + JSON.stringify(b));
+    // the match ends; the leader taps Back to Party
+    await killIn(A.page, { except: ['Cara'] });
+    ok(/Back to Party/.test(await toResults(A.page)), 'leader (winner): results offer Back to Party');
+    await A.page.click('#btn-rematch'); await sleep(2000);
+    const a = await sess(A.page); b = await sess(B.page);
+    const both = a.screen === 's-host' && a.lead && a.code === code && b.screen === 's-join' && b.code === code;
+    ok(both, `both in the same party lobby (leader Host ${a.code}, member Join ${b.code})`);
+    if (!both) for (const [X, n] of [[A, 'Cara'], [B, 'Dima']]) console.log('      ' + n + ' ' + JSON.stringify(await sess(X.page)) + '\n      link: ' + (await X.page.evaluate(async () => (await import('/js/cloud.js')).CLOUD.log.slice(-14).join(' | '))));
+    ok(a.lm && !a.lm.qp && !a.lm.pub && a.lm.fromQp && !a.lm.live && a.lm.cd === 0 && /Cara:leader/.test(a.lm.hum) && /Dima:/.test(a.lm.hum), 'party: private, no Quick Play countdown, same two players ' + JSON.stringify(a.lm));
+    ok(await A.page.evaluate(() => !!document.querySelector('#mm-host-note')) && await B.page.evaluate(() => !!document.querySelector('#mm-join-note')), 'Quick Play group note on both lobbies');
+    ok(A.page._nav === 1 && B.page._nav === 1, `no reload / navigation (nav ${A.page._nav}/${B.page._nav})`);
+    await A.page.screenshot({ path: `${OUT}/qp-after-party-390x844.png` }); await B.page.screenshot({ path: `${OUT}/qp-after-party-844x390.png` });
+    ok(!(await list()).some((r) => r.code === code), 'party not listed in Browse');
+    const q3 = await post('/mm/quick', { mode: 'royale' }); ok(q3.code && q3.code !== code, 'a stranger\'s Quick Play is never put into the party');
+    // Play Again: member readies, leader starts the next match
+    await B.page.click('#btn-ready'); await until(A.page, () => /Dima:ready/.test(window.__cc.session.lobbyMsg.players.map((x) => x.name + ':' + x.st).join(',')), null, 8000, 'Dima ready');
+    await A.page.click('#btn-start-host');
+    const mid2 = await inGame(A.page, mid1); const mid2b = await inGame(B.page, mid1);
+    ok(mid2 === mid2b && mid2 !== mid1, 'rematch: both in the next match ' + mid2);
+    await sleep(1500);
+    // the leader's phone goes to the background mid-results (pagehide persisted = app switch / page cache) and comes back
+    await killIn(A.page, { except: ['Cara'] });
+    await toResults(A.page); await toResults(B.page);
+    await A.page.evaluate(async () => { const { NET } = await import('/js/net.js'); dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })); NET.drop(1500); });
+    await sleep(2500);
+    await A.page.evaluate(() => dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await until(A.page, () => window.__cc.session && window.__cc.session.client && window.__cc.session.client.live, null, 10000, 'Cara reconnected');
+    const a2 = await sess(A.page); ok(!a2.none && a2.code === code && !a2.bye, 'pagehide (persisted) + pageshow: still in the party ' + JSON.stringify({ code: a2.code, bye: a2.bye }));
+    await A.page.click('#btn-rematch');
+    const a3 = await until(A.page, () => document.querySelector('#s-host.active') && window.__cc.session && window.__cc.session.code, null, 10000, 'Cara Host lobby');
+    ok(a3 === code && await A.page.evaluate(() => window.__cc.session.mode !== 'solo'), 'then Back to Party: Host lobby of the same room (no solo match)');
+    // the member's link gives up on the results screen (lost): Rejoin Party, never a solo Play Again
+    await B.page.evaluate(async () => { // every reconnect fails until restored: cloud.js gives up after retryFor -> byeReason 'lost'
+      const { CLOUD } = await import('/js/cloud.js'); const { NET } = await import('/js/net.js');
+      window.__WS = window.WebSocket; window.WebSocket = class { constructor() { this.readyState = 0; setTimeout(() => this.onclose && this.onclose({}), 30); } send() {} close() {} };
+      CLOUD.retryFor = 800; NET.drop(0);
+    });
+    const lbl = await until(B.page, () => { const s = window.__cc.session, rb = document.querySelector('#btn-rematch'); return s && s.byeReason === 'lost' && !rb.classList.contains('hidden') && rb.textContent; }, null, 15000, 'lost');
+    ok(lbl === 'Rejoin Party', 'member link lost on results: button says ' + lbl);
+    await B.page.evaluate(() => { window.WebSocket = window.__WS; }); await sleep(500); await B.page.screenshot({ path: `${OUT}/qp-lost-844x390.png` });
+    await B.page.click('#btn-rematch');
+    await until(B.page, () => window.__cc.session && window.__cc.session.myPid && window.__cc.session.lobbyMsg && document.querySelector('#s-join.active'), null, 15000, 'rejoined');
+    b = await sess(B.page); ok(b.code === code && !b.bye && !(await B.page.evaluate(() => window.__cc.session.mode === 'solo')), 'Rejoin Party: back in the same party lobby ' + JSON.stringify({ code: b.code, hum: b.lm && b.lm.hum }));
+    ok(A.page._nav === 1 && B.page._nav === 1, 'still no reloads');
+    await B.page.screenshot({ path: `${OUT}/qp-rejoin-844x390.png` });
+  } catch (e) {
+    ok(false, 'after-match: ' + e.message);
+    for (const [X, n] of [[A, 'Cara'], [B, 'Dima']]) { console.log('    ' + n, JSON.stringify(await sess(X.page).catch(() => null))); console.log('      link log: ' + (await X.page.evaluate(async () => (await import('/js/cloud.js')).CLOUD.log.slice(-14).join(' | ')).catch(() => ''))); }
+  }
+  await A.ctx.close(); await B.ctx.close();
 }
 
 (async () => {
@@ -77,6 +156,7 @@ async function open(browser, vp, name, q = '') {
     for (const [X, n] of [[A, 'A'], [B, 'B']]) console.log('    ' + n, JSON.stringify(await X.page.evaluate(() => ({ scr: (document.querySelector('.screen.active') || {}).id, card: document.querySelector('#mm-card').textContent.slice(0, 160), st: document.querySelector('#join-status').textContent, modal: [...document.querySelectorAll('.modal:not(.hidden)')].map((m) => m.id) }))).catch(() => null));
   }
   await A.ctx.close(); await B.ctx.close();
+  await afterMatch(browser); // 17.1.1 (MM)
 
   // ---- a code party: Private by default (hidden), Public switch lists it, back to Private unlists it
   const C = await open(browser, { width: 390, height: 844 }, 'Hosty');

@@ -96,3 +96,6 @@ body.reduced .mm-spin { animation: none; border-top-color: rgba(143, 220, 255, .
   .mm-card > .btn, .mm-card > .row2 { grid-column: 1 / -1; }
   .mm-card .mm-dots i { width: 10px; height: 10px; }
 }
+/* 17.1.1: party that came from Quick Play */
+.mm-party-note { margin: 0 0 10px; padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.4; text-align: left; color: #cfeeff; background: rgba(60, 130, 170, .16); box-shadow: inset 0 0 0 1px rgba(140, 220, 255, .25); }
+#s-host .code-panel .mm-party-note { margin-top: 2px; }

@@ -12,6 +12,23 @@
 //   hint   - coach tips and toasts, above the buttons (one at a time)
 
 import { NET } from './net.js'; // 17.0 (D2): a big callout on screen counts as playback backlog, so bots wait for it
+import { ABILITIES } from './data.js'; // 17.2 (D3): ability names for the action line
+import { pieceIcon } from './pieces.js';
+
+// 17.2 (D3) player feedback "2-3 consecutive actions clog the screen". Information hierarchy:
+//   1. hero lane (centre): ONE callout at a time, only for the viewer's own moments and headline events (kills,
+//      ultimates, crown and boss phases, eliminations). Anything below HERO_MIN that is not the viewer's goes to (2).
+//   2. action line (the old feed lane, now ONE row): who did what to whom this turn, damage / heal totals, KO and the
+//      notable effects as small tags. A newer line replaces the older one (never stacks); queued notes are dropped
+//      when a newer turn arrives. Tap it for (3).
+//   3. match log: every action line, note and callout of the match, grouped by round (nothing is lost by being compact).
+//   World-space: one number per target per action with small tags (render.js read()/tag(), 17.2 (D3)).
+//   Tips: only while the board is idle (no playback backlog, no callout).
+const HERO_MIN = 55;          // say() below this prio becomes an action-line note unless it is kept (KEEP) or mine
+const KEEP = /^(Round 1|Hold the Line|promote|disc|loc|crown)/;
+const ACT_MIN = 1500, NOTE_MIN = 1700, ALERT_MIN = 2600; // ms a line stays before a queued newer one replaces it
+const ACT_LIFE = 6500;        // after this the line dims (still tappable, still shows the last thing that happened)
+const LOG_MAX = 400;
 
 const now = () => performance.now();
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -33,7 +50,8 @@ export class Director {
     this.feedRows = []; this.hintQ = []; this.hintCur = null; this.turnUntil = 0; this.pendFeed = []; this.pendTurn = null;
     this.occ = []; this.occAt = 0; this.layoutAt = 0; this.box = null; this.mounted = false;
     this.L = { top: 100, feed: 132, hero: 230, heroH: 104, hint: 280, side: 0, W: 390, H: 844 };
-    this.stats = { shown: 0, merged: 0, dropped: 0, preempted: 0 };
+    this.stats = { shown: 0, merged: 0, dropped: 0, preempted: 0, demoted: 0, lines: 0 };
+    this.actQ = []; this.actCur = null; this.log = []; this.round = 0; // 17.2 (D3)
   }
 
   // ---------------------------------------------------------------- setup
@@ -54,6 +72,14 @@ export class Director {
     // 17.0 (D2): bots wait for the board's playback (render.js NET.backlog, R 15.1); a big callout still on screen counts too
     const rb = NET.backlog;
     if (typeof rb === 'function' && !rb.d2) { const f = () => { const b = rb() || 0; return typeof document !== 'undefined' && document.hidden ? b : Math.max(b, this.backlogMs()); }; f.d2 = 1; NET.backlog = f; }
+    // 17.2 (D3): the feed lane holds exactly one action line; tapping it opens the match log
+    if (this.feedEl) {
+      this.actEl = document.createElement('div'); this.actEl.className = 'al empty'; this.actEl.id = 'dir-act'; this.actEl.dataset.msg = 'feed';
+      this.actEl.setAttribute('role', 'button'); this.actEl.setAttribute('aria-label', 'Last action. Tap for the match log');
+      this.actEl.innerHTML = '<span class="al-in"></span><i class="al-log" aria-hidden="true"><s></s><s></s><s></s></i>';
+      this.feedEl.appendChild(this.actEl);
+      this.actEl.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.openLog(); });
+    }
   }
   // 17.0 (D2): ms of important hero callouts still to play (current + queued, prio >= BOT_WAIT_PRIO); 0 while held (intro)
   backlogMs() {
@@ -72,7 +98,10 @@ export class Director {
     this.q = []; this.cur = null; this.lastEnd = 0; this.holdUntil = 0; this.turnUntil = 0; this.hintHold = 0;
     for (const r of this.feedRows) r.el.remove();
     this.feedRows = []; this.hintQ = []; this.hintCur = null; this.occ = []; this.pendFeed = []; this.pendTurn = null;
+    this.actQ = []; this.actCur = null; this.log = []; this.round = 0; this.seg = null; this.timed = []; this.busyOn = false; this.busyFrom = this.busyLast = 0; // 17.2 (D3)
     if (!this.mounted) return;
+    if (this.actEl) { this.actEl.className = 'al empty'; this.actEl.querySelector('.al-in').innerHTML = ''; if (!this.actEl.isConnected && this.feedEl) this.feedEl.appendChild(this.actEl); }
+    this.closeLog();
     this.heroEl.className = 'dh'; this.turnEl.className = 'dt';
     if (this.hintEl) this.hintEl.classList.add('hidden');
     this.root.classList.remove('dir-turn');
@@ -111,8 +140,8 @@ export class Director {
     const short = H < 520;
     const laneTop = Math.round(top + 6);
     const feedTop = laneTop + (short ? 30 : 34);
-    this.feedMax = short ? 2 : FEED_MAX;
-    const rowH = Math.round((short ? 22 : 24) * big), feedH = this.feedMax * rowH + (this.feedMax - 1) * 4;
+    this.feedMax = 1; // 17.2 (D3): one action line (was 2-3 kill-feed rows)
+    const rowH = Math.round((short ? 26 : 28) * big), feedH = this.feedMax * rowH + (this.feedMax - 1) * 4;
     const heroTop = feedTop + feedH + (short ? 6 : 12);
     // bottom: lowest obstacle among buttons and the status slot
     let floor = side ? H : hb ? hb.top : H;
@@ -139,7 +168,7 @@ export class Director {
     const held = this.held();
     // DOM changes only happen here, before the canvas frame, so canvas text always knows the current occupancy
     if (this.pendTurn) { const p = this.pendTurn; this.pendTurn = null; this.showTurn(p); }
-    if (this.pendFeed.length && !held) { const list = this.pendFeed; this.pendFeed = []; for (const [h, k] of list) this.addFeed(h, k); }
+    if (this.pendFeed.length && !held) { const list = this.pendFeed; this.pendFeed = []; for (const [h, k, o] of list) this.addFeed(h, k, o); }
     // hero lane
     if (this.cur && this.cur.kind === 'cine' && this.opts.cineLive && this.opts.cineLive()) this.cur.end = Math.max(this.cur.end, t + 60);
     if (this.cur && t >= this.cur.end) this.endHero();
@@ -150,10 +179,16 @@ export class Director {
     // feed
     for (const r of this.feedRows) if (t >= r.until && !r.out) { r.out = true; r.el.classList.add('out'); setTimeout(() => r.el.remove(), 260); }
     this.feedRows = this.feedRows.filter((r) => !r.out);
+    this.runTimed(t); this.actTick(t, held); // 17.2 (D3)
     // hint
     if (this.hintCur && t >= this.hintCur.until) this.endHint();
-    this.hintQ = this.hintQ.filter((h) => t - h.at <= h.ttl);
-    if (!this.hintCur && !held && this.hintQ.length && t >= (this.hintRetry || 0) && t >= (this.hintHold || 0)) { const h = this.hintQ.shift(); this.showHint(h); if (this.cur && this.hitsHero(this.hintEl)) { this.endHint(); this.hintQ.unshift(h); this.hintRetry = t + 300; } }
+    // 17.2 (D3): coach tips only while the board is idle; a tip caught by new playback steps aside (and comes back
+    // once if it had been up < 2.5 s). Toasts (answers to the player's own taps) are not held.
+    const busy = this.busy(t);
+    if (this.hintCur && this.hintCur.kind === 'tip' && busy && t - this.busyFrom > 450) { const h = this.hintCur; this.endHint(); if (t - (h.until - h.life) < 2500 && !h.back) this.hintQ.unshift({ ...h, at: t, back: 1, onShow: null }); }
+    this.hintQ = this.hintQ.filter((h) => t - h.at <= h.ttl || (h.kind === 'tip' && busy && t - h.at <= h.ttl + 15000));
+    const nextTip = this.hintQ[0] && this.hintQ[0].kind === 'tip';
+    if (!this.hintCur && !held && this.hintQ.length && !(nextTip && (busy || t - (this.busyLast || 0) < 900)) && t >= (this.hintRetry || 0) && t >= (this.hintHold || 0)) { const h = this.hintQ.shift(); this.showHint(h); if (this.cur && this.hitsHero(this.hintEl)) { this.endHint(); this.hintQ.unshift(h); this.hintRetry = t + 300; } }
   }
   // Screen rects currently owned by DOM messages (recomputed lazily; canvas floats must not draw under them).
   occupied() {
@@ -182,6 +217,14 @@ export class Director {
   // m: { text, sub, kicker, color, tier 1|2|3|'disc', prio, key, group, sting, level, ttl, tone, tags }
   say(m) {
     if (!this.mounted || !m || !m.text) return;
+    // 17.2 (D3): minor callouts (other players' moments, world events, storm, waves cleared...) become action-line notes
+    if ((m.prio ?? 40) < HERO_MIN && !m.mine && !KEEP.test(String(m.key || m.text))) {
+      this.stats.demoted++;
+      const col = m.color || '#ffd24d', red = m.tone === 'red' || /^#ff[5-6]/.test(col);
+      this.note(`<b style="color:${col}">${esc(m.text)}</b>${m.sub ? `<span class="x">${esc(m.sub)}</span>` : ''}`, 'say:' + (m.key || m.text), { kind: red || (m.prio ?? 40) >= 50 ? 'alert' : 'note', kicker: m.kicker });
+      return;
+    }
+    this.logRow(`${m.kicker ? `<span class="x">${esc(m.kicker)}:</span> ` : ''}<b style="color:${m.color || '#ffd24d'}">${esc(m.text)}</b>${m.sub ? ` <span class="x">${esc(m.sub)}</span>` : ''}`, 'hero', 'say:' + (m.key || m.group || m.text)); // 17.2 (D3)
     const t = now();
     m = { tier: 1, prio: 40, ttl: 2600, tags: [], ...m, at: t, id: ++this.seq };
     m.ttl += TTL_PAD; // 17.0 (D2)
@@ -278,8 +321,10 @@ export class Director {
   }
 
   // ---------------------------------------------------------------- feed lane
-  feed(html, key) { if (this.mounted && this.feedEl) this.pendFeed.push([html, key]); }
-  addFeed(html, key) {
+  feed(html, key, o) { if (this.mounted && this.feedEl) this.pendFeed.push([html, key, o]); }
+  // 17.2 (D3): a feed line is now a note on the one action line (and always a row in the match log); o.log = log only
+  addFeed(html, key, o) { if (o === 'log' || (o && o.log)) { this.logRow(html, 'note', key); return; } this.note(html, key, typeof o === 'object' ? o : {}); }
+  addFeedRows(html, key) { // pre-17.2 stacked rows (unused; kept for reference by older probes)
     const t = now(); key = key || html;
     const hit = this.feedRows.find((r) => r.key === key && t - r.at < FEED_MERGE);
     if (hit) {
@@ -293,6 +338,117 @@ export class Director {
     this.feedRows.unshift({ el: d, key, at: t, until: t + FEED_LIFE, n: 1 });
     while (this.feedRows.length > (this.feedMax || FEED_MAX)) { const r = this.feedRows.pop(); r.el.remove(); }
     this.occAt = 0;
+  }
+
+  // ---------------------------------------------------------------- 17.2 (D3) action line + match log
+  // a: { key, html, kind 'act'|'note'|'alert', cls, log (log text html, default html) }. One line on screen; a newer turn's
+  // line replaces the current one once it has had ACT_MIN; notes queue behind it (max 2) and are dropped (they stay in
+  // the log) when a newer turn's line arrives.
+  action(a) {
+    if (!this.mounted || !this.actEl || !a || !a.html) return;
+    const t = now(); a = { kind: 'act', ...a, at: t, n: 1 };
+    this.logRow(a.log || a.html, a.kind, a.key, a.cls);
+    if (this.actCur && a.key && this.actCur.key === a.key) { // the same turn grew (move, then the attack): update in place
+      const c = this.actCur; c.html = a.html; c.cls = a.cls; c.until = Math.max(c.until, t + ACT_MIN); this.paintAct(c, true); return;
+    }
+    const qi = a.key ? this.actQ.findIndex((x) => x.key === a.key) : -1;
+    if (qi >= 0) { this.actQ[qi] = { ...a, at: this.actQ[qi].at }; return; }
+    if (a.kind === 'act') { const before = this.actQ.length; this.actQ = this.actQ.filter((x) => x.kind === 'alert' && t - x.at < 4000); this.stats.dropped += before - this.actQ.length; }
+    this.actQ.push(a);
+    while (this.actQ.length > 3) { const i = this.actQ.findIndex((x) => x.kind !== 'alert'); this.actQ.splice(i >= 0 ? i : 0, 1); this.stats.dropped++; }
+  }
+  note(html, key, o = {}) {
+    if (!this.mounted) return;
+    const t = now();
+    // the same note again soon (a repeated status, a second hill point): a x2 badge on the line instead of a new line
+    if (key && this.actCur && this.actCur.key === key && t - this.actCur.start < 6000) { const c = this.actCur; c.n++; c.until = Math.max(c.until, t + NOTE_MIN); this.logRow(html, 'note', key); this.paintAct(c, true); this.stats.merged++; return; }
+    this.action({ key, html: (o.kicker ? `<span class="x">${esc(o.kicker)}</span>` : '') + html, kind: o.kind || 'note', cls: o.cls, log: o.kicker ? `<span class="x">${esc(o.kicker)}:</span> ${html}` : html });
+  }
+  actTick(t, held) {
+    if (!this.actEl) return;
+    const c = this.actCur;
+    // a waiting turn line may cut a note / alert after 1.3 s (it is in the log): the line never lags the board for long
+    if (this.actQ.length && !held && (!c || t >= c.until || (c.kind !== 'act' && this.actQ.some((x) => x.kind === 'act') && t - c.start >= 1300))) { const a = this.actQ.shift(); this.showAct(a, t); return; }
+    if (c && !c.idle && t - c.start > ACT_LIFE) { c.idle = true; this.actEl.classList.add('idle'); }
+  }
+  showAct(a, t) {
+    a.start = t; a.until = t + (a.kind === 'alert' ? ALERT_MIN : a.kind === 'note' ? NOTE_MIN : ACT_MIN);
+    this.actCur = a; this.stats.lines++; this.paintAct(a, false); this.occAt = 0;
+  }
+  paintAct(a, bump) {
+    const el = this.actEl, inner = el.querySelector('.al-in');
+    if (!el.isConnected && this.feedEl) this.feedEl.appendChild(el); // main.js empties #h-feed at match start
+    inner.innerHTML = a.html + (a.n > 1 ? `<i class="fx-n">x${a.n}</i>` : '');
+    el.className = `al k-${a.kind}${a.cls ? ' ' + a.cls : ''}`;
+    if (!bump && !this.reduced()) { el.classList.remove('in'); void el.offsetWidth; el.classList.add('in'); }
+    else if (bump && !this.reduced()) { el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); }
+  }
+  // 17.2 (D3): run fn when the board's timeline reaches (this state's playback start + ms): in step with slow-mo, hit
+  // stops and the camdir pace, unlike a wall-clock delay. Wall-clock safety net: 12 s past the 1x estimate.
+  at(r, ms, fn, cap) {
+    if (!r || typeof r.time !== 'number') { setTimeout(fn, ms); return; }
+    const wall = now() + (cap ?? ms + 12000);
+    (this.timed || (this.timed = [])).push({ r, T: (r.lastBase ?? r.time) + ms / 1000, wall, fn });
+    if (cap != null) setTimeout(() => this.runTimed(now()), wall - now() + 30); // a hidden tab (no frames) still gets it
+  }
+  runTimed(t) {
+    const L = this.timed; if (!L || !L.length) return;
+    for (let i = 0; i < L.length; i++) { const x = L[i]; if (x.r.time >= x.T || t > x.wall) { L.splice(i--, 1); try { x.fn(); } catch (e) { console.warn('director.at', e); } } }
+  }
+  // a new turn is starting on the board: minor callouts still waiting would describe the past, so they skip
+  // (they are in the match log); a minor callout on screen gets cut once it has been read for READ_FIRST
+  newTurn() {
+    if (!this.mounted) return;
+    const t = now(), before = this.q.length;
+    this.q = this.q.filter((m) => m.prio >= 60 || t - m.at < 900);
+    this.stats.dropped += before - this.q.length;
+    if (this.cur && this.cur.kind !== 'cine' && this.cur.prio < 60 && !KEEP.test(String(this.cur.key || this.cur.text))) this.cur.end = Math.min(this.cur.end, Math.max(t + 150, this.cur.start + READ_FIRST + 400));
+  }
+  // 17.2 (D3): is the board busy playing something (tips wait for idle)
+  busy(t) {
+    let b = !!this.cur || this.cineActive();
+    if (!b) { try { b = typeof NET.backlog === 'function' && NET.backlog() > 250; } catch {} }
+    if (b) { if (!this.busyOn) { this.busyOn = true; this.busyFrom = t; } this.busyLast = t; } else this.busyOn = false;
+    return b;
+  }
+  logRow(html, kind = 'note', key, cls) {
+    const t = now(), L = this.log, last = L[L.length - 1];
+    if (key && last && last.key === key && t - last.at < 4000) { // the same moment grew (a merged kill callout, a turn's second action)
+      if (kind === 'hero' && last.kind === 'hero') { if (!last.html.includes(html)) last.html += ` <span class="x">-</span> ${html}`; }
+      else last.html = html;
+      last.at = t; if (this.logOpen()) this.renderLog(); return;
+    }
+    L.push({ html, kind, key, cls, at: t, round: this.round });
+    if (L.length > LOG_MAX) L.splice(0, L.length - LOG_MAX);
+    if (this.logOpen()) this.renderLog();
+  }
+  // the match log sheet (same look as the chat history sheet: .chat-sheet / .cs-*)
+  openLog() {
+    if (!this.mounted) return;
+    if (!this.logEl) {
+      const s = document.createElement('section'); s.className = 'chat-sheet act-log hidden'; s.id = 'act-log'; s.setAttribute('role', 'dialog'); s.setAttribute('aria-label', 'Match log');
+      s.innerHTML = '<header class="cs-head"><b>Match Log</b><small class="cs-n"></small><button type="button" class="cs-close" data-al="close" aria-label="Close match log">Close</button></header><div class="cs-list" role="log" aria-live="off" tabindex="0"></div>';
+      s.addEventListener('pointerdown', (e) => e.stopPropagation());
+      s.querySelector('[data-al="close"]').addEventListener('click', () => this.closeLog());
+      this.root.appendChild(s); this.logEl = s;
+    }
+    this.renderLog(); this.logEl.classList.remove('hidden');
+    const list = this.logEl.querySelector('.cs-list'); list.scrollTop = list.scrollHeight;
+    this.sound('tap');
+  }
+  closeLog() { if (this.logEl) this.logEl.classList.add('hidden'); }
+  logOpen() { return !!(this.logEl && !this.logEl.classList.contains('hidden')); }
+  renderLog() {
+    if (!this.logEl) return;
+    const list = this.logEl.querySelector('.cs-list'), stick = list.scrollTop + list.clientHeight >= list.scrollHeight - 30;
+    let rd = -1, h = '';
+    for (const r of this.log) {
+      if (r.round !== rd) { rd = r.round; if (rd > 0) h += `<div class="al-rd">Round ${rd}</div>`; }
+      h += `<div class="cs-row al-row k-${r.kind}${r.cls ? ' ' + r.cls : ''}"><span class="cs-t">${r.html}</span></div>`;
+    }
+    list.innerHTML = h || '<div class="cs-row sys"><span class="cs-t">Nothing has happened yet.</span></div>';
+    this.logEl.querySelector('.cs-n').textContent = `${this.log.length} entries`;
+    if (stick) list.scrollTop = list.scrollHeight;
   }
 
   // ---------------------------------------------------------------- hint lane: tips and toasts
@@ -592,6 +748,7 @@ export function interestNext(s, u, E) {
 const word = (g, id, text, color, size = 0.95, dy = -1.2, life = 1.25) => {
   const d = g.r && g.r.disp && g.r.disp.get(id); if (!d || !g.r.floats) return;
   if (g.r.floats.some((f) => f.w16 === id + text && f.t < f.life * 0.6)) return; // one word per piece at a time
+  if (g.r.tag) return; // 17.2 (D3): render.js onFx tags the piece's number itself, in step with the hit (GUARD / OVERKILL / SECOND WIND / HOLD)
   const f = { x: d.x + 0.5, y: d.y + dy, text, t: 0, life, color, size, w16: id + text };
   if (g.r.read) g.r.read(id, f); else g.r.floats.push(f); // 17.0 (D2): R2's readout: lingers, keeps the pace at 1x, per-unit stack cap
 };
@@ -600,24 +757,24 @@ export function tactics16(g, e, s, myId, E) {
   const nm = (u) => `<b style="color:${u.kind === 'player' ? u.color : '#ccc'}">${esc(u.name)}</b>`;
   if (e.e === 'overkill') {
     const k = by(e.id), t = by(e.to); if (!k || !t) return;
-    g.after(() => word(g, t.id, `OVERKILL +${e.dmg}`, '#ff7a4d', 1.0, -1.25, 1.35), 260);
+    g.after(() => word(g, t.id, 'OVERKILL', '#ff7a4d', 1.0, -1.25, 1.35), 260);
     if (k.id === myId) g.after(() => g.announce('Overkill', `+${e.dmg} splash on ${t.name}`, '#ff7a4d', null, 2, { kicker: 'ATK edge', tier: 2, prio: 63, group: 'k' + k.id, key: 'ok' + k.id }), 650);
-    else if (t.id === myId) g.after(() => g.feed(`<b style="color:#ff7a4d">Overkill</b><span class="x">splash from</span>${nm(k)}<span class="x">-${e.dmg}</span>`, 'ok-me'), 300);
-    else g.after(() => g.feed(`${nm(k)}<span class="x">overkill</span><b style="color:#ff7a4d">+${e.dmg}</b><span class="x">on</span>${nm(t)}`, 'ok' + k.id), 300);
+    else if (t.id === myId) g.after(() => g.feed(`<b style="color:#ff7a4d">Overkill</b><span class="x">splash from</span>${nm(k)}<span class="x">-${e.dmg}</span>`, 'ok-me', 'log'), 300);
+    else g.after(() => g.feed(`${nm(k)}<span class="x">overkill</span><b style="color:#ff7a4d">+${e.dmg}</b><span class="x">on</span>${nm(t)}`, 'ok' + k.id, 'log'), 300);
   }
   if (e.e === 'guard' && e.saved > 0) {
     const u = by(e.id); if (!u) return;
     const max = (E && E.stats ? E.stats(u).maxHp : u.hpMax || 100) || 100, big = e.saved >= max * 0.12;
     const mine = u.id === myId, mineHit = J.lastSrc16 === myId;
-    if (mine || big || mineHit) g.after(() => word(g, u.id, `GUARDED ${e.saved}`, '#7fb6ff', mine ? 1.0 : 0.92, -1.2, 1.2), 200);
-    if (mine && (big || !J.guardFed)) { J.guardFed = 1; g.after(() => g.feed(`<b style="color:#7fb6ff">Guard</b><span class="x">your DEF stopped ${e.saved} damage</span>`, 'guard-me'), 300); }
+    if (mine || big || mineHit) g.after(() => word(g, u.id, `GUARD ${e.saved}`, '#7fb6ff', mine ? 1.0 : 0.92, -1.2, 1.2), 200);
+    if (mine && (big || !J.guardFed)) { J.guardFed = 1; g.after(() => g.feed(`<b style="color:#7fb6ff">Guard</b><span class="x">your DEF stopped ${e.saved} damage</span>`, 'guard-me', 'log'), 300); }
   }
   if (e.e === 'ability' || e.e === 'turn') J.lastSrc16 = e.id; // whose action this is (a guard during my attack is mine to see)
   if (e.e === 'secondwind') {
     const u = by(e.id); if (!u) return;
-    g.after(() => word(g, u.id, `SECOND WIND +${e.heal}`, '#6dffa8', u.id === myId ? 1.0 : 0.92, -1.3, 1.5), 300);
+    g.after(() => word(g, u.id, 'SECOND WIND', '#6dffa8', u.id === myId ? 1.0 : 0.92, -1.3, 1.5), 300);
     if (u.id === myId) g.after(() => g.announce('Second Wind', `+${e.heal} HP - once per match`, '#6dffa8', null, 3, { kicker: 'HP edge', tier: 2, prio: 66, key: 'sw-me' }), 500);
-    else g.after(() => g.feed(`${nm(u)}<span class="x">caught a</span><b style="color:#6dffa8">Second Wind</b><span class="x">+${e.heal}</span>`, 'sw' + u.id), 400);
+    else g.after(() => g.feed(`${nm(u)}<span class="x">caught a</span><b style="color:#6dffa8">Second Wind</b><span class="x">+${e.heal}</span>`, 'sw' + u.id, 'log'), 400);
   }
   if (e.e === 'hold') {
     const u = by(e.id); if (!u) return;
@@ -627,7 +784,87 @@ export function tactics16(g, e, s, myId, E) {
   if (e.e === 'interest' && e.id === myId && e.n > 0) J.int16 = { n: e.n, at: performance.now() }; // main.js updateHud turns the next shard "+n" into "+n interest"
   if (e.e === 'reversal') {
     const L = locationInfo(s.location) || {}, col = L.c || '#e8b04a';
-    if (e.on) g.after(() => director.say({ text: 'Reversal', sub: 'Slowest SPD acts first this round', kicker: L.name || 'Clockwork Spire', color: col, tier: 2, prio: 56, key: 'world', ttl: 3600, level: 3 }), 300);
+    if (e.on) g.after(() => director.note(`<b style="color:${col}">Reversal</b><span class="x">slowest SPD acts first this round</span>`, 'rev-on', { kind: 'alert', kicker: L.name || 'Clockwork Spire' }), 300); // 17.2 (D3): an alert on the action line (the strip says REVERSED)
     else g.after(() => g.feed(`<b style="color:${col}">Time flows forward</b><span class="x">fastest SPD first again</span>`, 'rev-off'), 300);
   }
 }
+
+// ---------------------------------------------------------------- 17.2 (D3) the action line
+// One compact line per turn: "[icon] Name  Ability > Target -31 KO  Target -12 GUARD 14 [burn]". Built per state batch
+// from the engine events (the same events the board plays), shown when that batch plays (g.after = evLag-synced), and
+// merged across the batches of one turn (move, then attack). Kill-feed rows and minor feed lines become log rows: the
+// line already carries KO / Overkill / Guard / Second Wind / statuses. Movement-only turns go to the log only.
+const ENV = (e) => (e.sd ? 'Sudden Death' : e.storm ? 'The storm' : e.meteor ? 'Meteors' : e.lava ? 'Lava' : e.trap ? 'A trap' : e.thorns ? 'Thorns' : e.dot ? STATUS[e.dot] ? STATUS[e.dot].name : 'Damage over time' : null);
+const nameHTML = (u) => (u ? `<b style="color:${u.kind === 'player' ? u.color : '#cfc8dc'}">${esc(u.name)}</b>` : '');
+const iconHTML = (u) => { if (!u || u.kind !== 'player') return ''; try { return `<img src="${pieceIcon(u.piece, u.skin, null, 18)}" alt="">`; } catch { return ''; } };
+const stIcon = (k) => (STATUS[k] ? `<span class="stc st-${k}" style="--sc:${STATUS[k].c}" title="${STATUS[k].name}">${STATUS[k].icon}</span>` : '');
+function lineHTML(seg, s, myId, max) {
+  const by = (id) => s.units.find((v) => v.id === id);
+  const a = seg.actor != null ? by(seg.actor) : null;
+  const tl = [...seg.tg.values()].filter((x) => x.dmg || x.heal || x.ko || x.tags.length || x.st.length || x.abs);
+  if (!a && !tl.length && !seg.extra.length) return null;
+  tl.sort((p, q) => (q.id === myId) - (p.id === myId) || q.ko - p.ko || q.dmg - p.dmg);
+  const env = !seg.abs.length && tl.length ? tl.map((x) => x.env).find(Boolean) : null;
+  const envOnly = env && !seg.abs.length && !seg.hold && !seg.extra.length;
+  let h = `<span class="al-who">${envOnly || (!a && env) ? `<b class="al-env">${esc(env)}</b>` : a ? iconHTML(a) + (a.id === myId ? '<b class="al-you">You</b>' : nameHTML(a)) : ''}</span>`;
+  if (seg.hold) h += '<span class="al-ab hold">Hold</span>';
+  if (seg.abs.length) h += `<span class="al-ab${seg.ult ? ' ult' : ''}">${seg.abs.map(esc).join(' + ')}</span>`;
+  else if (seg.moved && !tl.length && !seg.extra.length) h += '<span class="x">moved</span>';
+  const shown = tl.slice(0, max);
+  shown.forEach((x, i) => {
+    const v = by(x.id);
+    h += `${i === 0 && (a || env) ? '<i class="al-to" aria-hidden="true"></i>' : ''}<span class="al-t${x.id === myId ? ' me' : ''}">${x.id === myId ? '<b class="al-you">You</b>' : nameHTML(v)}`;
+    if (x.dmg) h += `<em class="d">-${x.dmg}</em>`;
+    if (x.hits > 1) h += `<small>x${x.hits}</small>`;
+    if (x.heal) h += `<em class="h">+${x.heal}</em>`;
+    if (x.abs) h += `<i class="al-tg sh">ABSORB ${x.abs}</i>`;
+    if (x.ko) h += '<i class="al-ko">KO</i>';
+    for (const tg of x.tags) h += `<i class="al-tg ${tg.c}">${esc(tg.t)}</i>`;
+    for (const k of x.st) h += stIcon(k);
+    h += '</span>';
+  });
+  if (tl.length > shown.length) h += `<i class="al-more">+${tl.length - shown.length}</i>`;
+  for (const x of seg.extra) h += `<span class="al-x">${x}</span>`;
+  return h;
+}
+export function actionLine(g, ev, s, myId) {
+  const D = director; if (!D.mounted || !ev || !ev.length || !s) return;
+  if (s.round) D.round = s.round;
+  let seg = D.seg, delay = 150, dirty = false, ult = false;
+  const start = (actor, turnStart) => { seg = D.seg = { actor, turnStart, key: 'al' + (D.segN = (D.segN || 0) + 1), abs: [], ult: false, moved: false, hold: false, tg: new Map(), extra: [], at: 0 }; };
+  const tg = (id) => { let x = seg.tg.get(id); if (!x) seg.tg.set(id, (x = { id, dmg: 0, heal: 0, hits: 0, abs: 0, ko: false, tags: [], st: [], env: null })); return x; };
+  const tag = (x, t, c, add) => { const o = x.tags.find((q) => q.c === c); if (o) { if (add != null) { o.n += add; o.t = t.replace(/\d+$/, o.n); } } else x.tags.push({ t, c, n: add || 0 }); };
+  const flush = (ms) => {
+    if (!dirty || !seg) return; dirty = false;
+    const cur = seg, html = lineHTML(cur, s, myId, 2), full = lineHTML(cur, s, myId, 99);
+    if (!html) return;
+    const quiet = !cur.abs.length && !cur.hold && !cur.extra.length && ![...cur.tg.values()].some((x) => x.ko || x.id === myId || x.tags.length) && cur.actor !== myId;
+    const hitMe = cur.tg.has(myId) && cur.actor !== myId, cls = cur.actor === myId ? 'mine' : hitMe ? 'me' : '';
+    D.at(g.r, ms, () => { if (quiet) D.logRow(full, 'act', cur.key, cls); else D.action({ key: cur.key, html, log: full, kind: 'act', cls }); }, ms + (g.evLag || 0) + 3500);
+  };
+  for (const e of ev) {
+    if (e.e === 'turn') { flush(ult ? 1000 : delay); D.at(g.r, (ult ? 1000 : delay) + 60, () => D.newTurn(), (ult ? 1000 : delay) + 60 + (g.evLag || 0) + 3500); start(e.id, true); delay += 650; ult = false; continue; }
+    if (!seg) start(null, false);
+    if ((e.e === 'ability' || e.e === 'hold') && seg.actor !== e.id) { if (seg.actor != null && (seg.abs.length || seg.hold)) { flush(delay); start(e.id, false); } else seg.actor = e.id; }
+    switch (e.e) {
+      case 'ability': { const n = (ABILITIES[e.ab] || {}).name || e.ab; if (!seg.abs.includes(n)) seg.abs.push(n); if (e.slot === 'ult') { seg.ult = true; ult = true; } dirty = true; break; }
+      case 'hold': seg.hold = true; dirty = true; break;
+      case 'move': if (e.id === seg.actor && !/^(push|pull|cog|conveyor|swap)$/.test(e.how || '')) { seg.moved = true; dirty = true; } break;
+      case 'dmg': { const x = tg(e.id); if (e.self) { x.dmg += e.n; dirty = true; break; } if (e.shield) x.abs += e.n; else { x.dmg += e.n; x.hits++; } const en = ENV(e); if (en && e.src == null) x.env = en; if (e.dot && !x.st.includes(e.dot)) x.st.push(e.dot); if (e.crit) tag(x, 'CRIT', 'crit'); if (e.overkill) tag(x, 'OVERKILL', 'ok'); if (e.sd) tag(x, 'SUDDEN DEATH', 'sd'); dirty = true; break; }
+      case 'heal': tg(e.id).heal += e.n; dirty = true; break;
+      case 'guard': if (e.saved > 0) { tag(tg(e.id), 'GUARD ' + e.saved, 'gd', e.saved); dirty = true; } break;
+      case 'secondwind': tag(tg(e.id), 'SECOND WIND', 'sw'); dirty = true; break;
+      case 'death': tg(e.id).ko = true; dirty = true; break;
+      case 'status': if (e.on && STATUS[e.k] && e.k !== 'exposed') { const x = tg(e.id); if (!x.st.includes(e.k)) x.st.push(e.k); dirty = true; } else if (e.on && e.k === 'exposed') { tag(tg(e.id), 'EXPOSED x' + (e.n || 1), 'ex'); dirty = true; } break;
+      case 'stagger': tag(tg(e.id), 'STAGGERED', 'ex'); dirty = true; break;
+      case 'steadfast': tag(tg(e.id), 'STEADFAST', 'gd'); dirty = true; break;
+      case 'pickup': if (e.id === seg.actor && e.k === 'shard') { seg.extra.push(`<span class="x">+${e.n || 1} shard${(e.n || 1) > 1 ? 's' : ''}</span>`); dirty = true; } break;
+      case 'promote': if (e.id === seg.actor && PIECES_NAME(e)) { seg.extra.push(`<span class="x">${e.type === 'evolve' ? 'evolved:' : 'honed'}</span><b>${esc(PIECES_NAME(e))}</b>`); dirty = true; } break;
+      case 'revive': { const v = s.units.find((q) => q.id === e.id); if (v) { seg.extra.push(`<span class="x">revived</span>${nameHTML(v)}`); dirty = true; } break; }
+      case 'crowned': if (e.id === seg.actor) { seg.extra.push('<b style="color:#ffd24d">took the Crown</b>'); dirty = true; } break;
+      default: break;
+    }
+  }
+  flush(ult ? 1000 : delay);
+}
+const PIECES_NAME = (e) => { try { return e.type === 'evolve' ? String(e.piece || '').replace(/^./, (c) => c.toUpperCase()) : `level ${e.hone || ''}`.trim(); } catch { return ''; } };

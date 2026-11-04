@@ -671,3 +671,62 @@ body:not(.reduced) #s-game .order .o-rev { animation: revPulse 1.6s ease-in-out 
   .ib-foot { flex-direction: row; justify-content: center; gap: 12px; margin-top: 8px; }
   .ib-prog { flex: 1; }
 }
+
+/* ---------------------------------------------------------------- 17.2 (D3) action line + match log
+   The feed lane holds ONE line: the latest turn (who, ability, targets with damage / heal / KO / tags / status icons)
+   or a note. It dims when stale and is a tap target for the Match Log sheet (same look as the chat history sheet). */
+#s-game #h-feed > div.al { pointer-events: auto; cursor: pointer; position: relative; padding-right: 30px; font-size: 12px; -webkit-mask-image: none; mask-image: none; animation: none; transition: opacity .35s; touch-action: manipulation; }
+#s-game #h-feed > div.al.empty { display: none; }
+#s-game #h-feed > div.al.in { animation: dfIn .28s cubic-bezier(.2,.9,.3,1) both; }
+#s-game #h-feed > div.al.pulse { animation: dfPulse .4s ease-out; }
+#s-game #h-feed > div.al.idle { opacity: .6; }
+#s-game #h-feed > div.al.mine { border-left-color: #ffd24d; }
+#s-game #h-feed > div.al.me { border-left-color: #ff5a6a; background: linear-gradient(90deg, rgba(48,12,20,.94), rgba(14,10,18,.8)); }
+#s-game #h-feed > div.al.k-note { border-left-color: rgba(214,201,164,.55); }
+#s-game #h-feed > div.al.k-alert { border-left-color: #ff8a5c; background: linear-gradient(90deg, rgba(46,22,12,.94), rgba(14,10,18,.8)); }
+.al .al-in { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent); mask-image: linear-gradient(90deg, #000 90%, transparent); }
+.al .al-in > *, .al-t > * { flex: none; }
+.al-log { position: absolute; right: 8px; top: 50%; width: 13px; height: 10px; margin-top: -5px; display: flex; flex-direction: column; justify-content: space-between; opacity: .65; }
+.al-log s { display: block; height: 2px; border-radius: 1px; background: #d6c9a4; }
+.al-log s:nth-child(2) { width: 80%; } .al-log s:nth-child(3) { width: 60%; }
+.al-who { display: inline-flex; align-items: center; gap: 4px; }
+.al-who:empty { display: none; }
+.al-env { color: #ff9a7a; }
+.al-ab { font-weight: 800; color: #f3ead2; }
+.al-ab.ult { color: #ffd24d; text-transform: uppercase; letter-spacing: .05em; }
+.al-ab.hold { color: #e8c87a; }
+.al-to { width: 6px; height: 6px; margin: 0 2px 0 0; border-top: 2px solid #9a90ad; border-right: 2px solid #9a90ad; transform: rotate(45deg); }
+.al-t { display: inline-flex; align-items: center; gap: 3px; margin-right: 3px; }
+.al-t em { font-style: normal; font-weight: 800; font-variant-numeric: tabular-nums; }
+.al-t em.d { color: #ff9a9a; } .al-t em.h { color: #6dffa8; }
+.al-t small { font-size: 11px; color: #c9bfd9; font-weight: 700; }
+.al-you { color: #fff; }
+.al-t.me .al-you { color: #ffb3bb; }
+.al-ko { font-style: normal; font-size: 11px; font-weight: 900; line-height: 15px; padding: 0 4px; border-radius: 3px; background: #e2384a; color: #fff; letter-spacing: .04em; }
+.al-tg { font-style: normal; font-size: 11px; font-weight: 800; line-height: 13px; padding: 0 3px; border-radius: 3px; border: 1px solid currentColor; letter-spacing: .03em; color: #d6c9a4; }
+.al-tg.crit { color: #ffd24d; } .al-tg.ok { color: #ff8a5c; } .al-tg.gd { color: #8fc0ff; } .al-tg.sw { color: #6dffa8; } .al-tg.ex { color: #ff7a88; } .al-tg.sd { color: #ffe08a; } .al-tg.sh { color: #9fd0ff; }
+.al .stc, .act-log .stc { width: 17px; height: 17px; border-radius: 5px; }
+.al .stc svg, .act-log .stc svg { width: 11px; height: 11px; }
+.al-more { font-style: normal; font-size: 11px; font-weight: 800; color: #d6c9a4; }
+.al-x { display: inline-flex; align-items: center; gap: 4px; }
+.al .x, .act-log .x { color: var(--mute, #9a90ad); font-size: 11px; }
+.al .fx-n { margin-left: 4px; }
+/* match log sheet */
+.act-log .cs-head > b { color: var(--gold2, #ffd98a); }
+.act-log .cs-t { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; font-size: 13px; }
+.act-log .cs-t img { width: 18px; height: 18px; }
+.act-log .x { font-size: 12px; }
+.act-log .al-row { padding-left: 8px; border-left: 2px solid transparent; }
+.act-log .al-row.mine { border-left-color: #ffd24d; } .act-log .al-row.me { border-left-color: #ff5a6a; }
+.act-log .al-row.k-alert { border-left-color: #ff8a5c; } .act-log .al-row.k-hero { border-left-color: #b98cff; }
+.act-log .al-rd { margin: 10px 0 2px; font-size: 11px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: var(--gold2, #ffd98a); opacity: .85; }
+body.reduced #s-game #h-feed > div.al { animation: none; }
+#s-game #h-feed { width: calc(100vw - var(--lane-side, 0px) - 16px - env(safe-area-inset-left, 0px)); max-width: none; align-items: flex-start; pointer-events: none; } /* 17.2 (D3): the one action line may use the lane width */
+#s-game #h-feed > div.al { width: max-content; max-width: 100%; }
+.al .al-in { flex: 0 1 auto; }
+#s-game #h-feed > div.al > .al-in { flex: 0 1 auto; min-width: 0; } /* 17.2 (D3): shrink + fade instead of running under the log icon */
+#s-game .act-log { background: #0e0c14; z-index: 12; } /* 17.2 (D3): opaque, above the hint lane */
+/* 17.2 (A0): the action line opens the Match Log, so it is a real tap target: 40 px tall (a11y audit), and it steps
+   aside while the results card is up */
+#s-game #h-feed > div.al { min-height: 40px; box-sizing: border-box; display: flex; align-items: center; }
+body:has(#m-results:not(.hidden)) #s-game #h-feed > div.al { display: none; }

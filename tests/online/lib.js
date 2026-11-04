@@ -205,7 +205,8 @@ async function waitFor(p, fn, arg, ms = 10000) {
   // Q 10.3: waitForFunction does not await a Promise returned by an async predicate (it is truthy at once), so poll those
   if (typeof fn === 'function' && fn.constructor && fn.constructor.name === 'AsyncFunction') { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch {} await sleep(150); } return false; }
   try { await p.waitForFunction(fn, arg, { timeout: ms }); return true; } catch { return false; } }
-const waitResults = (p, ms = 12000) => waitFor(p, () => !document.querySelector('#m-results').classList.contains('hidden'), null, ms);
+// 17.2: results follow the board's playback (D3); with test-fast bots the final blow can play >12 s after the kill
+const waitResults = (p, ms = +(process.env.CC_WAITRES || 25000)) => waitFor(p, () => !document.querySelector('#m-results').classList.contains('hidden'), null, ms);
 const waitDead = (p, ms = 12000) => waitFor(p, () => !document.querySelector('#m-dead').classList.contains('hidden'), null, ms);
 
 module.exports = { protectHumans, chromium, Run, sleep, tap, visible, view, autoplay, hostKill, killAllExcept, pids, hostLobby, clientJoin, startMatch, clientPid, advancing, waitFor, waitResults, waitDead, readyAll };

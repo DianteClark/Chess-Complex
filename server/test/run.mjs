@@ -174,7 +174,7 @@ if (on('resume')) {
   await check('lobby: leader drops -> leadership passes; comes back with the same token, seat kept', async () => {
     const { A, B, C, cs } = await room(3);
     const aPid = A.myPid; A.close();
-    await B.wait(() => B.lobby.leader === B.myPid && B.lobby.players.find((p) => p.pid === aPid).st === 'away', 4000, 'handoff');
+    await B.wait(() => B.lobby.leader === B.myPid && B.lobby.players.find((p) => p.pid === aPid).st === 'away', 14000, 'handoff'); // 17.1.1 (MM): after the 8 s leader grace (T.leadGrace)
     B.lead('add-bot'); await C.wait(() => C.lobby.players.some((p) => p.isBot), 3000, 'new leader can lead');
     const A2 = new Client(A.code, { tok: A.tok, name: 'Alice' }); await A2.open(); await A2.waitMsg('welcome', 3000);
     assert(A2.myPid === aPid, 'same seat'); await C.wait(() => C.lobby.players.find((p) => p.pid === aPid).st === 'wait', 3000, 'back from away');
@@ -234,7 +234,7 @@ if (on('resume')) {
     for (const c of cs) c.send({ t: 'leave' }); // all forfeit: 8 bots
     await B.wait(() => B.msgs.filter((m) => m.t === 'seat' && m.why === 'leave').length >= 3, 4000, 'forfeit seats');
     A.close();
-    await B.wait(() => B.lobby.leader === B.myPid, 4000, 'leader handoff mid-match');
+    await B.wait(() => B.lobby.leader === B.myPid, 14000, 'leader handoff mid-match'); // 17.1.1 (MM): after T.leadGrace
     await B.wait(() => B.s.over && B.lobby.party.live === false, 240000, 'over');
     assert(B.lobby.players.some((p) => p.pid === C.myPid), 'forfeiter still in party');
     const rs = B.lobby.players.find((p) => p.pid === C.myPid).st; assert(rs === 'results', 'results state ' + rs);
