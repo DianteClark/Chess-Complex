@@ -6,8 +6,8 @@
     "dev": "wrangler dev --local --port 8787",
     "dev:test": "wrangler dev --local --port 8787 --var ROOM_TEST:1 --var NEW_PER_HOUR:1000",
     "deploy": "wrangler deploy",
-    "build": "wrangler deploy --dry-run --outdir /tmp/s1build",
-    "test": "node test/run.mjs"
+    "test": "node test/run.mjs",
+    "check": "wrangler deploy --dry-run --outdir /tmp/cc-check"
   },
   "devDependencies": {
     "wrangler": "^4.40.0"

@@ -12,3 +12,6 @@ node_modules
 *.cjs
 package.json
 package-lock.json
+.gitignore
+.nojekyll
+CHANGELOG.md
