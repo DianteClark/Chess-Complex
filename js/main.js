@@ -1,4 +1,5 @@
 // Chess Complex — app shell: menus, loadout, armory, sessions, in-game HUD, progression.
+import './canvasguard.js'; // 17.0 (A0): must load before any drawing code
 import { TRAILS, PIECES, ABILITIES, PASSIVES, PRESETS, STAT_POINTS, STAT_GAIN, SKINS, DEFAULT_SKINS, MAX_PLAYERS, TURN_MS, BOARDS, DEFAULT_BOARDS, FINISHERS, DEFAULT_FINISHERS, EMOTES, xpForLevel, titleFor, PLAYER_COLORS, QUESTS, WORLD_EVENTS, DISCOVERIES, RARITY, BUNDLES, MODES, SEASON, SEASON_REWARDS, ACHIEVEMENTS, TEAM_COLORS, MUTATORS } from './data.js';
 import { ensureProgress, seasonTier, seasonProgress, rewardLabel, addSeasonXp, checkAchievements, recordMatch, dailySeed, dailyScore, achievementValue, addMastery, masteryLevel } from './progression.js';
 import { previewDamage, legalMoves, abilityOptions, canMove, canAct, canUse, slotAbility, stats, effSpd, promoteOptions, predictOrder, unitById, alivePlayers, STORM, createTutorial, ARENA, isVoid, isCracked, ally } from './engine.js';
@@ -20,9 +21,14 @@ import { initScene, sequelReveal, showroom, modeArt, newsFrom } from './menus.js
 import { keepAwake } from './wakelock.js'; // 15.2: no screen timeout in lobbies and matches
 import * as F from './front15.js'; // F 15.0: title rank, profile editor, grouped Play, build slots + unlocks, location wheel
 import { GameHost, openServer, openClient, makeCode } from './net.js';
+import * as CL from './cloud.js'; // 17.0 (N2): cloud rooms (Host/Join use them when the server is healthy)
 import { chat, hostCheck as chatHostCheck, BOT_LINES } from './chat.js';
 import { voice } from './voice.js';
 import * as party from './party.js'; // 15.0 (N): parties that survive matches
+import * as CS from './cloudsave.js'; // 17.0 (P): cloud save + transfer codes
+import * as LBC from './leaderboard.js'; // 17.0 (L2): leaderboards screen, Daily submissions, rank lines
+import { dailySetup } from './daily.js'; // 17.0 (L2): shared Daily setup (client + cloud verifier)
+import * as RP from './replay.js'; // 17.0 (RP): replay viewer + Share Replay
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -72,7 +78,7 @@ function normalizeProfile(d) {
   return p;
 }
 profile = normalizeProfile(profile);
-const save = () => { try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch {} };
+const save = () => { CS.track(profile); try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch {} CS.dirty(); }; // 17.0 (P): cloud save ledger + debounced upload
 const CB_COLORS = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7', '#FFFFFF'];
 const ptsUsed = () => Object.values(profile.build.pts).reduce((a, b) => a + b, 0);
 
@@ -160,7 +166,8 @@ function go(name) {
   if (name === 'loadout') { delete $('#sr-bars').dataset.on; renderLoadout(); }
   SUI.onScreen(name);
   if (name === 'armory') renderArmory();
-  if (name === 'profile') { SUI.renderProfileScreen(); F.decorateProfile(); }
+  if (name === 'profile') { SUI.renderProfileScreen(); F.decorateProfile(); LBC.decorateProfile(); }
+  if (name === 'ranks') LBC.open(); // 17.0 (L2)
   if (name === 'title') setTimeout(() => { if (screen === 'title') SUI.maybeLogin(); }, 900);
   if (name === 'play') renderPlay();
   if (name === 'path') renderPath();
@@ -294,6 +301,7 @@ function renderPlay() {
   if (M === 'daily') {
     const L = dailyLoadout();
     $('#opt-daily').innerHTML = `<b>Today's loadout: ${PRESETS[L.preset].name} - ${PASSIVES[L.passive].name}</b><p>Everyone plays the same map, the same build, against 7 Hard bots. Score = placement + eliminations + damage.</p><div class="best"><div><b>${profile.daily.date === today() ? profile.daily.best : 0}</b><span>Today's best</span></div><div><b>${profile.daily.days.length}</b><span>Days played</span></div></div>`;
+    LBC.dailyNote($('#opt-daily')); // 17.0 (L2): "Your first run of the day counts" / Offline: won't be ranked / Practice
   }
   renderSoloMini();
 }
@@ -390,7 +398,7 @@ function renderCodexTab() {
 
 // ---------- discoveries ----------
 function discover(id) {
-  if (!session || session.mode === 'tutorial' || profile.discovered.includes(id)) return;
+  if (!session || session.mode === 'tutorial' || session.mode === 'replay' || profile.discovered.includes(id)) return; // 17.0 (RP): no rewards while watching
   profile.discovered.push(id); profile.marks += 60; save();
   const d = DISCOVERIES[id];
   director.say({ text: d.name, sub: d.desc, kicker: 'Combo discovered', tags: ['+60 Marks'], color: '#7fe0ff', tier: 'disc', prio: 56, key: 'disc' + id, ttl: 6000 });
@@ -421,7 +429,7 @@ function endSession() {
   session.dead = true;
   try { session.host && session.host.stop(); } catch {}
   { const srv = session.server, shut = () => { try { srv.close(); } catch {} }; if (srv) { if (location.search.includes('net=local')) shut(); else setTimeout(shut, 150); } } // let the goodbye flush
-  try { if (session.client && !session.byeReason) session.client.send({ t: 'part' }); } catch {} // a deliberate leave frees the seat at once
+  try { if (session.client && !session.byeReason && !session.noPart) session.client.send({ t: 'part' }); } catch {} // a deliberate leave frees the seat at once
   try { session.client && session.client.close(); } catch {}
   if (session.mode === 'client') party.clearMember(session);
   try { voice.stop(true); chat.clearMatch(); } catch {}
@@ -474,13 +482,14 @@ function startSolo(bots = null, modeArg = null) {
   let seed;
   const keepLvl = profile.botLevel;
   if (mode === 'daily') { const L = dailyLoadout(); players[0].build = { pts: L.pts, passive: L.passive, equips: L.equips }; seed = L.seed; profile.botLevel = 'hard'; }
-  if (mode === 'daily') { const rr = Math.random; let st = seed >>> 0; Math.random = () => { st = (Math.imul(st, 1664525) + 1013904223) >>> 0; return st / 4294967296; }; try { for (let i = 0; i < n; i++) players.push(botPlayer(i, players.map((p) => p.name))); } finally { Math.random = rr; } }
+  if (mode === 'daily') players.push(...dailySetup(today(), players[0]).players.slice(1)); // 17.0 (L2): js/daily.js, the same seeded bots the cloud Board rebuilds to verify a run
   else for (let i = 0; i < n; i++) players.push(botPlayer(i, players.map((p) => p.name)));
   profile.botLevel = keepLvl;
   const sess = { mode: 'solo', myPid: 'me', bots: n, gameMode: mode, hard: mode === 'daily' || profile.botLevel === 'hard' };
   session = sess;
   sess.host = new GameHost(players, (m) => { game.onMsg(m); botChatter(sess, m); }, { mode, seed, noTimer: mode !== 'blitz', location: (typeof window.__ccLoc === 'string' && window.__ccLoc) || undefined }); // 16.0 (L): test hook window.__ccLoc = '<location id>' forces a solo location (engine validates it)
   sess.send = (a) => sess.host.act('me', a);
+  if (mode === 'daily') sess.lbStart = LBC.dailyStart(); // 17.0 (L2): register the ranked attempt (first run of the day counts)
   sess.emote = (k) => hostEmote(sess, 'me', k); sess.chat = (m) => hostChat(sess, 'me', m);
   game.enter();
   sess.host.start(game.introDelay(sess.host.s, false)); // 15.1 (D): first turn waits for the intro (go() when it ends)
@@ -490,14 +499,17 @@ function startSolo(bots = null, modeArg = null) {
 function lobbyHTML(players, host, gm = 'royale', maxP = 0) {
   const M = MODES[gm] || {}, T = M.teams;
   const col = (i) => (T ? TEAM_COLORS[Math.floor(i / T) % 4] : (settings.cb ? CB_COLORS : PLAYER_COLORS)[i % 8]);
-  const PM = { leader: 'pm-leader', ready: 'pm-ready', wait: 'pm-wait', results: 'pm-wait pm-results', away: 'pm-wait pm-away' }, PL = { ready: 'Ready', wait: 'Not ready', results: 'On results', away: 'Reconnecting' }; // 15.0 (N): party ready states
-  const cards = players.map((p, i) => `<li class="pcard ${p.pid === 'me' ? 'host' : ''} ${p.isBot ? 'bot' : ''} ${PM[p.st] || ''}" data-pid="${esc(p.pid)}" style="--c:${col(i)};animation-delay:${i * 0.04}s">${T ? `<span class="team-tag">Team ${Math.floor(i / T) + 1}</span>` : M.siege || gm === 'siege' ? '<span class="team-tag">Ally</span>' : ''}<span class="pc-av"><img src="${pieceIcon('pawn', p.skin, null, 44)}" alt=""></span><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${p.pid === 'me' ? '<svg><use href="#m-crown"/></svg>Leader' : p.isBot ? '<svg><use href="#m-bot"/></svg>Bot' : PL[p.st] || 'Player'}</em>${host && p.pid !== 'me' ? `<button data-kick="${p.pid}" aria-label="Remove ${esc(p.name)}" title="Remove">&times;</button>` : ''}</li>`).join('');
+  const PM = { leader: 'pm-leader', ready: 'pm-ready', wait: 'pm-wait', results: 'pm-wait pm-results', away: 'pm-wait pm-away', play: 'pm-wait pm-results' }, PL = { ready: 'Ready', wait: 'Not ready', results: 'On results', away: 'Reconnecting', play: 'In the match' }; // 15.0 (N): party ready states; 17.0 (N2): cloud 'play' = still in the live match
+  const lead = (p) => p.pid === 'me' || p.st === 'leader'; // 17.0 (N2): cloud seats have real pids; the leader is st 'leader'
+  const cards = players.map((p, i) => `<li class="pcard ${lead(p) ? 'host' : ''} ${p.isBot ? 'bot' : ''} ${PM[p.st] || ''}" data-pid="${esc(p.pid)}" style="--c:${col(i)};animation-delay:${i * 0.04}s">${T ? `<span class="team-tag">Team ${Math.floor(i / T) + 1}</span>` : M.siege || gm === 'siege' ? '<span class="team-tag">Ally</span>' : ''}<span class="pc-av"><img src="${pieceIcon('pawn', p.skin, null, 44)}" alt=""></span><b>${esc(p.name)}${p.title ? `<span class="ttl">${esc(p.title)}</span>` : ''}</b><em>${lead(p) ? '<svg><use href="#m-crown"/></svg>Leader' : p.isBot ? '<svg><use href="#m-bot"/></svg>Bot' : PL[p.st] || 'Player'}</em>${host && !lead(p) ? `<button data-kick="${p.pid}" aria-label="Remove ${esc(p.name)}" title="Remove">&times;</button>` : ''}</li>`).join('');
   const open = Math.max(0, Math.min(8, maxP) - players.length);
   return cards + Array.from({ length: open }, (_, j) => { const i = players.length + j; return `<div class="pcard open" style="--c:${col(i)}"${T ? ` data-team="Team ${Math.floor(i / T) + 1}"` : ''}><span class="pc-av"><svg><use href="#m-plus"/></svg></span><b>Open seat</b><em>${host ? 'Waiting' : ''}</em></div>`; }).join('');
 }
-function startHostLobby() {
+function startHostLobby(viaPeer) {
   if (session && session.mode === 'host' && session.rematch) { session.rematch = false; session.players = session.players.filter((p) => p.isBot || p.pid === 'me' || session.conns.has(p.pid)); session.renderLobby(); return; }
+  if (session && session.cloud && session.lead && !session.dead && !session.byeReason) { cloudLobby(session); return; } // 17.0 (N2): the cloud leader's Back to Party
   endSession();
+  if (!viaPeer && CL.endpoint()) { cloudHostLobby(); return; } // 17.0 (N2): cloud room when healthy, else this PeerJS path
   if (!window.Peer && !location.search.includes('net=local')) { $('#host-status').textContent = 'Online play could not load. Check your connection and reload.'; $('#host-status').classList.add('err'); return; }
   const code = makeCode();
   const gm = profile.mode === 'daily' ? 'royale' : profile.mode;
@@ -569,6 +581,45 @@ function startHostLobby() {
     },
   });
   renderLobby();
+  if (cloudCustom) { cloudCustom = false; sess.custom = true; party.setGroup(sess, 'custom'); } // 17.0 (N2): Custom card tapped while the cloud check ran
+}
+// ---------- 17.0 (N2): cloud parties ----------
+// Every device is a client of the Room (js/cloud.js). The leader's device shows the Host screen (code, seats, party
+// options, Start) and its controls send {t:'lead', op}; members see today's Join lobby. Leadership passes when the
+// leader quits: the new leader's lobby switches to Host, a demoted one to Join. Matches arrive as today's 'start' and
+// 'state' messages (lockstep replay inside cloud.js), so the game screen runs the same code as PeerJS play.
+let cloudCustom = false, hostGen = 0;
+function cloudHostLobby() {
+  const g = ++hostGen, hs = $('#host-status');
+  $('#host-code').textContent = '-----'; $('#host-lobby').innerHTML = ''; { const po = $('#party-opts'); if (po) po.innerHTML = ''; }
+  hs.innerHTML = '<span class="cc-wait" aria-hidden="true"></span>Opening room...'; hs.classList.remove('err'); $('#btn-start-host').disabled = true; // the cloud check may take up to ~6 s on a slow phone
+  const still = () => g === hostGen && screen === 'host' && !session;
+  const fallback = () => { if (still()) startHostLobby(true); };
+  const up = (ok) => { if (!still()) return; if (!ok) { fallback(); return; } CL.createRoom().then((code) => { if (still()) joinGame('cloud', code); }, () => { CL.markDown(); fallback(); }); };
+  const now = CL.healthyNow(); if (now === null) CL.healthy().then(up); else up(now);
+}
+function cloudLobby(sess, m) {
+  m = m || sess.lobbyMsg; if (!m || session !== sess) return;
+  sess.lead = !!sess.myPid && m.leader === sess.myPid;
+  party.onLobby(sess, m);
+  if (!sess.lead) { if (screen === 'host') go('join'); drawJoinLobby(m); party.renderMember(sess); return; }
+  if (screen === 'join') { go('host'); return; } // promoted: go('host') -> startHostLobby -> back here on the Host screen
+  const M = MODES[m.mode] || MODES.royale, maxP = m.maxP || M.players[1];
+  sess.gameMode = MODES[m.mode] ? m.mode : 'royale'; sess.maxP = maxP; sess.players = Array.isArray(m.players) ? m.players : [];
+  $('#host-code').textContent = sess.code;
+  const hs = $('#host-status'); if (!sess.client.reconnecting) { hs.textContent = 'Room open. Share the code with friends.'; hs.classList.remove('err'); }
+  if (screen === 'host') $('#host-lobby').innerHTML = lobbyHTML(sess.players, true, sess.gameMode, maxP);
+  $('#lobby-count').textContent = `${M.short} - ${sess.players.length}/${maxP}`;
+  party.renderCloudHost(sess);
+  voice.changed();
+  if (cloudCustom) { cloudCustom = false; sess.client.send({ t: 'lead', op: 'group', group: 'custom' }); }
+}
+function cloudSeat(m) {
+  const s = game.s, u = s && session && m.pid !== session.myPid && s.units.find((v) => v.pid === m.pid && v.kind === 'player');
+  if (!u || s.over || screen !== 'game') return;
+  if (m.why === 'drop' && u.alive) game.feed(`<b>${esc(u.name)}</b> lost connection - a bot plays until they are back`);
+  else if (m.why === 'leave' && u.alive) game.feed(`<b>${esc(u.name)}</b> forfeited - a bot takes over`);
+  else if (m.why === 'back') game.feed(`<b>${esc(u.name)}</b> reconnected`);
 }
 function sanitizePts(p) {
   const out = { hp: 0, atk: 0, def: 0, spd: 0 }; let left = STAT_POINTS;
@@ -576,20 +627,26 @@ function sanitizePts(p) {
   return out;
 }
 function hostAddBot() {
+  if (session && session.cloud) { if (!session.lead || session.players.length >= session.maxP) { sfx.error(); return; } session.client.send({ t: 'lead', op: 'add-bot' }); sfx.tap(); return; } // 17.0 (N2)
   if (!session || session.mode !== 'host' || session.players.length >= session.maxP) { sfx.error(); return; }
   session.players.push(botPlayer(session.players.length, session.players.map((p) => p.name))); sfx.tap(); session.renderLobby();
 }
 function startHost() {
-  const sess = session; if (!sess || sess.players.length < 2) return;
-  sess.players = sess.players.filter((p) => p.isBot || p.pid === 'me' || sess.conns.has(p.pid));
+  const sess = session;
+  if (sess && sess.cloud) { if (sess.lead) sess.client.send({ t: 'lead', op: 'start' }); return; } // 17.0 (N2): the Room starts it; 'start' arrives like a member's
+  if (!sess || sess.players.length < 2) return;
+  if (sess.started && sess.host && !sess.host.s.over) return; // 17.0 (N2): one match at a time (a second Start tap used to restart everyone's intro and leave a ghost host running)
+  sess.players = sess.players.filter((p) => p.isBot || p.pid === 'me' || sess.conns.has(p.pid) || p.away); // 17.0 (N2): a member whose phone is reconnecting keeps the seat (a bot plays it until they are back)
   const minP = Math.max(2, MODES[sess.gameMode].players[0]);
   if (sess.players.length < minP) { toast(`${MODES[sess.gameMode].name} needs at least ${minP} players. Add bots to fill.`); sess.renderLobby(); return; }
   { const st = party.canStart(sess); if (!st.ok) { toast(st.why); sfx.error(); sess.renderLobby(); return; } } // 15.0 (N): members ready up first
   sess.started = true; sess.left = new Set(); for (const c of sess.conns.values()) c.left = false;
   sess.players[0] = { ...me() };
   const mid = party.onStart(sess); matchKey = mid;
+  try { sess.host && sess.host.stop(); } catch {} // 17.0 (N2): never two GameHosts publishing into one session
   sess.host = new GameHost(sess.players, (m) => { hostEmit(sess, m); botChatter(sess, m); }, { mode: sess.gameMode, ...party.matchOpts(sess) });
   sess.send = (a) => sess.host.act('me', a);
+  for (const p of sess.players) if (p.away && !p.isBot && !sess.conns.has(p.pid)) sess.host.setBot(p.pid); // resumes with its token like a mid-match drop
   for (const c of sess.conns.values()) c.send({ t: 'start', pid: c.pid, mid });
   game.enter();
   sess.host.start(game.introDelay(sess.host.s, true)); // 15.1 (D): first turn waits for every screen's intro (fixed, host clock)
@@ -601,14 +658,22 @@ function drawJoinLobby(m) {
   $('#join-lobby').innerHTML = lobbyHTML(Array.isArray(m.players) ? m.players : [], false, m.mode, (M.players || [2, 8])[1]);
   $('#join-lobby-panel .lbl').textContent = `Party - ${M.name}`;
 }
-function joinGame() {
-  const code = $('#in-code').value.trim().toUpperCase();
-  const st = $('#join-status');
+let joinGen = 0;
+// 17.0 (N2): via 'cloud' | 'peer' | undefined (decide: cloud room when the server is healthy, else PeerJS);
+// hostCode = the cloud leader's fresh room (cloudHostLobby), shown on the Host screen.
+function joinGame(via, hostCode) {
+  const code = hostCode || $('#in-code').value.trim().toUpperCase();
+  const st = $(hostCode ? '#host-status' : '#join-status');
   if (code.length !== 5) { st.textContent = 'Codes are 5 characters.'; st.classList.add('err'); sfx.error(); return; }
-  if (!window.Peer && !location.search.includes('net=local')) { st.textContent = 'Online play could not load. Check your connection and reload.'; st.classList.add('err'); return; }
-  endSession(); party.resetJoin();
+  if (via === undefined && CL.endpoint()) {
+    const ok = CL.healthyNow(), g = ++joinGen;
+    if (ok === null) { st.innerHTML = '<span class="cc-wait" aria-hidden="true"></span>Connecting...'; st.classList.remove('err'); CL.healthy().then((up) => { if (g === joinGen && screen === 'join') joinGame(up ? 'cloud' : 'peer'); }); return; }
+    via = ok ? 'cloud' : 'peer';
+  }
+  if (via !== 'cloud' && !window.Peer && !location.search.includes('net=local')) { st.textContent = 'Online play could not load. Check your connection and reload.'; st.classList.add('err'); return; }
+  endSession(); if (!hostCode) party.resetJoin();
   st.textContent = 'Connecting...'; st.classList.remove('err');
-  const sess = { mode: 'client', myPid: null, code };
+  const sess = { mode: 'client', myPid: null, code, cloud: via === 'cloud' };
   session = sess;
   // 15.0 (N): the party is over for this member (leader left, kicked, full, connection lost): clear the lobby everywhere
   const gone = (msg) => {
@@ -616,14 +681,17 @@ function joinGame() {
     st.textContent = msg; st.classList.add('err');
     if (screen === 'game') { toast(msg); if (game.s && !game.s.over && !game.resultsShown) game.showResults(true, 'hostleft'); }
   };
-  sess.client = openClient(code, {
+  sess.client = (sess.cloud ? CL.openRoom : openClient)(code, {
     // 15.0 (N): the link reconnects by itself (net.js); while it is down the host's bot plays this seat
     onDrop: () => { if (session !== sess || sess.byeReason) return; party.netBanner('Connection lost. Reconnecting...'); if (screen === 'join') st.textContent = 'Connection lost. Reconnecting...'; },
-    onOpen: (again) => { if (session !== sess) return; if (!again) st.textContent = 'Connected. Joining lobby...'; let tok = sess.tok || ''; try { tok = tok || sessionStorage.getItem('cc_tok_' + code) || Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem('cc_tok_' + code, tok); } catch {} sess.tok = tok; /* 15.0 (N): per tab (survives a reload), so two tabs never share a seat */ sess.client.send({ token: tok, t: 'join', name: profile.name, title: profile.title, trail: profile.trail, skin: profile.skin, finisher: profile.finisher, build: profile.build }); },
+    onOpen: (again) => { if (session !== sess) return; if (!again) st.textContent = 'Connected. Joining lobby...'; let tok = sess.tok || ''; try { tok = tok || sessionStorage.getItem('cc_tok_' + code) || Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem('cc_tok_' + code, tok); } catch {} sess.tok = tok; /* 15.0 (N): per tab (survives a reload), so two tabs never share a seat */ sess.client.send({ token: tok, t: 'join', name: profile.name, title: profile.title, trail: profile.trail, skin: profile.skin, finisher: profile.finisher, build: profile.build, ...(sess.cloud ? { mode: profile.mode, botLevel: profile.botLevel, avatar: profile.avatar } : {}) }); }, // 17.0 (N2): the cloud Room opens on the first player's mode
     onData: (m) => {
       if (session !== sess) return;
       if (m.t === 'welcome') { const again = !!sess.myPid; sess.myPid = m.pid; party.netBanner(null); st.classList.remove('err'); st.textContent = 'In the lobby.'; if (again && screen === 'game') toast('Reconnected'); else if (!again) sfx.select(); party.renderMember(sess); }
-      else if (m.t === 'lobby') { sess.lobby = Array.isArray(m.players) ? m.players : []; voice.changed(); drawJoinLobby(m); party.onLobby(sess, m); }
+      else if (m.t === 'lobby') { sess.lobby = Array.isArray(m.players) ? m.players : []; voice.changed(); if (sess.cloud) cloudLobby(sess, m); else { drawJoinLobby(m); party.onLobby(sess, m); } }
+      else if (m.t === 'seat') cloudSeat(m); // 17.0 (N2): a seat went to a bot / came back (feed line)
+      else if (m.t === 'replay' && typeof m.id === 'string' && (!m.mid || m.mid === sess.mid)) { sess.replayId = m.id.slice(0, 8); if (game.resultsShown) RP.results(sess, game.s); } // 17.0 (RP): the Room saved this match's replay (S2: {t:'replay', mid, id})
+      else if (m.t === 'err') { if (typeof m.why === 'string' && m.why) toast(m.why.slice(0, 80)); sfx.error(); }
       else if (m.t === 'full' || m.t === 'bye') { if (sess.byeReason) return; sess.byeReason = m.reason || 'full'; gone({ full: 'That lobby is full.', started: 'That match has already started.', kicked: 'The host removed you from the lobby.', ended: 'The host ended the match.', closed: 'The party leader left, so the party has closed.' }[sess.byeReason] || 'Disconnected.'); }
       else if (m.t === 'start') {
         // 15.2 (N): owner bug "froze after our second match": a reconnect while this member waits in the party lobby
@@ -631,6 +699,7 @@ function joinGame() {
         if (m.resume && m.mid && m.mid === sess.mid && (sess.benched || screen !== 'game')) { sess.myPid = m.pid; return; }
         sess.myPid = m.pid; sess.benched = false; sess.amReady = false; party.netBanner(null);
         if (m.resume && m.mid && m.mid === sess.mid && game.s && screen === 'game') return; // 15.0 (N): reconnected mid-match: carry on where we were
+        if (m.mid && m.mid === sess.mid && screen === 'game' && !(game.s && game.s.over)) return; // 17.0 (N2): a repeated start for the match on screen (or one whose first state is still on its way) must not reset it mid-intro
         sess.mid = m.mid; matchKey = typeof m.mid === 'string' ? m.mid.slice(0, 24) : 'm' + Date.now(); game.enter();
       }
       else if (m.t === 'state') { if (!sess.benched) game.onMsg(m); } // back in the party lobby: the old match plays on without us
@@ -644,6 +713,8 @@ function joinGame() {
     },
     onError: (t) => {
       if (session !== sess) return;
+      // 17.0 (N2): no cloud room with that code (a PeerJS-hosted party) or the cloud is unreachable: today's path
+      if (sess.cloud) { session = null; if (t !== 'peer-unavailable') CL.markDown(); if (hostCode) { if (screen === 'host') startHostLobby(true); } else if (screen === 'join') joinGame('peer'); return; }
       st.textContent = t === 'peer-unavailable' ? 'No match found with that code.' : t === 'timeout' ? 'Could not reach that match. Check the code and try again.' : 'Connection error. Try again.';
       st.classList.add('err'); sfx.error();
     },
@@ -780,7 +851,7 @@ const game = {
     this.lastAlive = alive;
     // 15.2 (N): a finished state that arrives without its 'over' event (the link dropped just as the match ended and
     // the reconnect resent the final state) still leads to results instead of a dead board
-    if (this.s.over && !this.resultsShown && session.mode !== 'tutorial' && !(m.ev || []).some((e) => e.e === 'over')) this.after(() => { if (this.s && this.s.over && !this.resultsShown) this.showResults(); }, 2500);
+    if (this.s.over && !this.resultsShown && session.mode !== 'tutorial' && !session.replay && !(m.ev || []).some((e) => e.e === 'over')) this.after(() => { if (this.s && this.s.over && !this.resultsShown) this.showResults(); }, 2500);
     this.refresh();
   },
   handleEvents(ev, first) {
@@ -797,7 +868,7 @@ const game = {
     for (const e of ev) {
       if (!tut) this.hud15(e, s, myId); // D 15.0: status, boss King, crown telegraph, Ascension and pawn-line callouts
       if (!tut) tactics16(this, e, s, myId, E16); // D 16.0: overkill, guard, second wind, hold, interest, reversal
-      if (e.e === 'dmg' && e.id === myId) { if (e.self) continue; const src = e.storm ? 'The storm' : e.meteor ? 'Meteors' : e.lava ? 'Lava' : e.trap ? 'A trap' : (unitById(s, e.src) || {}).name || 'Unknown'; this.taken[src] = (this.taken[src] || 0) + e.n; this.since[src] = (this.since[src] || 0) + e.n; }
+      if (e.e === 'dmg' && e.id === myId) { if (e.self) continue; const src = e.sd ? 'Sudden Death' : e.storm ? 'The storm' : e.meteor ? 'Meteors' : e.lava ? 'Lava' : e.trap ? 'A trap' : (unitById(s, e.src) || {}).name || 'Unknown'; this.taken[src] = (this.taken[src] || 0) + e.n; this.since[src] = (this.since[src] || 0) + e.n; }
       if (e.e === 'timeout' && e.id === myId) { toast('Time ran out - turn skipped'); sfx.error(); }
       if (e.e === 'turn' && e.id === myId) { const lines = Object.entries(this.since).sort((a, b) => b[1] - a[1]); if (lines.length) this.after(() => this.feed(`<span class="x">Since your last turn:</span> ${lines.map(([n, v]) => `<b>${esc(n)}</b> -${v}`).join(', ')}`), 600); this.since = {}; } // R 10.3: the camera director focuses my piece (and clears a manual override) when my turn plays
       if (e.e === 'turn' && e.id === myId) this.after(() => { if (!tut) this.banner('Your Turn', hasStatus(this.me, 'freeze') ? 'Frozen - attack only' : hasStatus(this.me, 'stun') ? 'Stunned - move only' : 'Round ' + s.round, ''); sfx.turn(); $('#h-actions').classList.remove('myturn'); void $('#h-actions').offsetWidth; $('#h-actions').classList.add('myturn'); }, 250);
@@ -830,7 +901,7 @@ const game = {
         const v = unitById(s, e.id); if (!v || v.kind !== 'player') continue;
         const k = e.by ? unitById(s, e.by) : null;
         const ico = (u) => `<img src="${pieceIcon(u.piece, u.skin, null, 18)}" alt="">`;
-        this.after(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : e.cause === 'lava' ? 'burned in the lava' : e.cause === 'trap' ? 'was caught in a trap' : e.cause === 'geyser' ? 'was launched by a geyser' : e.cause === 'crumble' ? 'fell through the floor' : e.cause === 'earthquake' ? 'was swallowed by the quake' : k && k.kind === 'hollow' ? 'was overrun by Hollows' : 'fell to the storm'}</span>`, 'death' + e.id), 400);
+        this.after(() => this.feed(k && k.id !== v.id ? `${ico(k)}<b style="color:${k.color}">${esc(k.name)}</b><span class="x">took</span>${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b>` : `${ico(v)}<b style="color:${v.color}">${esc(v.name)}</b><span class="x">${e.cause === 'meteor' ? 'was crushed by a meteor' : e.cause === 'lava' ? 'burned in the lava' : e.cause === 'trap' ? 'was caught in a trap' : e.cause === 'geyser' ? 'was launched by a geyser' : e.cause === 'crumble' ? 'fell through the floor' : e.cause === 'earthquake' ? 'was swallowed by the quake' : e.cause === 'sudden' ? 'burned out in Sudden Death' : k && k.kind === 'hollow' ? 'was overrun by Hollows' : 'fell to the storm'}</span>`, 'death' + e.id), 400);
         if (e.shutdown && k) this.after(() => this.announce('Shutdown', `${k.name} ended ${v.name}'s streak`, k.color, 'shutdown', 3, { group: 'k' + k.id, kicker: 'Streak ended', tier: 2, prio: 78 }), 700);
         if (e.regicide && k) this.after(() => this.announce('Regicide', `${k.name} toppled the King`, '#ffd24d', 'regicide', 5, { group: 'k' + k.id, kicker: 'The Crown shatters', tier: 4, prio: 99, nameSub: false, subHtml: `<b style="color:${k.color}">${esc(k.name)}</b> toppled the King` }), 700);
         if (s.teams && !s.over && e.id !== myId && this.me && ally(this.me, v) && this.me.alive) this.after(() => this.banner('Ally Down', 'Step on their soul within 3 rounds to revive them', 'red', { kicker: v.name, prio: 60, key: 'ally' + v.id }), 900);
@@ -857,7 +928,7 @@ const game = {
       if (e.e === 'enrage') { const u = unitById(s, e.id); if (u && !this.juice.enraged) { this.juice.enraged = 1; this.after(() => this.banner(`${u.name} Enrages`, 'Faster and stronger every round', 'red', { kicker: 'Boss', key: 'enrage', tier: 2, prio: 68 }), 300); } }
       if (e.e === 'shieldBreak') { const u = unitById(s, e.id); if (u) this.feed(`<b style="color:#9df3ff">Shield broken</b><span class="x">${esc(u.name)}</span>`, 'shield' + e.id); }
       if (e.e === 'summon') this.after(() => this.banner('The Dead Rise', `${(unitById(s, e.id) || { name: 'The Regent' }).name} raises the fallen`, 'violet', { kicker: 'Boss', key: 'summon', tier: 2, prio: 70 }), 300);
-      if (e.e === 'over') this.after(() => { if (this.resultsShown) this.refreshFinal(); else this.showResults(); }, 4800);
+      if (e.e === 'over') this.after(() => { if (session && session.replay) { session.replay.over(); return; } if (this.resultsShown) this.refreshFinal(); else this.showResults(); }, 4800);
     }
   },
   // Play of the Match: keep the single most dramatic action (before/after states + its events).
@@ -894,7 +965,7 @@ const game = {
     clearTimeout(this.potmT);
     this.potmT = setTimeout(() => { if (!this.potmOn) return; if (r.slowmo) r.slowmo(0.55, 2.4); r.setState(structuredClone(B.next), B.ev); }, 900);
   },
-  closePotm() { this.potmOn = false; clearTimeout(this.potmT); $('#m-potm').classList.add('hidden'); $('#m-results').classList.remove('hidden'); },
+  closePotm() { this.potmOn = false; clearTimeout(this.potmT); $('#m-potm').classList.add('hidden'); if (!(session && session.replay)) $('#m-results').classList.remove('hidden'); }, // 17.0 (RP): back to the replay viewer
   refreshFinal() {
     const s = this.s, u = this.me; if (!s || !u) return;
     const top3 = s.units.filter((v) => v.kind === 'player').sort((a, b) => (a.alive ? 1 : a.place) - (b.alive ? 1 : b.place)).slice(0, 3);
@@ -970,17 +1041,18 @@ const game = {
   },
   introPlan(s) { const wheel = !!s.location, brief = this.introBrief(s); return { wheel, brief, ms: introMs({ contenders: true, wheel, brief }) }; },
   // How long the host holds the first turn back (net.js GameHost.start(ms)): the whole intro, plus link latency online
-  introDelay(s, online) { return this.wantsIntro(s) ? this.introPlan(s).ms + (online ? INTRO.net : 0) : 0; },
-  showBrief(b) {
+  introDelay(s, online) { if (!this.wantsIntro(s)) return 0; const p = this.introPlan(s); return p.ms + (online ? INTRO.net : this.soloBrief() && p.brief ? INTRO.soloBrief - briefMs(p.brief) : 0); }, // 17.0 (D2): solo's briefing waits for a tap (go() ends the hold)
+  soloBrief() { return !!(session && session.mode === 'solo'); }, // 17.0 (D2)
+  showBrief(b, ms) {
     const root = $('#s-game'); const el = document.createElement('div');
     el.className = 'intro-brief' + (settings.motion ? ' calm' : ''); el.id = 'intro-brief'; el.style.setProperty('--lc', b.color || '#ffd24d');
-    el.innerHTML = briefHTML(b); root.appendChild(el);
+    el.innerHTML = briefHTML(b, { ms }); root.appendChild(el); // 17.0 (D2): ms > 0 = draining bar (online clock), 0 = tap to continue
     try { sfx.whoosh(); } catch {}
     return { end: () => { el.classList.add('out'); setTimeout(() => el.remove(), 320); } };
   },
   matchIntro(s) {
     const gen = this.gen, plan = this.introPlan(s), t0 = performance.now();
-    const online = !!(session && session.mode !== 'solo');
+    const online = !!(session && session.mode !== 'solo' && session.mode !== 'replay'); // 17.0 (RP): a replay paces itself
     const steps = [
       { id: 'contenders', dot: true, ms: INTRO.ct, show: () => { this.showContenders(); return { end: () => this.hideContenders() }; } },
       plan.wheel && { id: 'wheel', dot: true, ms: 0, show: (api) => {
@@ -988,7 +1060,7 @@ const game = {
         if (!w || typeof w !== 'object') { setTimeout(api.next, 0); return {}; }
         return { tap: () => w.tap(), end: () => w.close() };
       } },
-      plan.brief && { id: 'brief', dot: true, ms: briefMs(plan.brief), show: () => this.showBrief(plan.brief) },
+      plan.brief && (() => { const solo = this.soloBrief(), ms = solo ? INTRO.soloBrief : briefMs(plan.brief); return { id: 'brief', dot: true, ms, tapText: '', minTap: 900, show: () => this.showBrief(plan.brief, solo ? 0 : ms) }; })(), // 17.0 (D2): longer read, the card says Tap to continue; solo waits for the tap
     ];
     const round = () => {
       if (gen !== this.gen || !this.s) return;
@@ -998,7 +1070,7 @@ const game = {
       const S = this.s, kick = (MODES[S.mode] || {}).name;
       if (S.siege) this.banner('Hold the Line', `${S.siege.waves} waves. Survive together.`, 'cyan', { kicker: kick, prio: 45, ttl: 4000 });
       else this.banner('Round 1', S.teams ? 'Last team standing wins' : 'Last piece standing wins', '', { kicker: kick, prio: 45, ttl: 4000 });
-      if (session && session.mode === 'solo' && session.host && session.host.go) session.host.go(); // solo: the first turn starts now
+      if (session && (session.mode === 'solo' || session.mode === 'replay') && session.host && session.host.go) session.host.go(); // solo: the first turn starts now (17.0 RP: a replay starts playing)
     };
     intro.run(steps, { root: $('#s-game'), skip: (profile.games || 0) > 0, onDone: () => {
       if (gen !== this.gen) return;
@@ -1015,7 +1087,7 @@ const game = {
   },
   tip(id, html) {
     profile.tips = profile.tips || [];
-    if (profile.tips.includes(id) || this.resultsShown || (session && session.mode === 'tutorial')) return;
+    if (profile.tips.includes(id) || this.resultsShown || (session && (session.mode === 'tutorial' || session.mode === 'replay'))) return;
     // queued in the Director's hint lane; only marked as seen once it is actually on screen
     const gen = this.gen;
     director.hint(html, { kind: 'tip', id, icon: pieceIcon('king', 'gilded', null, 34), onShow: () => { if (gen !== this.gen) return; profile.tips = profile.tips || []; if (!profile.tips.includes(id)) { profile.tips.push(id); save(); } } });
@@ -1600,7 +1672,7 @@ const game = {
       profile.xp += xpGain;
       while (profile.xp >= xpForLevel(profile.level)) { profile.xp -= xpForLevel(profile.level); profile.level++; levels++; profile.marks += 50; earned += 50; }
       this.achGain = checkAchievements(profile);
-      profile.played = [...profile.played.slice(-30), matchKey]; save();
+      profile.played = [...profile.played.slice(-30), matchKey]; save(); CS.flush(); // 17.0 (P): upload at match end
     } else { this.seasonGain = []; this.achGain = []; this.dailyScore = null; }
     $('#r-lvl').textContent = startLvl;
     $('#r-xptext').innerHTML = xpGain ? `+<span id="rx">0</span> XP` : '';
@@ -1627,6 +1699,7 @@ const game = {
     const tier = seasonTier(profile);
     $('#r-quests').insertAdjacentHTML('beforeend', `<div class="r-season" style="animation:rise .4s 1.1s both">Crown Path - Tier ${tier}${tier < SEASON.tiers ? ` (${profile.season.xp % SEASON.tierXp}/${SEASON.tierXp})` : ''}<div class="xpbar"><i style="width:${tier >= SEASON.tiers ? 100 : seasonProgress(profile) * 100}%"></i></div></div>` + unlocks.join(''));
     if (this.dailyScore != null) $('#r-quests').insertAdjacentHTML('afterbegin', `<div class="r-unlock"><span>Daily score: ${this.dailyScore}${this.dailyNew ? ' - new best!' : ''}</span><b>Best ${profile.daily.best}</b></div>`);
+    try { LBC.onResults({ daily: this.dailyScore != null, log: session && session.host && session.host.rec && session.host.rec.actions, result: { score: this.dailyScore, place }, start: session && session.lbStart, online: !!(session && session.cloud) && !quit }); } catch {} // 17.0 (L2): Daily rank / Crown Rating line
     if (unlocks.length) setTimeout(() => { sfx.buy(); uiFlash(); }, 1400);
     const winner = s.units.find((v) => v.id === s.winner);
     const wmate = winner && s.teams ? s.units.find((v) => v.kind === 'player' && v !== winner && v.team === winner.team) : null;
@@ -1642,6 +1715,7 @@ const game = {
     $('#btn-potm').classList.toggle('hidden', !this.best);
     if (this.best) $('#btn-potm').innerHTML = `Play of the Match <small style="color:${this.best.color}">${esc(this.best.name)}</small>`;
     $('#btn-menu').textContent = liveSpec && session && session.mode === 'host' ? 'Leave' : 'Menu';
+    try { RP.results(session, s); } catch {} // 17.0 (RP): Share / Watch Replay
     party.rematchButton(session, s, liveSpec); F.partyResults(session); // F 15.0: Back to Party styling // 15.0 (N): "Back to Party" online, "Play Again" solo
     $('#spec-bar').classList.add('hidden');
     $('#m-results').classList.remove('hidden');
@@ -1755,7 +1829,7 @@ $('#set-cam') && $('#set-cam').addEventListener('click', (e) => { const b = e.ta
 $('#set-quality').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); game.r.setQuality(settings.quality); $$('#set-quality button').forEach((x) => x.classList.toggle('on', x === b)); sfx.tap(); });
 function sig(str) { let h1 = 0x811c9dc5, h2 = 0x1b873593; for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 ^ (c + i), 2246822519); } return ((h1 >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 12); }
 function info(title, html) { $('#info-title').textContent = title; $('#info-body').innerHTML = html; $('#m-info').classList.remove('hidden'); }
-const WHATS_NEW = `<h4>16.0: Tactics</h4><ul><li><b>Every stat has an edge</b>: SPD gives the Speed Edge; ATK gives <b>Overkill</b> (damage past a kill spills half into a nearby enemy); DEF gives <b>Guard</b> (no single hit takes more than 60% minus your DEF of your max HP, never more than 35% at high DEF); HP gives <b>Second Wind</b> (once per match, a heal when a hit drops you below 25%).</li><li><b>Hold</b>: before you move, hold to act last this round. Let them come to you. Holding starts you 3 SPD later next round.</li><li><b>Shard Interest</b>: +1 shard each round for every 5 you hold (max +2). Save up for a Queen or spend now.</li><li><b>Four tempo abilities</b>: Seize (Knight), Hourglass (Bishop), Anchor (Rook) and Time Fracture (Queen) bend the turn order. Unlock them with Marks.</li><li><b>New location: Clockwork Spire</b>. A giant clock tower with its own music. <b>Cogwheels</b> carry pieces one step clockwise every round, and <b>Reversal</b> makes the slowest pieces act first for a round.</li><li><b>Turn strip</b> shows where the next round starts, held pieces, and Reversal rounds.</li><li><b>Balance</b>: every promotion road wins within about two points of the others; the King wins about 38%. Champion costs 7 shards with 98 HP, Assassin build 4 ATK / 4 SPD, Bruiser 4 HP / 4 ATK.</li></ul><h4>15.2</h4><ul><li><b>Fair turns</b>: every round, every piece gets exactly one turn, fastest SPD first. Nobody gets two moves before someone else gets one. SPD also gives a Speed Edge: +3% damage per point over your target (up to 15%).</li><li><b>Balance</b>: all four promotion roads (Pawn line, Ascend, Rook, Queen) win within a couple of points of each other; the King wins about 38% of matches. Queen SPD 12, Rook HP 134. Siege retuned for the new turns.</li><li><b>Voice chat fixed</b>: friends' voices play again on iPhone, and the volume slider shows its real level.</li><li><b>Screen stays on</b> during matches and lobbies.</li><li><b>One match intro</b> instead of three quick pop-ups: contenders, the location wheel, then one location card. Tap to go faster; returning players can skip.</li><li><b>Pawn line</b> shown as its own section in Promote (Veteran, then Champion, stays a pawn).</li><li><b>Spectating</b>: the board no longer shrinks to a strip, and zoom works.</li><li><b>Real-speed playback</b>: other players' turns play at normal speed and bots wait for your screen to catch up.</li><li><b>Fixed</b>: a freeze when starting a second match in a party.</li></ul><h4>15.1</h4><ul><li><b>Smoother matches</b>: World Tour scenery, lighting and boards draw far cheaper, so matches run as smoothly as before the update even on high quality.</li><li><b>Balance</b>: the King wins about 40% of matches. The pawn road is still a real path to victory but no longer the best one (Veteran 92 HP, Champion now 6 shards with slightly lower stats).</li><li><b>Readability</b>: every label in the Royal Pass, Abilities tab and collections is at least 11px.</li></ul><h4>15.0</h4><ul><li><b>World Tour</b>: 8 locations (Frost Citadel, Volcanic Forge, Sunken Temple, Royal Gardens, Desert Ruins, Iron Works, Astral Rift, Witchwood Bog), each with its own scenery, weather, music, hazards and signature events. A wheel picks where you fight, and your store board is laid over the location.</li><li><b>The King is a raid boss</b>: the Crown is marked a round early, the King gets a boss bar, a royal aura and two enraged phases, and teaming up strips its armour (Exposed). Regicide is the biggest moment in the game.</li><li><b>Status effects</b>: Burn, Poison, Freeze, Stun, Slow, Shield and Haste, shown on the pieces and your HUD.</li><li><b>Every piece can win</b>: hone to level 3 to Ascend (new passive and empowered ultimate), or stay a Pawn and promote to Veteran then Champion. The Queen now costs 11 shards.</li><li><b>New abilities</b>: 7 base abilities and 10 equips. Start with 5 base abilities and 2 equips per piece; unlock the rest with Marks.</li><li><b>Parties</b>: stay together between matches, pick mode and location, ready up. Dropped players reconnect automatically while a bot holds their seat.</li><li><b>Royal Pass</b>: a premium Crown Path lane for 3,000 Marks in Season 4: World Tour.</li><li><b>Modes regrouped</b> into Competitive, Co-op, Party, Challenge and Custom. Daily now gives everyone the same build and a location of the day.</li><li><b>Your profile</b>: tap the top-left chip to edit your name, title, avatar and banner. Your level and title sit under the logo.</li><li><b>Custom builds</b>: a Custom card with 3 saved build slots.</li><li><b>Zoom</b>: matches open on an 8x8 view around your piece; tap 8x8 / Board for the whole board.</li><li><b>Quick chat favourites</b>: pick 6 to 10 phrases; the rest live in All Phrases.</li><li><b>Fixed</b>: mic crackle in voice chat on iPhone, friends disconnecting in late Siege waves, the join lobby not clearing after the host left, menus slowing down after some modes, and name tags floating two tiles up.</li><li>New music for every location, new effects and sounds for everything above, new Ascended and pawn-line piece art, and 4 location finishers.</li></ul><h4>10.3</h4><ul><li><b>Turn-by-turn camera</b>: the camera glides to whoever is acting, frames their whole move or ability, and waits for it to finish before moving on. Back-to-back ultimates each get their own moment.</li><li><b>Camera setting</b>: Follow every turn, Follow my turns only, or Free. Pan or pinch and the camera stays put until your next turn; tap your portrait to recentre.</li><li><b>Microphone setup</b>: Join Voice explains the microphone first, then asks (this is what makes the iPhone Home Screen app show its prompt). Blocked? You get step-by-step help. Settings can test your mic with a live meter.</li><li><b>Chat log</b>: the last 3 messages stay on screen; tap them to scroll the whole match chat with timestamps, team tags and an unread count.</li><li>Turn timers include a short grace so the camera's playback never eats your time.</li></ul><h4>10.2.2</h4><ul><li><b>Voice chat works on iPhone</b>: the game's sound held the iPhone in playback-only mode, which blocks the microphone. Joining voice now switches the phone to play-and-record, and leaving switches it back.</li></ul><h4>10.2.1</h4><ul><li><b>Voice chat microphone fix</b>: Join Voice asks for microphone permission properly on phones, retries with simpler settings when a phone rejects the voice-tuned ones, and explains exactly how to allow the microphone on iPhone, Android or desktop. A new Turn On Mic button asks again without leaving voice.</li></ul><h4>10.2</h4><ul><li><b>Accurate taps</b>: zoomed-out taps land where your finger first touched, snap to the nearest legal tile, and hold the camera still. On tiny tiles, the first tap previews with a magnifier and the second confirms (turn on One-Tap in Settings to skip).</li><li><b>Move in the storm</b>: collapsed ground is now open floor, so pieces caught in the storm can always move out. Moves into the storm show in red. It still burns 20% max HP each turn.</li><li><b>Quick Chat</b>: 87 phrases in six categories, favourites, recently used, up to 12 phrases of your own, and team-only callouts in Squads.</li><li><b>Safer chat</b>: custom phrases are cleaned and filtered, spam is rate-limited, and you can mute anyone or show only preset phrases.</li><li><b>Voice chat (beta)</b>: opt-in push-to-talk or open mic with friends online, per-player mute and volume, and speaking indicators.</li><li>Eliminated players can still chat and talk while spectating.</li></ul><h4>10.1</h4><ul><li><b>Smoother</b>: the title screen, store and matches run much faster on phones, and auto quality reacts sooner.</li><li><b>New hazard art</b>: a royal Throne dais, erupting geysers, industrial conveyors, collapsing floors and Rift Storm tears.</li><li><b>Tidier screens</b>: every label at least 11px, every button at least 40px, and layout fixes on small phones and in landscape.</li><li><b>Lesson Complete</b> now shows your progress and what the next lesson covers.</li><li><b>Accurate text everywhere</b>: tutorials, Codex, How to Play and ability descriptions match the rules. The bounty world event is now called Royal Bounty.</li><li>Fixed: clipped emote names in Collections, the Lessons button spacing, and the tutorial saying the Crown appears at the centre.</li></ul><h4>10.0</h4><ul><li><b>Four new modes</b>: King of the Hill, Chaos, Gauntlet (co-op boss rush) and Mirror Match.</li><li><b>A living world</b>: rebuilt boards with real materials, dynamic lighting, shadows, new weather (rain, ash, aurora, sandstorms, fog) and a cinematic camera.</li><li><b>All-new piece art</b>: every piece re-sculpted and lit in 3D, with real materials and animated premium sets.</li><li><b>New effects</b>: every ability rebuilt, plus 11 new finishers.</li><li><b>The Director</b>: callouts, banners, tips and ultimate cinematics take turns in fixed lanes, so nothing stacks.</li><li><b>New soundtrack and sound</b>: an adaptive score with a theme for every mode, and a layered sound for every ability and finisher, with an announcer voice.</li><li><b>New Siege enemies</b> (Stalker, Hexer, Splitter, Brute) and a new boss, the Wraith Regent.</li><li><b>New world events and hazards</b>: Eclipse, Earthquake, Mana Surge, Royal Bounty, War Drums, Restless Dead, geysers, conveyors, a crumbling floor and Rift Storms.</li><li><b>Six new abilities and two new base abilities</b> (Bastion and Predator).</li><li><b>A rebuilt Store</b>: Mythic rarity, 25 piece sets, 13 boards, 14 trails, Collections, try-on previews and a wishlist.</li><li><b>Season 3: The Endgame</b>: a free 40-tier Crown Path.</li><li><b>Daily login streaks, a Profile screen and 26 new trophies</b>.</li><li><b>A whole new look</b>: new menus, title screen, loadout showroom and cinematic results.</li></ul><h4>5.0</h4><ul><li><b>Squads</b>: teams of two, no friendly fire, a Bond DEF bonus when you stick together, and revives: step on a fallen teammate's soul to bring them back.</li><li><b>Siege</b>: co-op against eight waves of hunting Hollows, with a Colossus boss on waves 4 and 8. The first Colossus drops the Crown.</li><li><b>Map hazards</b>: Magma Rift, Frostbite and Warpgates. Most matches roll one.</li><li><b>Five new abilities</b> (Tripwire, Lance, Penance, Quake, Gambit) and two new base abilities (Lifesteal, Last Stand).</li><li><b>The Announcer</b>: First Blood, Double Take, Shutdown, Regicide, Final Two and more.</li><li><b>Play of the Match</b>: the best move of every game, replayed in slow motion on the results screen.</li><li><b>Piece Mastery</b>: level each piece to 10 for titles and Marks.</li><li><b>Season 2: The Middlegame</b>: a fresh Crown Path with the Warden and Colossus sets, the Riftgate board and the Soulfire finisher.</li><li>Dozens of rules fixes, faster rendering, bigger tap targets and a landscape title screen.</li></ul><h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
+const WHATS_NEW = `<h4>17.0: Cloud</h4><ul><li><b>Online matches run on the server</b>: no phone has to host. Lock your screen, take a call, come back: the match keeps going and your seat waits for you (a bot plays it meanwhile). Phone-hosted play is still there as a backup.</li><li><b>Cloud save, no sign-up</b>: your progress saves automatically. Settings &gt; Transfer Code moves it to a new phone (copy it or scan the QR code).</li><li><b>Leaderboards</b>: a weekly Season board, the online Crown Rating, and a Daily Challenge board where the server replays every run to keep it fair. Your first Daily run each day counts. Tap the crown on the title screen.</li><li><b>Replays</b>: share any match with a link. Friends watch it on the real board with play, pause, 4x speed and jump to any round.</li><li><b>Bishops can Sidestep</b>: 1 tile straight to switch tile colour (it uses your action, so strike first).</li><li><b>Sudden Death is now clearly Sudden Death</b>: the last four tiles never fall, but everyone on them burns a little more each round. It no longer looks like storm damage on a safe tile.</li><li><b>Easier to follow</b>: damage numbers, callouts and ultimate cut-ins stay on screen long enough to read, the camera holds on each hit, and the location briefing waits for your tap.</li><li><b>Location is random every match</b> (pick it yourself in Custom), on a cleaner location card.</li><li>The spoken announcer is gone (music stings remain). Witchwood Bog's poison pools fit the floor tiles. Better voice-chat connections, chat moderation for custom phrases, and fixes for parties where someone reconnects as a match starts.</li></ul><h4>16.0: Tactics</h4><ul><li><b>Every stat has an edge</b>: SPD gives the Speed Edge; ATK gives <b>Overkill</b> (damage past a kill spills half into a nearby enemy); DEF gives <b>Guard</b> (no single hit takes more than 60% minus your DEF of your max HP, never more than 35% at high DEF); HP gives <b>Second Wind</b> (once per match, a heal when a hit drops you below 25%).</li><li><b>Hold</b>: before you move, hold to act last this round. Let them come to you. Holding starts you 3 SPD later next round.</li><li><b>Shard Interest</b>: +1 shard each round for every 5 you hold (max +2). Save up for a Queen or spend now.</li><li><b>Four tempo abilities</b>: Seize (Knight), Hourglass (Bishop), Anchor (Rook) and Time Fracture (Queen) bend the turn order. Unlock them with Marks.</li><li><b>New location: Clockwork Spire</b>. A giant clock tower with its own music. <b>Cogwheels</b> carry pieces one step clockwise every round, and <b>Reversal</b> makes the slowest pieces act first for a round.</li><li><b>Turn strip</b> shows where the next round starts, held pieces, and Reversal rounds.</li><li><b>Balance</b>: every promotion road wins within about two points of the others; the King wins about 38%. Champion costs 7 shards with 98 HP, Assassin build 4 ATK / 4 SPD, Bruiser 4 HP / 4 ATK.</li></ul><h4>15.2</h4><ul><li><b>Fair turns</b>: every round, every piece gets exactly one turn, fastest SPD first. Nobody gets two moves before someone else gets one. SPD also gives a Speed Edge: +3% damage per point over your target (up to 15%).</li><li><b>Balance</b>: all four promotion roads (Pawn line, Ascend, Rook, Queen) win within a couple of points of each other; the King wins about 38% of matches. Queen SPD 12, Rook HP 134. Siege retuned for the new turns.</li><li><b>Voice chat fixed</b>: friends' voices play again on iPhone, and the volume slider shows its real level.</li><li><b>Screen stays on</b> during matches and lobbies.</li><li><b>One match intro</b> instead of three quick pop-ups: contenders, the location wheel, then one location card. Tap to go faster; returning players can skip.</li><li><b>Pawn line</b> shown as its own section in Promote (Veteran, then Champion, stays a pawn).</li><li><b>Spectating</b>: the board no longer shrinks to a strip, and zoom works.</li><li><b>Real-speed playback</b>: other players' turns play at normal speed and bots wait for your screen to catch up.</li><li><b>Fixed</b>: a freeze when starting a second match in a party.</li></ul><h4>15.1</h4><ul><li><b>Smoother matches</b>: World Tour scenery, lighting and boards draw far cheaper, so matches run as smoothly as before the update even on high quality.</li><li><b>Balance</b>: the King wins about 40% of matches. The pawn road is still a real path to victory but no longer the best one (Veteran 92 HP, Champion now 6 shards with slightly lower stats).</li><li><b>Readability</b>: every label in the Royal Pass, Abilities tab and collections is at least 11px.</li></ul><h4>15.0</h4><ul><li><b>World Tour</b>: 8 locations (Frost Citadel, Volcanic Forge, Sunken Temple, Royal Gardens, Desert Ruins, Iron Works, Astral Rift, Witchwood Bog), each with its own scenery, weather, music, hazards and signature events. A wheel picks where you fight, and your store board is laid over the location.</li><li><b>The King is a raid boss</b>: the Crown is marked a round early, the King gets a boss bar, a royal aura and two enraged phases, and teaming up strips its armour (Exposed). Regicide is the biggest moment in the game.</li><li><b>Status effects</b>: Burn, Poison, Freeze, Stun, Slow, Shield and Haste, shown on the pieces and your HUD.</li><li><b>Every piece can win</b>: hone to level 3 to Ascend (new passive and empowered ultimate), or stay a Pawn and promote to Veteran then Champion. The Queen now costs 11 shards.</li><li><b>New abilities</b>: 7 base abilities and 10 equips. Start with 5 base abilities and 2 equips per piece; unlock the rest with Marks.</li><li><b>Parties</b>: stay together between matches, pick mode and location, ready up. Dropped players reconnect automatically while a bot holds their seat.</li><li><b>Royal Pass</b>: a premium Crown Path lane for 3,000 Marks in Season 4: World Tour.</li><li><b>Modes regrouped</b> into Competitive, Co-op, Party, Challenge and Custom. Daily now gives everyone the same build and a location of the day.</li><li><b>Your profile</b>: tap the top-left chip to edit your name, title, avatar and banner. Your level and title sit under the logo.</li><li><b>Custom builds</b>: a Custom card with 3 saved build slots.</li><li><b>Zoom</b>: matches open on an 8x8 view around your piece; tap 8x8 / Board for the whole board.</li><li><b>Quick chat favourites</b>: pick 6 to 10 phrases; the rest live in All Phrases.</li><li><b>Fixed</b>: mic crackle in voice chat on iPhone, friends disconnecting in late Siege waves, the join lobby not clearing after the host left, menus slowing down after some modes, and name tags floating two tiles up.</li><li>New music for every location, new effects and sounds for everything above, new Ascended and pawn-line piece art, and 4 location finishers.</li></ul><h4>10.3</h4><ul><li><b>Turn-by-turn camera</b>: the camera glides to whoever is acting, frames their whole move or ability, and waits for it to finish before moving on. Back-to-back ultimates each get their own moment.</li><li><b>Camera setting</b>: Follow every turn, Follow my turns only, or Free. Pan or pinch and the camera stays put until your next turn; tap your portrait to recentre.</li><li><b>Microphone setup</b>: Join Voice explains the microphone first, then asks (this is what makes the iPhone Home Screen app show its prompt). Blocked? You get step-by-step help. Settings can test your mic with a live meter.</li><li><b>Chat log</b>: the last 3 messages stay on screen; tap them to scroll the whole match chat with timestamps, team tags and an unread count.</li><li>Turn timers include a short grace so the camera's playback never eats your time.</li></ul><h4>10.2.2</h4><ul><li><b>Voice chat works on iPhone</b>: the game's sound held the iPhone in playback-only mode, which blocks the microphone. Joining voice now switches the phone to play-and-record, and leaving switches it back.</li></ul><h4>10.2.1</h4><ul><li><b>Voice chat microphone fix</b>: Join Voice asks for microphone permission properly on phones, retries with simpler settings when a phone rejects the voice-tuned ones, and explains exactly how to allow the microphone on iPhone, Android or desktop. A new Turn On Mic button asks again without leaving voice.</li></ul><h4>10.2</h4><ul><li><b>Accurate taps</b>: zoomed-out taps land where your finger first touched, snap to the nearest legal tile, and hold the camera still. On tiny tiles, the first tap previews with a magnifier and the second confirms (turn on One-Tap in Settings to skip).</li><li><b>Move in the storm</b>: collapsed ground is now open floor, so pieces caught in the storm can always move out. Moves into the storm show in red. It still burns 20% max HP each turn.</li><li><b>Quick Chat</b>: 87 phrases in six categories, favourites, recently used, up to 12 phrases of your own, and team-only callouts in Squads.</li><li><b>Safer chat</b>: custom phrases are cleaned and filtered, spam is rate-limited, and you can mute anyone or show only preset phrases.</li><li><b>Voice chat (beta)</b>: opt-in push-to-talk or open mic with friends online, per-player mute and volume, and speaking indicators.</li><li>Eliminated players can still chat and talk while spectating.</li></ul><h4>10.1</h4><ul><li><b>Smoother</b>: the title screen, store and matches run much faster on phones, and auto quality reacts sooner.</li><li><b>New hazard art</b>: a royal Throne dais, erupting geysers, industrial conveyors, collapsing floors and Rift Storm tears.</li><li><b>Tidier screens</b>: every label at least 11px, every button at least 40px, and layout fixes on small phones and in landscape.</li><li><b>Lesson Complete</b> now shows your progress and what the next lesson covers.</li><li><b>Accurate text everywhere</b>: tutorials, Codex, How to Play and ability descriptions match the rules. The bounty world event is now called Royal Bounty.</li><li>Fixed: clipped emote names in Collections, the Lessons button spacing, and the tutorial saying the Crown appears at the centre.</li></ul><h4>10.0</h4><ul><li><b>Four new modes</b>: King of the Hill, Chaos, Gauntlet (co-op boss rush) and Mirror Match.</li><li><b>A living world</b>: rebuilt boards with real materials, dynamic lighting, shadows, new weather (rain, ash, aurora, sandstorms, fog) and a cinematic camera.</li><li><b>All-new piece art</b>: every piece re-sculpted and lit in 3D, with real materials and animated premium sets.</li><li><b>New effects</b>: every ability rebuilt, plus 11 new finishers.</li><li><b>The Director</b>: callouts, banners, tips and ultimate cinematics take turns in fixed lanes, so nothing stacks.</li><li><b>New soundtrack and sound</b>: an adaptive score with a theme for every mode, and a layered sound for every ability and finisher, with an announcer voice.</li><li><b>New Siege enemies</b> (Stalker, Hexer, Splitter, Brute) and a new boss, the Wraith Regent.</li><li><b>New world events and hazards</b>: Eclipse, Earthquake, Mana Surge, Royal Bounty, War Drums, Restless Dead, geysers, conveyors, a crumbling floor and Rift Storms.</li><li><b>Six new abilities and two new base abilities</b> (Bastion and Predator).</li><li><b>A rebuilt Store</b>: Mythic rarity, 25 piece sets, 13 boards, 14 trails, Collections, try-on previews and a wishlist.</li><li><b>Season 3: The Endgame</b>: a free 40-tier Crown Path.</li><li><b>Daily login streaks, a Profile screen and 26 new trophies</b>.</li><li><b>A whole new look</b>: new menus, title screen, loadout showroom and cinematic results.</li></ul><h4>5.0</h4><ul><li><b>Squads</b>: teams of two, no friendly fire, a Bond DEF bonus when you stick together, and revives: step on a fallen teammate's soul to bring them back.</li><li><b>Siege</b>: co-op against eight waves of hunting Hollows, with a Colossus boss on waves 4 and 8. The first Colossus drops the Crown.</li><li><b>Map hazards</b>: Magma Rift, Frostbite and Warpgates. Most matches roll one.</li><li><b>Five new abilities</b> (Tripwire, Lance, Penance, Quake, Gambit) and two new base abilities (Lifesteal, Last Stand).</li><li><b>The Announcer</b>: First Blood, Double Take, Shutdown, Regicide, Final Two and more.</li><li><b>Play of the Match</b>: the best move of every game, replayed in slow motion on the results screen.</li><li><b>Piece Mastery</b>: level each piece to 10 for titles and Marks.</li><li><b>Season 2: The Middlegame</b>: a fresh Crown Path with the Warden and Colossus sets, the Riftgate board and the Soulfire finisher.</li><li>Dozens of rules fixes, faster rendering, bigger tap targets and a landscape title screen.</li></ul><h4>3.1</h4><ul><li><b>Spectate properly</b>: getting eliminated online never ends the match, and you can follow any player. Hosts get a warning before leaving.</li><li><b>Rejoin</b> a match after a reload with the same code.</li><li><b>Cheaper, smarter promotions</b>: Knight or Bishop for 2, Rook +4, Queen +7, Hone from 1. Evolving early never wastes shards.</li><li><b>Steadfast</b>: before round 6 a full-HP piece survives any single hit.</li><li><b>Lethal Range</b> warnings, Knights that face their moves, and pieces with personality.</li></ul><h4>3.0</h4><ul><li><b>Full promotion ladder</b>: the Promote menu shows every rung and you can climb several at once (Pawn to Rook for 8, to Queen for 15).</li><li><b>The Store</b>: a daily Featured shop with a 30% Deal of the Day, discounted Bundles, rarity tiers, and an item reveal for every unlock.</li><li><b>New cosmetics</b>: 5 piece sets, 3 boards (with snow and bubbles), 3 finishers, Trails that follow your piece, and Emote packs.</li><li><b>Showtime</b>: a contender reveal before every match (VS for Duels), a podium on the results screen, and your piece on display on the title screen.</li></ul>
 <h4>2.0 Modes</h4><ul><li><b>Blitz</b>: faster storm, 15 second turns, start with 2 shards.</li><li><b>Duel</b>: 1v1 in a tight arena.</li><li><b>Daily Challenge</b>: same map and build for everyone, chase your best score.</li></ul>
 <h4>Progression</h4><ul><li><b>Crown Path</b>: a free 30-tier season track with exclusive cosmetics and titles.</li><li><b>Trophies</b>: 21 achievements, each with Marks and a title.</li><li>Pick a title to show in lobbies and results.</li></ul>
 <h4>Balance</h4><ul><li>Heavy is the Head: the King no longer attunes, charges ultimates at half speed and takes 10% more damage. The Crown appears at a random safe spot.</li><li>Tank preset reworked. Regen scales with attunement.</li></ul>
@@ -1791,9 +1865,10 @@ document.addEventListener('click', (e) => {
     case 'do-import': try { const [body, mac] = $('#import-code').value.trim().split('.'); if (!mac || sig(body) !== mac) throw 0; const d = JSON.parse(decodeURIComponent(escape(atob(body)))); if (!d || typeof d !== 'object' || !d.build) throw 0; profile = normalizeProfile(d); save(); renderProfile(); $('#m-info').classList.add('hidden'); toast('Progress restored'); sfx.buy(); } catch { toast('That code did not work'); sfx.error(); } break;
     case 'start-solo': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startSolo(null, profile.mode); break;
     case 'copy-code': copy(session && session.code, 'Code copied'); break;
-    case 'copy-link': copy(session && `${location.origin}${location.pathname}?join=${session.code}`, 'Invite link copied'); break;
+    case 'copy-link': copy(session && `${location.origin}${location.pathname}?join=${session.code}${(() => { const c = new URLSearchParams(location.search).get('cloud'); return c ? '&cloud=' + encodeURIComponent(c) : ''; })()}`, 'Invite link copied'); break; // 17.0 (N2): a ?cloud= override rides along
     case 'add-bot': hostAddBot(); break;
-    case 'fill-bots': while (session && session.players && session.players.length < session.maxP) hostAddBot(); break;
+    case 'fill-bots': if (session && session.cloud) { if (session.lead) session.client.send({ t: 'lead', op: 'fill-bots' }); sfx.tap(); break; } // 17.0 (N2)
+      while (session && session.players && session.players.length < session.maxP) hostAddBot(); break;
     case 'start-host': matchKey = 'm' + Date.now(); sfx.select(); uiFlash(); startHost(); break;
     case 'join': joinGame(); break;
     case 'danger': game.danger = !game.danger; $('#btn-danger').classList.toggle('on', game.danger); game.refresh(); sfx.tap(); if (game.danger) toast('Red tiles: where enemy pieces can attack next turn'); break;
@@ -1823,6 +1898,7 @@ document.addEventListener('click', (e) => {
 });
 $('#host-lobby').addEventListener('click', (e) => {
   const b = e.target.closest('[data-kick]'); if (!b || !session) return;
+  if (session.cloud) { if (session.lead) session.client.send({ t: 'lead', op: 'kick', pid: b.dataset.kick }); sfx.tap(); return; } // 17.0 (N2)
   const pid = b.dataset.kick; const c = session.conns.get(pid);
   if (c) { c.send({ t: 'bye', reason: 'kicked' }); setTimeout(() => c.close(), 200); session.conns.delete(pid); }
   if (session.tokens) delete session.tokens[pid];
@@ -1865,27 +1941,32 @@ $('#coach-next').addEventListener('click', () => { sfx.select(); if (tutorial) t
 $('#coach-text').addEventListener('click', () => { clearInterval(coachUI.tw); $('#coach-text').textContent = coachUI.full || ''; });
 $('#modes').addEventListener('click', (e) => {
   // F 15.0: the Custom card opens the party/custom lobby (N's party.js renders the rules into the Host screen)
-  if (e.target.closest('[data-custom]')) { const cm = F.customModes(); if (!cm.includes(profile.mode)) profile.mode = cm[0] || 'royale'; save(); sfx.select(); uiFlash(); go('host'); if (session && session.mode === 'host') { session.custom = true; party.setGroup(session, 'custom'); if (session.renderLobby) session.renderLobby(); } return; }
+  if (e.target.closest('[data-custom]')) { const cm = F.customModes(); if (!cm.includes(profile.mode)) profile.mode = cm[0] || 'royale'; save(); sfx.select(); uiFlash(); go('host'); if (session && session.mode === 'host') { session.custom = true; party.setGroup(session, 'custom'); if (session.renderLobby) session.renderLobby(); } else if (session && session.cloud && session.lead) session.client.send({ t: 'lead', op: 'group', group: 'custom' }); else if (!session && CL.endpoint()) cloudCustom = true; return; } // 17.0 (N2): cloud leader / cloud check still running
   const b = e.target.closest('[data-mode]'); if (!b) return; profile.mode = b.dataset.mode; save(); sfx.select(); renderPlay();
 });$('#seg-diff').addEventListener('click', (e) => { const b = e.target.closest('[data-diff]'); if (!b) return; profile.botLevel = b.dataset.diff; save(); sfx.select(); renderSoloMini(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; const open = [...document.querySelectorAll('.modal:not(.hidden)')].pop(); if (open && open.id !== 'm-results' && open.id !== 'm-lesson') open.classList.add('hidden'); });
 addEventListener('beforeunload', (e) => { if (session && session.mode === 'host' && game.s && !game.s.over && screen === 'game' && session.conns.size) { e.preventDefault(); e.returnValue = ''; } });
-addEventListener('pagehide', () => endSession());
+addEventListener('pagehide', () => { if (session && session.cloud) session.noPart = true; endSession(); }); // 17.0 (N2): a cloud tab closing/reloading is a drop (the Room keeps the seat for a resume), not a quit
 bgInit();
 game.init();
 renderProfile();
 document.body.classList.toggle('bigtext', !!settings.bigtext); document.body.classList.toggle('reduced', !!settings.motion);
 // 10.0 (A8): the title news card reads its headlines from WHATS_NEW, and returning players get the sequel reveal once.
 { const n = newsFrom(WHATS_NEW); if (n.ver) $('#nc-head').textContent = `Chess Complex ${n.ver}`; if (n.items.length) $('#nc-body').textContent = n.items.slice(0, 3).join(', ') + (n.items.length > 3 ? ` and ${n.items.length - 3} more` : ''); }
-const afterSplash = (showNew) => { if (!profile.seenReveal15 && (profile.games || profile.tutorial.length) && !q0.get('join')) { profile.seenReveal15 = profile.seenReveal10 = true; save(); sequelReveal(showNew, { reduced: !!settings.motion, sfx }); } else showNew(); }; // F 15.0: the "15" reveal, once
+const afterSplash = (showNew) => { if (q0.get('replay')) return; /* 17.0 (RP): a replay link opens straight into the viewer */ if (!profile.seenReveal15 && (profile.games || profile.tutorial.length) && !q0.get('join')) { profile.seenReveal15 = profile.seenReveal10 = true; save(); sequelReveal(showNew, { reduced: !!settings.motion, sfx }); } else showNew(); }; // F 15.0: the "15" reveal, once
 const q0 = new URLSearchParams(location.search);
-setTimeout(() => { $('#splash').classList.add('out'); afterSplash(() => { if (profile.seenVersion !== '16.0' && (profile.games || profile.tutorial.length)) { info('What\'s New in 16.0', WHATS_NEW); } profile.seenVersion = '16.0'; save(); }); }, 700);
+setTimeout(() => { $('#splash').classList.add('out'); afterSplash(() => { if (profile.seenVersion !== '17.0' && (profile.games || profile.tutorial.length)) { info('What\'s New in 17.0', WHATS_NEW); } profile.seenVersion = '17.0'; save(); }); }, 700);
 const q = new URLSearchParams(location.search);
 if (q.get('join')) { go('join'); $('#in-code').value = q.get('join').toUpperCase().slice(0, 5); }
+// 17.0 (RP): the replay viewer drives the game screen as a seatless spectator session
+RP.mount({ game, toast, copy, session: () => session, sfx: (n) => { try { if (typeof sfx[n] === 'function') sfx[n](); } catch {} }, begin: (sess) => { endSession(); session = sess; game.enter(); }, end: () => { endSession(); go('title'); } });
+if (q.get('replay') && !q.get('join')) RP.openId(q.get('replay'));
 setInterval(() => keepAwake(!!session && (screen === 'game' || screen === 'host' || screen === 'join' || screen === 'tutorial')), 1500);
 // 15.2: every range slider keeps its filled track (--p) in step with its value (the CSS default is 50%).
 const syncRange = (r) => { const lo = +r.min || 0, hi = r.max === '' ? 100 : +r.max, v = +r.value; r.style.setProperty('--p', (hi > lo ? ((v - lo) / (hi - lo)) * 100 : 0) + '%'); };
 document.addEventListener('input', (e) => { if (e.target && e.target.type === 'range') syncRange(e.target); }, true);
 new MutationObserver(() => { for (const r of document.querySelectorAll('input[type=range]')) if (!r.dataset.p || r.dataset.p !== r.value) { r.dataset.p = r.value; syncRange(r); } }).observe(document.body, { childList: true, subtree: true });
 window.__cc = { intro, game, profile, get session() { return session; }, startSolo };
+CS.init({ profile: () => profile, normalize: normalizeProfile, idle: () => screen !== 'game', save: () => save(), refresh: () => { renderProfile(); if (window.__cc) window.__cc.profile = profile; }, toast: (m) => toast(m), sfx: (n) => { if (typeof sfx[n] === 'function') sfx[n](); } }); // 17.0 (P)
+LBC.init({ profile: () => profile, sfx, toast: (m) => toast(m), playDaily: () => { profile.mode = 'daily'; save(); go('play'); } }); // 17.0 (L2)

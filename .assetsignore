@@ -1,0 +1,14 @@
+# 17.0: files Cloudflare must NOT serve as static assets (the Worker serves the game from the repo root)
+.git
+.github
+.assetsignore
+server
+tests
+tools
+docs
+node_modules
+*.md
+*.mjs
+*.cjs
+package.json
+package-lock.json

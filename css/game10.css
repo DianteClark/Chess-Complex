@@ -73,3 +73,84 @@ body.reduced .net-banner .nb-spin { animation: none; }
 .t-st.st-slow { background: rgba(120,140,255,.18); } .t-st.st-shield { background: rgba(157,243,255,.14); } .t-st.st-haste { background: rgba(92,255,157,.14); }
 .cx-asc { border-left: 2px solid var(--gold2); padding-left: 8px; }
 #emote-menu.qc .qc-tog.on::after { font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px; }
+/* P 17.0 cloud save: Settings row + Transfer Code panel (js/cloudsave.js) */
+.cs-row small { display: flex; align-items: center; gap: 6px; }
+.cs-row small::before, .cs-stat i { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--mute); }
+.cs-row small[data-k="ok"]::before, .cs-stat[data-k="ok"] i { background: var(--green); box-shadow: 0 0 6px rgba(92, 255, 157, .6); }
+.cs-row small[data-k="busy"]::before, .cs-stat[data-k="busy"] i { background: var(--gold); }
+.cs-row small[data-k="warn"]::before, .cs-stat[data-k="warn"] i { background: #ff9f43; }
+.cs-row small[data-k="bad"]::before, .cs-stat[data-k="bad"] i { background: var(--red); }
+.cs-row .btn.small { flex: none; min-height: 40px; }
+.cs-row { margin-bottom: 10px; }
+#m-transfer { z-index: 60; }
+#m-transfer .cs-box { width: min(440px, 100%); display: flex; flex-direction: column; gap: 10px; }
+#m-transfer .cs-box h3 { margin-bottom: 2px; }
+#m-transfer .set-sec { margin: 8px 0 0; }
+#m-transfer .row2 .btn, #m-transfer .btn.wide { min-height: 40px; margin: 0; }
+.cs-stat { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; color: var(--mute); }
+.cs-code { font: 700 18px/1.5 ui-monospace, 'SF Mono', Menlo, Consolas, monospace; letter-spacing: .08em; text-align: center; color: var(--gold2); padding: 10px 8px; border-radius: 10px; background: rgba(5, 4, 10, .55); box-shadow: inset 0 0 0 1px var(--edge-soft, rgba(255, 255, 255, .12)); user-select: all; -webkit-user-select: all; }
+.cs-code span { display: inline-block; white-space: nowrap; }
+.cs-code.masked { color: var(--mute); user-select: none; -webkit-user-select: none; }
+.cs-qr { align-self: center; width: min(180px, 46vw); aspect-ratio: 1; padding: 0; border-radius: 10px; overflow: hidden; background: #fff; }
+.cs-qr svg { display: block; width: 100%; height: 100%; }
+.cs-hint { margin: 0; font-size: 11px; color: var(--mute); text-align: center; }
+.cs-enter { display: flex; gap: 8px; align-items: stretch; }
+.cs-enter .cs-in { flex: 1; min-width: 0; min-height: 44px; font: 600 14px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; letter-spacing: .06em; padding: 10px; text-align: left; text-transform: uppercase; }
+.cs-enter .btn { flex: none; min-width: 72px; }
+.cs-err { margin: 0; min-height: 15px; font-size: 12px; color: #ffb3c0; }
+.cs-err:empty { min-height: 0; }
+.cs-warn { font-size: 13px; color: var(--ink); }
+/* landscape phones: two columns (code + entry left, QR + actions right) so everything fits without scrolling */
+@media (orientation: landscape) and (max-height: 500px) {
+  #m-transfer .cs-box.cs-mainv { width: min(780px, 100%); padding: 14px 18px; display: grid; grid-template-columns: minmax(0, 1fr) 236px; grid-auto-flow: row dense; column-gap: 18px; row-gap: 6px; align-items: start; }
+  #m-transfer .cs-mainv > * { grid-column: 1; }
+  #m-transfer .cs-mainv > .cs-qr, #m-transfer .cs-mainv > .row2, #m-transfer .cs-mainv > .cs-move, #m-transfer .cs-mainv > .cs-reset, #m-transfer .cs-mainv > [data-cs="close"] { grid-column: 2; }
+  #m-transfer .cs-mainv > .cs-qr { grid-row: span 4; width: min(150px, 38vh); justify-self: center; }
+  #m-transfer .cs-mainv > .cs-hint { display: none; }
+  #m-transfer .cs-mainv h3 { margin: 0; text-align: left; }
+  #m-transfer .cs-mainv .cs-stat { justify-content: flex-start; }
+  #m-transfer .cs-mainv .set-note { margin: 0; }
+  #m-transfer .cs-mainv .cs-code { padding: 6px 8px; }
+  #m-transfer .cs-mainv .set-sec { margin: 2px 0 0; }
+}
+/* Turnstile check card (only shown when Cloudflare needs a tap) and the one-time move card */
+.cs-human { position: fixed; z-index: 70; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(340px, calc(100% - 24px)); display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px; border-radius: 16px; background: linear-gradient(180deg, #221d36, #120f1e); box-shadow: 0 10px 30px rgba(0, 0, 0, .6), inset 0 0 0 1px rgba(240, 194, 94, .35); font-size: 12px; color: var(--mute); text-align: center; }
+.cs-human b { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold2); }
+.cs-human .cs-ts-slot { min-height: 65px; }
+.cs-human .btn { min-height: 40px; }
+#m-move { z-index: 65; }
+#m-move .cs-box { width: min(420px, 100%); }
+#m-move .btn.wide { min-height: 44px; }
+
+/* RP 17.0: replay viewer (spectator HUD + controls in the spectate bar) and Share / Watch Replay on results */
+body.replaying #s-game [data-act="menu"], body.replaying #s-game #btn-danger, body.replaying #s-game .emote-wrap, body.replaying #s-game .timer, body.replaying #spec-bar [data-act="results"], body.replaying #s-game .lethal { display: none !important; }
+body.replaying #spec-bar { flex-wrap: wrap; row-gap: 6px; width: min(460px, 96vw); padding: 6px 8px; }
+.rp-ctl { flex: 1 0 100%; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
+.rp-ctl.hidden { display: none; }
+.rp-row1 { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.rp-row1 .icon-btn, .rp-row1 .btn.small { min-width: 42px; min-height: 42px; padding: 0 8px; font-size: 12px; }
+.rp-row1 .rp-speed { min-width: 48px; font-variant-numeric: tabular-nums; }
+.rp-row1 .rp-play { min-width: 52px; background: rgba(255, 210, 77, .14); border-color: rgba(255, 210, 77, .5); color: #ffd24d; }
+.rp-row1 .icon-btn svg { width: 22px; height: 22px; }
+.rp-play svg { display: none; } .rp-play[data-state="play"] .rp-i-play, .rp-play[data-state="pause"] .rp-i-pause, .rp-play[data-state="again"] .rp-i-again { display: block; }
+.rp-row2 { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.rp-row2 small { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); white-space: nowrap; }
+.rp-row2 input[type=range] { flex: 1; min-width: 0; height: 40px; }
+.rp-row2 span { font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; }
+.rp-share { margin-top: 8px; }
+.rp-share.hidden, .rp-share .hidden { display: none; }
+@media (max-height: 520px) and (orientation: landscape) { /* one compact row along the bottom edge */
+  body.replaying #spec-bar { flex-wrap: nowrap; width: min(900px, calc(100vw - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))); bottom: calc(6px + var(--sb, 0px)); padding: 4px 6px; gap: 4px; }
+  body.replaying .spec-who { flex: 0 1 112px; }
+  body.replaying .spec-who b { font-size: 13px; }
+  body.replaying .spec-who small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .08em; }
+  .rp-ctl { flex: 1 1 auto; flex-direction: row; align-items: center; border-top: 0; border-left: 1px solid var(--line); padding: 0 0 0 6px; min-width: 0; }
+  .rp-row1 { flex: 0 0 auto; gap: 3px; }
+  .rp-row2 { flex: 1 1 auto; min-width: 0; gap: 6px; }
+  .rp-row2 small { display: none; }
+  .rp-row2 input[type=range] { min-width: 70px; }
+  .rp-row2 span { min-width: 0; font-size: 11px; }
+}
+/* N2 17.0: small inline spinner in #host-status / #join-status while Host/Join wait for the cloud check (up to ~6 s) */
+.cc-wait { display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px; border-radius: 50%; border: 2px solid rgba(255,231,168,.3); border-top-color: #ffe7a8; animation: nbspin .8s linear infinite; }
+body.reduced .cc-wait { animation: none; }

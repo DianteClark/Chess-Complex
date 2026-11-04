@@ -636,3 +636,25 @@ body:not(.reduced) #s-game .order .o-rev { animation: revPulse 1.6s ease-in-out 
 .ht-edges li { margin: 4px 0; line-height: 1.45; }
 .ht-edges .e-spd { color: #ffe04d; } .ht-edges .e-atk { color: #ff6b6b; } .ht-edges .e-def { color: #7fb6ff; } .ht-edges .e-hp { color: #5cff9d; }
 #s-game .inspect { width: max-content; max-width: min(340px, 92vw); } /* absolute + left 50% shrank the box to half the screen */
+
+/* ---------------------------------------------------------------- 17.0 (D2) location wheel + briefing: sized, centred cards */
+/* the wheel no longer runs edge to edge: a framed card over a dimmed board, portrait, landscape and desktop */
+#s-game .loc-wheel { gap: 8px; background: radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--s1, #2a2048) 55%, rgba(4,3,9,.82)), rgba(4,3,9,.94) 75%); }
+#s-game .loc-wheel.e2 .lw-stage { flex: none; width: min(calc(100vw - 24px), 420px); height: min(calc(100vh - 150px), 580px); height: min(calc(100dvh - 150px), 580px); aspect-ratio: auto;
+  border-radius: 18px; overflow: hidden; background: #07060c; border: 1px solid color-mix(in srgb, var(--lc) 50%, transparent);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.5), 0 20px 60px rgba(0,0,0,.65), 0 0 50px color-mix(in srgb, var(--lc) 18%, transparent); }
+@media (max-height: 520px) {
+  #s-game .loc-wheel.e2 .lw-stage { width: min(calc(100vw - 150px), 620px); height: calc(100vh - 78px); height: calc(100dvh - 78px); border-radius: 14px; }
+  #s-game .loc-wheel .lw-kick { top: 10px; }
+}
+/* briefing: Tap to continue on the card; online a draining bar shows when it moves on by itself */
+.ib-foot { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 14px; }
+.ib-foot span { font-size: 11px; font-weight: 800; letter-spacing: .26em; padding-left: .26em; text-transform: uppercase; color: rgba(255,255,255,.72); animation: pulseA 1.8s ease-in-out infinite; }
+.ib-prog { display: block; width: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,.1); overflow: hidden; }
+.ib-prog > i { display: block; height: 100%; background: var(--lc); transform-origin: left center; animation: ibProg var(--ms, 6500ms) linear both; }
+@keyframes ibProg { to { transform: scaleX(0); } }
+@media (max-height: 520px) {
+  .ib-card { width: min(600px, 100%); }
+  .ib-foot { flex-direction: row; justify-content: center; gap: 12px; margin-top: 8px; }
+  .ib-prog { flex: 1; }
+}

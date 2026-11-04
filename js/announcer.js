@@ -11,14 +11,21 @@
 //   status - lethal warning, between the emote and ultimate buttons
 //   hint   - coach tips and toasts, above the buttons (one at a time)
 
+import { NET } from './net.js'; // 17.0 (D2): a big callout on screen counts as playback backlog, so bots wait for it
+
 const now = () => performance.now();
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // hero timing per tier (ms on screen, not counting the gap). 15.0: tier 4 = Regicide only; 'loc' = location intro.
-const LIFE = { 1: 1650, 2: 1900, 3: 2350, 4: 3100, disc: 2600, loc: 3000 };
-const GAP = 200;              // minimum spacing between two hero moments
-const MERGE_MS = 2600;        // same group (same killer) within this window merges into one callout
-const FEED_MAX = 3, FEED_LIFE = 5200, FEED_MERGE = 4500;
+// 17.0 (D2) player feedback ("a tactics battle royale, information is everything"): every lane stays up long enough
+// to read (was 1650/1900/2350/3100, feed 5200). Queue ttls grow by TTL_PAD so the longer lives do not drop more.
+const LIFE = { 1: 2400, 2: 2800, 3: 3300, 4: 4000, disc: 3300, loc: 3600 };
+const GAP = 260;              // minimum spacing between two hero moments
+const MERGE_MS = 3400;        // same group (same killer) within this window merges into one callout
+const FEED_MAX = 3, FEED_LIFE = 7500, FEED_MERGE = 6000;
+const TTL_PAD = 1400;         // 17.0 (D2): added to every hero message's queue ttl
+const READ_FIRST = 1100;      // 17.0 (D2): a hero callout is on screen at least this long before a bigger one may cut it
+const BOT_WAIT_PRIO = 60;     // 17.0 (D2): hero callouts at or above this prio hold the host's bots (NET.backlog) while they play
 
 export class Director {
   constructor() {
@@ -44,6 +51,17 @@ export class Director {
     this.lethalEl = root.querySelector('#lethal');
     if (this.hintEl) { this.hintEl.dataset.msg = 'hint'; this.hintEl.classList.add('hidden'); this.hintEl.addEventListener('click', () => this.dismissHint()); }
     addEventListener('resize', () => { this.layoutAt = 0; });
+    // 17.0 (D2): bots wait for the board's playback (render.js NET.backlog, R 15.1); a big callout still on screen counts too
+    const rb = NET.backlog;
+    if (typeof rb === 'function' && !rb.d2) { const f = () => { const b = rb() || 0; return typeof document !== 'undefined' && document.hidden ? b : Math.max(b, this.backlogMs()); }; f.d2 = 1; NET.backlog = f; }
+  }
+  // 17.0 (D2): ms of important hero callouts still to play (current + queued, prio >= BOT_WAIT_PRIO); 0 while held (intro)
+  backlogMs() {
+    if (!this.mounted || now() < this.holdUntil) return 0;
+    const t = now(); let ms = 0;
+    if (this.cur && this.cur.kind !== 'cine' && this.cur.prio >= BOT_WAIT_PRIO) ms += Math.max(0, this.cur.end - t);
+    for (const m of this.q) if (m.prio >= BOT_WAIT_PRIO && t - m.at <= m.ttl) ms += (m.life || LIFE[m.tier] || LIFE[1]) + GAP;
+    return Math.min(4000, ms);
   }
   reduced() { return !!(this.opts && this.opts.reduced && this.opts.reduced()); }
   // 10.2 (N): a module that owns its own small DOM lane (chat log) registers it so canvas floats avoid it
@@ -166,6 +184,7 @@ export class Director {
     if (!this.mounted || !m || !m.text) return;
     const t = now();
     m = { tier: 1, prio: 40, ttl: 2600, tags: [], ...m, at: t, id: ++this.seq };
+    m.ttl += TTL_PAD; // 17.0 (D2)
     m.tags = [...(m.tags || [])];
     // same key: never twice in a row
     if (m.key) {
@@ -181,7 +200,7 @@ export class Director {
       if (qi >= 0) { this.stats.merged++; this.q[qi] = this.merge(this.q[qi], m); this.sortQ(); return; }
     }
     // a much more important moment cuts a minor one short
-    if (this.cur && this.cur.kind !== 'cine' && m.prio >= this.cur.prio + 30 && t - this.cur.start > 350) { this.stats.preempted++; this.cur.end = Math.min(this.cur.end, t + 120); }
+    if (this.cur && this.cur.kind !== 'cine' && m.prio >= this.cur.prio + 30 && t - this.cur.start > READ_FIRST) { this.stats.preempted++; this.cur.end = Math.min(this.cur.end, t + 120); }
     this.q.push(m); this.sortQ();
     while (this.q.length > 4) { this.q.pop(); this.stats.dropped++; }
   }
@@ -193,7 +212,7 @@ export class Director {
   }
   upgrade(cur, m) {
     const merged = this.merge(cur, m);
-    Object.assign(cur, merged, { start: cur.start, end: Math.max(cur.end, now() + 900) });
+    Object.assign(cur, merged, { start: cur.start, end: Math.max(cur.end, now() + 1500) }); // 17.0 (D2): a merged tag gets time to be read (was 900)
     this.render(cur, true);
     if (m.prio >= cur.prio) this.sound(m.sting ? 'announce:' + m.sting : 'stinger', m.level || 2);
   }
@@ -431,7 +450,9 @@ export const director = new Director();
 // Wall-clock timers only (setTimeout / performance.now): the renderer's timeline pace (camdir speed-up) never touches
 // intro text. A tap advances ONE step (a spinning wheel lands first); "Skip intro" (returning players) ends it all.
 // Every lane of the Director is held for the whole intro, so tips, toasts, feed and callouts wait for it.
-export const INTRO = { ct: 2500, spin: 3100, hold: 2500, brief: 3200, perRow: 500, gap: 300, fly: 1950, net: 600, minTap: 350 };
+// 17.0 (D2): the briefing reads slowly enough now (brief 3200 -> 6500, perRow 500 -> 1500; server/src/intro.js mirrors
+// these). Solo waits for a tap on the briefing (soloBrief = safety timeout); online it ends on the shared clock.
+export const INTRO = { ct: 2500, spin: 3100, hold: 2500, brief: 6500, perRow: 1500, gap: 300, fly: 1950, net: 600, minTap: 350, soloBrief: 45000 };
 export const briefMs = (b) => (b ? INTRO.brief + INTRO.perRow * Math.max(0, ((b.rows || []).length) - 1) : 0);
 // Deterministic from the state (host and clients agree): how long until the first turn may start.
 export function introMs({ contenders = true, wheel = false, brief = null } = {}) {
@@ -441,9 +462,11 @@ export function introMs({ contenders = true, wheel = false, brief = null } = {})
   if (brief) t += briefMs(brief) + INTRO.gap;
   return t ? t + INTRO.fly : 0;
 }
-export function briefHTML(b) {
+// o.ms: auto-advance time (a draining bar shows it); 0 = waits for a tap. 17.0 (D2): the card says "Tap to continue".
+export function briefHTML(b, o = {}) {
   const rows = (b.rows || []).map((r) => `<div class="ib-row${r.cls ? ' ' + r.cls : ''}"><em>${esc(r.k)}</em><b>${esc(r.name)}</b>${r.desc ? `<span>${esc(r.desc)}</span>` : ''}</div>`).join('');
-  return `<div class="ib-card" data-msg="intro"><div class="ib-kick">${esc(b.kicker || '')}</div><div class="ib-name">${esc(b.title)}</div>${b.line ? `<p class="ib-line">${esc(b.line)}</p>` : ''}${rows ? `<div class="ib-rows">${rows}</div>` : ''}</div>`;
+  const foot = `<div class="ib-foot">${o.ms > 0 ? `<i class="ib-prog" style="--ms:${Math.round(o.ms)}ms"><i></i></i>` : ''}<span>Tap to continue</span></div>`;
+  return `<div class="ib-card" data-msg="intro"><div class="ib-kick">${esc(b.kicker || '')}</div><div class="ib-name">${esc(b.title)}</div>${b.line ? `<p class="ib-line">${esc(b.line)}</p>` : ''}${rows ? `<div class="ib-rows">${rows}</div>` : ''}${foot}</div>`;
 }
 export class Intro {
   constructor(dir) { this.dir = dir; this.on = false; this.log = []; }
@@ -484,8 +507,9 @@ export class Intro {
   }
   endCur() { const c = this.cur; this.cur = null; if (c && c.end) { try { c.end(); } catch {} } }
   tap() {
-    if (!this.on || now() - this.stepAt < INTRO.minTap) return;
-    const st = this.steps[this.i]; if (st && st.wait) return;
+    const st = this.steps[this.i];
+    if (!this.on || now() - this.stepAt < ((st && st.minTap) || INTRO.minTap)) return; // 17.0 (D2): a step may ask for a longer guard (the briefing: no accidental skip)
+    if (st && st.wait) return;
     const c = this.cur; if (c && c.tap) { let used = false; try { used = c.tap() === true; } catch {} if (used) { this.mark(st.id + ':tap'); return; } }
     this.next();
   }
@@ -568,7 +592,8 @@ export function interestNext(s, u, E) {
 const word = (g, id, text, color, size = 0.95, dy = -1.2, life = 1.25) => {
   const d = g.r && g.r.disp && g.r.disp.get(id); if (!d || !g.r.floats) return;
   if (g.r.floats.some((f) => f.w16 === id + text && f.t < f.life * 0.6)) return; // one word per piece at a time
-  g.r.floats.push({ x: d.x + 0.5, y: d.y + dy, text, t: 0, life, color, size, w16: id + text });
+  const f = { x: d.x + 0.5, y: d.y + dy, text, t: 0, life, color, size, w16: id + text };
+  if (g.r.read) g.r.read(id, f); else g.r.floats.push(f); // 17.0 (D2): R2's readout: lingers, keeps the pace at 1x, per-unit stack cap
 };
 export function tactics16(g, e, s, myId, E) {
   const J = g.juice || (g.juice = {}), by = (id) => (E && E.unitById ? E.unitById(s, id) : s.units.find((v) => v.id === id));

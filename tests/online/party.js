@@ -61,7 +61,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     run.check(st.mode === hp.gm && st.siege, `c1: next match is ${st.mode}, expected ${hp.gm}`);
     if (loc) run.check(st.loc === loc, `c1: location ${st.loc}, leader picked ${loc}`);
     // ready resets for the match after this one
-    const rd = await host.evaluate(() => window.__cc.session.party.ready.size);
+    const rd = await host.evaluate(() => { const s = window.__cc.session; return s.cloud ? (s.players || []).filter((p) => p.st === 'ready').length : s.party.ready.size; }); // 17.0 (N2): cloud = the Room's seat states
     run.check(rd === 0, `host: ready set not cleared at start (${rd})`);
   };
 
@@ -76,6 +76,14 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     await sleep(1200);
     let cp = await party(c);
     run.note(`c1 after leader left (${where}): ${JSON.stringify({ screen: cp.screen, status: cp.joinStatus, toasts: cp.toasts, rematch: cp.rematch })}`);
+    if (process.env.CC_CLOUD) { // 17.0 (N2): a cloud party passes to the next human instead of closing
+      if (where === 'results') { run.check(!cp.rematch.hidden, `c1: Back to Party hidden after the leader left ${JSON.stringify(cp.rematch)}`); await tap(c, '#btn-rematch'); await sleep(800); cp = await party(c); }
+      const hs = await c.evaluate(() => ({ status: document.querySelector('#host-status').textContent, lead: !!(window.__cc.session && window.__cc.session.lead), opts: !!document.querySelector('#party-opts [data-party="group"]') }));
+      run.check(cp.screen === 's-host' && hs.lead && hs.opts && /Room open/.test(hs.status), `c1: not the new leader on the Host screen ${JSON.stringify({ screen: cp.screen, ...hs })}`);
+      await L.startMatch(run, c, { bots: 1, clients: [] });
+      run.check((await view(c)).screen === 's-game', 'c1: new leader could not start a match');
+      return;
+    }
     run.check(!cp.joinPanel && cp.joinRows === 0 && !cp.inParty, `c1: party lobby not cleared ${JSON.stringify(cp)}`);
     run.check(/party has closed/i.test(cp.joinStatus) || cp.toasts.some((t) => /party has closed/i.test(t)), `c1: no clear message ${JSON.stringify(cp)}`);
     if (where === 'results') run.check(cp.rematch.hidden, 'c1: Back to Party still offered after the party closed');
@@ -91,24 +99,27 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
 
   // Bug (b): a friend in Siege at wave 5. States grow past 16300 bytes; then the friend's network drops.
   S['P3-siege-wave5-reconnect'] = async (run) => {
+    // 17.0 (N2): PeerJS-only (the 16300 byte data-channel limit and host-side state growth); cloud rooms send ~100 byte
+    // actions, and their drop/reconnect is covered by S4b, P4 and P5c
+    if (process.env.CC_CLOUD) { run.note('skipped in cloud runs: PeerJS message-size scenario'); return; }
     const { host, c, cpid } = await match(run, { mode: 'siege', bots: 2 });
     for (const p of [host, c]) await net(p, { dead: 8000, retry: 1000, hb: 1500 });
     await autoplay(host, false); await autoplay(c, false);
     // AI drives both humans so the run gets to wave 5 quickly; the host's protect loop keeps them alive
-    await host.evaluate(async (cp) => { const E = await import('/js/engine.js'); const h = window.__cc.session.host; h.fast = true; h.setBot('me'); h.setBot(cp); clearInterval(window.__pt); window.__pt = setInterval(() => { for (const u of h.s.units) if (u.alive && u.kind === 'player' && u.hp < E.stats(u).maxHp * 0.7) u.hp = E.stats(u).maxHp; }, 30); }, cpid);
+    await host.evaluate(async (cp) => { const E = await import('/js/engine.js'); const h = window.__ccHost(); h.fast = true; h.setBot('me'); h.setBot(cp); clearInterval(window.__pt); window.__pt = setInterval(() => { for (const u of h.s.units) if (u.alive && u.kind === 'player' && u.hp < E.stats(u).maxHp * 0.7) u.hp = E.stats(u).maxHp; }, 30); }, cpid);
     // natural play to wave 5 when the box is fast enough; otherwise (after 3 minutes, at least wave 2) grow the state the
     // way later waves do, with spent Hollows piling up in s.units, until it is past the 16300 byte channel limit
     const t0 = Date.now(); let st;
-    const siegeSt = () => host.evaluate(() => { const s = window.__cc.session.host.s; return { over: s.over, wave: s.siege.wave, turn: s.turnNo, units: s.units.length, bytes: JSON.stringify({ t: 'state', state: s, ev: [], dl: -1 }).length }; });
+    const siegeSt = () => host.evaluate(() => { const s = window.__ccHost().s; return { over: s.over, wave: s.siege.wave, turn: s.turnNo, units: s.units.length, bytes: JSON.stringify({ t: 'state', state: s, ev: [], dl: -1 }).length }; });
     while (Date.now() - t0 < 6 * 60000) { st = await siegeSt(); if (st.wave >= 5 || st.over || (st.wave >= 2 && Date.now() - t0 > 3 * 60000)) break; await sleep(1000); }
     run.note(`siege reached ${JSON.stringify(st)} in ${Math.round((Date.now() - t0) / 1000)}s`);
     run.check(!st.over && st.wave >= 2, `siege did not get going ${JSON.stringify(st)}`);
     if (st.wave < 5) {
-      await host.evaluate(() => { const s = window.__cc.session.host.s; const tpl = s.units.find((u) => u.kind === 'hollow') || s.units.find((u) => u.kind !== 'player'); let n = 0; while (JSON.stringify(s).length < 19000 && n++ < 60) s.units.push({ ...structuredClone(tpl), id: s.nextId++, alive: false, hp: 0, x: 0, y: 0 }); });
+      await host.evaluate(() => { const s = window.__ccHost().s; const tpl = s.units.find((u) => u.kind === 'hollow') || s.units.find((u) => u.kind !== 'player'); let n = 0; while (JSON.stringify(s).length < 19000 && n++ < 60) s.units.push({ ...structuredClone(tpl), id: s.nextId++, alive: false, hp: 0, x: 0, y: 0 }); });
       st = await siegeSt(); run.note(`padded with spent Hollows to wave-5 size: ${JSON.stringify(st)}`);
     }
     await sleep(2500);
-    const hs = await net(host), ct = await c.evaluate(() => window.__cc.game.s.turnNo), ht = await host.evaluate(() => window.__cc.session.host.s.turnNo);
+    const hs = await net(host), ct = await c.evaluate(() => window.__cc.game.s.turnNo), ht = await host.evaluate(() => window.__ccHost().s.turnNo);
     run.note(`host net stats ${JSON.stringify(hs)}; turn host ${ht} c1 ${ct}`);
     run.check(hs.maxMsg >= 16300 && hs.chunked > 0, `no state over the PeerJS limit was sent chunked ${JSON.stringify(hs)}`);
     run.check(hs.tooBig === 0, `${hs.tooBig} messages were over the channel limit`);
@@ -117,25 +128,25 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     if (run.fails.length) await logs();
     const cv = await view(c); run.check(cv.screen === 's-game' && !cv.modals.includes('m-results'), `c1 left the match ${cv.screen} [${cv.modals}]`);
     // hand c1 back, then cut it off the network without a goodbye
-    await host.evaluate((cp) => { const h = window.__cc.session.host, u = h.s.units.find((v) => v.pid === cp); u.bot = false; h.fast = false; h.schedule(); }, cpid);
+    await host.evaluate((cp) => { const h = window.__ccHost(), u = h.s.units.find((v) => v.pid === cp); u.bot = false; h.fast = false; h.schedule(); }, cpid);
     await autoplay(c, true, 300);
     const gen = await c.evaluate(() => window.__cc.game.gen);
     await c.evaluate(async () => (await import('/js/net.js')).NET.drop(30000));
-    const botted = await waitFor(host, (cp) => { const u = window.__cc.session.host.s.units.find((v) => v.pid === cp); return u && u.bot; }, cpid, 90000);
+    const botted = await waitFor(host, (cp) => { const u = window.__ccHost().s.units.find((v) => v.pid === cp); return u && u.bot; }, cpid, 90000);
     run.check(botted, 'host: dropped friend was not handed to a bot');
     run.check(await waitFor(c, () => { const b = document.querySelector('#net-banner'); return b && !b.classList.contains('hidden') && /Reconnecting/.test(b.textContent); }, null, 60000), 'c1: no Reconnecting banner while offline');
     await run.shot('c1', 'reconnecting');
     const feed = await host.evaluate(() => document.querySelector('#h-feed').textContent);
     run.check(/lost connection/i.test(feed), `host feed: "${feed}"`);
-    const t1 = await host.evaluate(() => window.__cc.session.host.s.turnNo); await sleep(8000);
-    run.check((await host.evaluate(() => window.__cc.session.host.s.turnNo)) > t1, 'host: match stalled while the friend was away');
+    const t1 = await host.evaluate(() => window.__ccHost().s.turnNo); await sleep(8000);
+    run.check((await host.evaluate(() => window.__ccHost().s.turnNo)) > t1, 'host: match stalled while the friend was away');
     const back = await waitFor(host, (cp) => { const s = window.__cc.session; const u = s.host.s.units.find((v) => v.pid === cp); return u && !u.bot && s.conns.has(cp); }, cpid, 120000);
     run.check(back, 'c1 did not reconnect by itself');
     await waitFor(c, () => { const b = document.querySelector('#net-banner'); return !b || b.classList.contains('hidden'); }, null, 30000);
-    const synced = async () => { const h = await host.evaluate(() => window.__cc.session.host.s.turnNo), k = await c.evaluate(() => window.__cc.game.s.turnNo); return Math.abs(h - k) <= 3; };
+    const synced = async () => { const h = await host.evaluate(() => window.__ccHost().s.turnNo), k = await c.evaluate(() => window.__cc.game.s.turnNo); return Math.abs(h - k) <= 3; };
     for (let i = 0; i < 20 && !(await synced()); i++) await sleep(1500);
     const after = await c.evaluate(() => ({ gen: window.__cc.game.gen, pid: window.__cc.session.myPid, screen: document.querySelector('.screen.active').id, turn: window.__cc.game.s.turnNo, results: !document.querySelector('#m-results').classList.contains('hidden'), banner: !!document.querySelector('#net-banner') && !document.querySelector('#net-banner').classList.contains('hidden') }));
-    const ht2 = await host.evaluate(() => window.__cc.session.host.s.turnNo);
+    const ht2 = await host.evaluate(() => window.__ccHost().s.turnNo);
     run.note(`c1 after reconnect ${JSON.stringify(after)} host turn ${ht2}`);
     run.check(after.pid === cpid && after.screen === 's-game' && !after.results, `c1 not back in its seat ${JSON.stringify(after)}`);
     run.check(after.gen === gen, 'c1 restarted the match intro instead of carrying on');
@@ -173,7 +184,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
         run.check(okC, `match ${k}: c1 never got past the intro into turns`);
       }
       for (const [l, p] of [['host', host], ['c1', c]]) { const a = await L.advancing(p, 4000); run.check(a.moved, `match ${k}: ${l} turns did not advance ${JSON.stringify(a)} ${JSON.stringify(await state(p))}`); }
-      const ht = await host.evaluate(() => window.__cc.session.host.s.turnNo), ct = await c.evaluate(() => window.__cc.game.s.turnNo);
+      const ht = await host.evaluate(() => window.__ccHost().s.turnNo), ct = await c.evaluate(() => window.__cc.game.s.turnNo);
       run.check(Math.abs(ht - ct) <= 4, `match ${k}: c1 out of sync (host ${ht}, c1 ${ct})`);
       if (vr === 'b') {
         await L.hostKill(host, cpid);
@@ -183,8 +194,8 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
         await tap(c, '#btn-rematch'); await sleep(600);
         run.check((await party(c)).screen === 's-join', `match ${k}: c1 benched Back to Party failed`);
         await sleep(2500); // the match plays on without c1 for a bit
-        const a = await L.advancing(host, 3000); const hOver = await host.evaluate(() => window.__cc.session.host.s.over); run.check(a.moved || hOver, `match ${k}: host stalled after c1 left for the lobby ${JSON.stringify(a)}`);
-        if (!a.moved) run.note('stall diag ' + JSON.stringify(await host.evaluate(() => { const h = window.__cc.session.host, s = h.s, u = s.units.find((q) => q.id === s.active); return { over: s.over, active: u && { pid: u.pid, kind: u.kind, alive: u.alive, bot: !!u.isBot, name: u.name }, introUntil: h.introUntil, fast: h.fast, deadline: h.deadline && h.deadline - Date.now(), screen: document.querySelector('.screen.active').id, humans: s.units.filter((q) => q.kind === 'player' && !q.isBot).map((q) => [q.pid, q.alive]) }; })));
+        const a = await L.advancing(host, 3000); const hOver = await host.evaluate(() => window.__ccHost().s.over); run.check(a.moved || hOver, `match ${k}: host stalled after c1 left for the lobby ${JSON.stringify(a)}`);
+        if (!a.moved) run.note('stall diag ' + JSON.stringify(await host.evaluate(() => { const h = window.__ccHost(), s = h.s, u = s.units.find((q) => q.id === s.active); return { over: s.over, active: u && { pid: u.pid, kind: u.kind, alive: u.alive, bot: !!u.isBot, name: u.name }, introUntil: h.introUntil, fast: h.fast, deadline: h.deadline && h.deadline - Date.now(), screen: document.querySelector('.screen.active').id, humans: s.units.filter((q) => q.kind === 'player' && !q.isBot).map((q) => [q.pid, q.alive]) }; })));
         await L.killAllExcept(host, ['me']);
         run.check(await waitResults(host, 15000), `match ${k}: host no results`);
         await sleep(1200);
@@ -194,6 +205,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
         await autoplay(host, false); await autoplay(c, false);
         await tap(c, '#btn-ready'); await sleep(400);
         run.check(await waitFor(host, () => !document.querySelector('#btn-start-host').disabled, null, 5000), `match ${k}: Start never enabled ${JSON.stringify(await party(host))}`);
+        if (process.env.CC_CLOUD) await host.evaluate(() => { window.__ccHost().fast = false; }); // the Room's test pace is per room, a PeerJS GameHost's per match
         await tap(host, '#btn-start-host');
         for (const [l, p] of [['host', host], ['c1', c]]) run.check(await waitFor(p, () => window.__cc.game.s && !window.__cc.game.s.over && document.querySelector('.screen.active').id === 's-game', null, 8000), `match ${k + 1}: ${l} did not enter`);
         continue;
@@ -210,6 +222,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
       await autoplay(host, false); await autoplay(c, false);
       await tap(c, '#btn-ready'); await sleep(400);
       run.check(await waitFor(host, () => !document.querySelector('#btn-start-host').disabled, null, 5000), `match ${k}: Start never enabled`);
+      if (process.env.CC_CLOUD) await host.evaluate(() => { window.__ccHost().fast = false; }); // see above: per-room test pace
       await tap(host, '#btn-start-host');
       for (const [l, p] of [['host', host], ['c1', c]]) run.check(await waitFor(p, () => window.__cc.game.s && !window.__cc.game.s.over && document.querySelector('.screen.active').id === 's-game', null, 8000), `match ${k + 1}: ${l} did not enter`);
     }
@@ -239,7 +252,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     run.check(await waitFor(host, () => !document.querySelector('#btn-start-host').disabled, null, 5000), 'host: Start never enabled');
     await tap(host, '#btn-start-host');
     run.check(await waitFor(c, () => window.__cc.game.s && !window.__cc.game.s.over && document.querySelector('.screen.active').id === 's-game', null, 8000), 'c1: did not enter match 2');
-    await host.evaluate(() => { const h = window.__cc.session.host; h.fast = true; h.go(); });
+    await host.evaluate(() => { const h = window.__ccHost(); h.fast = true; h.go(); });
     await autoplay(host); await autoplay(c);
     const a = await L.advancing(c, 5000); run.check(a.moved, `c1: match 2 not advancing ${JSON.stringify(a)}`);
     await L.killAllExcept(host, ['me']);
@@ -252,7 +265,8 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     await c.evaluate(() => { const g = window.__cc.game, o = g.onMsg.bind(g); g.onMsg = (m) => { if (m.t === 'state' && (m.ev || []).some((e) => e.e === 'over')) return; o(m); }; });
     await L.killAllExcept(host, ['me']);
     run.check(await waitResults(host, 15000), 'host: no results');
-    await host.evaluate(() => window.__cc.session.host.publish([]));
+    if (process.env.CC_CLOUD) await c.evaluate(() => window.__cc.session.client.send({ t: 'sync' })); // 17.0 (N2): the Room resends the final state as a snap
+    else await host.evaluate(() => window.__ccHost().publish([]));
     run.check(await waitResults(c, 10000), 'c1: final state without the over event left it on a dead board');
   };
 
@@ -271,7 +285,7 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     const cp = await party(c); run.note(`c1 while cut off: ${JSON.stringify({ status: cp.joinStatus, banner: cp.banner })}`);
     run.check(noticed, 'c1 never noticed the drop');
     run.check(await waitFor(c, () => /In the lobby/.test(document.querySelector('#join-status').textContent), null, 20000), 'c1 did not reconnect by itself');
-    run.check(await waitFor(host, () => window.__cc.session.players.length === 2 && window.__cc.session.conns.size === 1, null, 10000), 'c1 not back in the party after the drop');
+    run.check(await waitFor(host, () => { const s = window.__cc.session; return s.players.length === 2 && (s.cloud ? s.players.filter((p) => !p.isBot && p.st !== 'leader' && p.st !== 'away').length === 1 : s.conns.size === 1); }, null, 10000), 'c1 not back in the party after the drop');
     await sleep(800);
     const back = await party(c); hp = await party(host);
     run.note(`c1 back: ${JSON.stringify({ status: back.joinStatus, rows: back.joinRows, pid: await L.clientPid(c), was: pid0 })}`);
@@ -284,5 +298,63 @@ module.exports = function register(S, { L, match, sleep, tap, autoplay }) {
     run.check((await host.evaluate(() => window.__cc.session.players.length)) === 2, 'host: c2 still seated after leaving on purpose');
     await L.startMatch(run, host, { clients: [c] });
     run.check((await view(c)).screen === 's-game', 'c1: did not start after reconnecting in the lobby');
+  };
+
+  // 17.0 (N2) owner bug: "left the app, came back, reconnected to the party lobby fine; when the next match started
+  // the friend's game reset during the location selection, and after that the leave buttons stopped working".
+  // P6a: c1 drops in the party lobby and reconnects, then the leader starts the next match (real intro, no fast).
+  // P6b: c1 drops right after the next match starts (during the contenders/wheel) and reconnects mid-intro.
+  // P6c: the leader double-taps Start. Every page must enter that match exactly once (one game.enter, one intro run),
+  // the intro must end with nothing left blocking the HUD, and both players must be able to leave
+  // (Menu -> Forfeit -> results -> Menu -> title) afterwards. P6d: c1 is still reconnecting when the leader taps Start.
+  for (const vr of ['a', 'b', 'c', 'd']) S[`P6${vr}-reconnect-next-match`] = async (run) => {
+    const { host, c } = await match(run, { bots: 2 });
+    await L.killAllExcept(host, ['me']);
+    run.check(await waitResults(host, 15000), 'host: no results'); run.check(await waitResults(c, 15000), 'c1: no results');
+    await sleep(1000);
+    await tap(host, '#btn-rematch'); await tap(c, '#btn-rematch'); await sleep(600);
+    for (const p of [host, c]) await net(p, { dead: 4000, retry: 1000, hb: 1000 });
+    if (vr === 'a') {
+      await c.evaluate(async () => (await import('/js/net.js')).NET.drop(3000));
+      run.check(await waitFor(c, () => /In the lobby/.test(document.querySelector('#join-status').textContent) && !document.querySelector('#btn-ready').classList.contains('hidden'), null, 30000), 'c1 did not reconnect to the party lobby');
+      await sleep(800);
+    }
+    await autoplay(host, false); await autoplay(c, false);
+    if (!(await c.evaluate(() => window.__cc.session.amReady))) await tap(c, '#btn-ready');
+    run.check(await waitFor(host, () => !document.querySelector('#btn-start-host').disabled, null, 8000), `host: Start never enabled ${JSON.stringify(await party(host))}`);
+    // count every match entry and intro run from here on
+    for (const p of [host, c]) await p.evaluate(() => { const g = window.__cc.game, I = window.__cc.intro; window.__enters = 0; window.__intros = 0; if (!g.__wrapped) { const e = g.enter.bind(g); g.enter = (...a) => { window.__enters++; return e(...a); }; const r = I.run.bind(I); I.run = (...a) => { window.__intros++; return r(...a); }; g.__wrapped = true; } });
+    if (process.env.CC_CLOUD) await host.evaluate(() => { window.__ccHost().fast = false; });
+    if (vr === 'd') { // c1's phone is away (reconnecting) at the moment the leader starts: it must land in the match, not lose the party
+      await c.evaluate(async () => (await import('/js/net.js')).NET.drop(9000));
+      run.check(await waitFor(host, () => [...document.querySelectorAll('#host-lobby li em')].some((e) => /Reconnecting/.test(e.textContent)), null, 20000), 'host: c1 never shown as reconnecting');
+      await sleep(300);
+      await host.evaluate(() => document.querySelector('#btn-start-host').click());
+      run.check(await waitFor(c, () => window.__cc.game.s && document.querySelector('.screen.active').id === 's-game', null, 40000), `c1: did not get back into the match it was seated in ${JSON.stringify(await party(c))}`);
+    } else if (vr === 'c') await host.evaluate(() => { const b = document.querySelector('#btn-start-host'); b.click(); b.click(); setTimeout(() => b.click(), 120); });
+    else await tap(host, '#btn-start-host');
+    if (vr === 'b') { await sleep(2000); await c.evaluate(async () => (await import('/js/net.js')).NET.drop(3000)); }
+    const done = (p) => waitFor(p, () => window.__cc.game.s && !window.__cc.intro.on && window.__cc.game.s.turnNo > 1, null, 45000);
+    run.check(await done(host), 'host: never got past the intro into turns'); run.check(await done(c), 'c1: never got past the intro into turns');
+    await autoplay(host); await autoplay(c);
+    const cnt = async (p) => p.evaluate(() => ({ enters: window.__enters, intros: window.__intros, mid: window.__cc.session && window.__cc.session.mid, introOn: document.querySelector('#s-game').classList.contains('intro-on'), blockers: [...document.querySelectorAll('#intro-tap, #intro-brief, #intro-wait, #loc-wheel')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.id) }));
+    const hc = await cnt(host), cc = await cnt(c);
+    run.note(`counts host ${JSON.stringify(hc)} c1 ${JSON.stringify(cc)}`);
+    run.check(hc.enters === 1 && hc.intros <= 1, `host: the match was entered ${hc.enters}x / intro ran ${hc.intros}x (reset)`);
+    run.check(cc.enters === 1 && cc.intros <= 1, `c1: the match was entered ${cc.enters}x / intro ran ${cc.intros}x (reset)`);
+    for (const [l, x] of [['host', hc], ['c1', cc]]) run.check(!x.introOn && !x.blockers.length, `${l}: intro left something on screen ${JSON.stringify(x)}`);
+    const ht = await host.evaluate(() => window.__cc.game.s.turnNo), ct = await c.evaluate(() => window.__cc.game.s.turnNo);
+    run.check(Math.abs(ht - ct) <= 4, `c1 out of sync with the leader (host ${ht}, c1 ${ct})`);
+    { const a = await L.advancing(c, 6000); run.check(a.moved, `c1: match not advancing ${JSON.stringify(a)}`); }
+    // both can leave
+    for (const [l, p] of [['c1', c], ['host', host]]) {
+      await tap(p, '#s-game [data-act="menu"]');
+      await tap(p, '#m-menu [data-act="forfeit"]');
+      run.check(await waitResults(p, 5000), `${l}: Forfeit did not open results`);
+      await tap(p, '#m-results [data-act="to-title"]'); await sleep(500);
+      if (await p.evaluate(() => !document.querySelector('#m-confirm').classList.contains('hidden'))) { await tap(p, '#cf-yes'); await sleep(800); }
+      await sleep(800);
+      const sc = (await view(p)).screen; run.check(sc === 's-title', `${l}: could not leave the match (screen ${sc})`);
+    }
   };
 };

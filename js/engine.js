@@ -31,6 +31,11 @@ export const tileAt = (s, x, y) => (inB(x, y) ? s.tiles[y * SIZE + x] : null);
 export const ringOf = (x, y) => Math.min(x, y, SIZE - 1 - x, SIZE - 1 - y);
 export const isVoid = (s, x, y) => ringOf(x, y) < s.storm.ring;
 export const isCracked = (s, x, y) => s.storm.crack && ringOf(x, y) === s.storm.ring;
+// 17.0 (C2): Sudden Death (board fully closed, s.storm.ring >= STORM.maxRing): share of max HP every piece burns at the
+// start of its turn this round. 0 before Sudden Death. 6% plus 2% per round since it began (s.storm.sdAt).
+export const SUDDEN = { base: 0.06, per: 0.02 };
+export const suddenDeath = (s) => !!s.storm && s.storm.ring >= STORM.maxRing;
+export const suddenDeathPct = (s) => (suddenDeath(s) ? SUDDEN.base + SUDDEN.per * Math.max(0, s.round - (s.storm.sdAt == null ? s.round : s.storm.sdAt)) : 0);
 export const unitAt = (s, x, y) => s.units.find((u) => u.alive && u.x === x && u.y === y) || null;
 export const unitById = (s, id) => s.units.find((u) => u.id === id) || null;
 const SOLID = { wall: 1, rubble: 1, crate: 1, chest: 1, out: 1, pit: 1 };
@@ -268,7 +273,10 @@ export function legalMoves(s, u) {
   };
   switch (u.piece) {
     case 'knight': for (const [dx, dy] of KNIGHT) if (canStand(s, u.x + dx, u.y + dy)) add(u.x + dx, u.y + dy, true); break;
-    case 'bishop': slide(DIAG, 4); break;
+    case 'bishop': // 17.0 (C2): Sidestep. Diagonals up to 4, or 1 tile straight, so a Bishop is no longer locked to one tile colour
+      slide(DIAG, 4);
+      for (const [dx, dy] of ORTH) if (canStand(s, u.x + dx, u.y + dy)) out.push({ x: u.x + dx, y: u.y + dy, jump: false, side: true });
+      break;
     case 'rook': slide(ORTH, 4); break;
     case 'queen': slide(DIRS8, 5); break;
     default: for (const [dx, dy] of DIRS8) if (canStand(s, u.x + dx, u.y + dy)) add(u.x + dx, u.y + dy); // pawn, king, hollow
@@ -337,7 +345,9 @@ export function abilityOptions(s, u, slot) {
   const opt = (anchor, tiles, mult, extra = {}) => o.push({ anchor, tiles, mult, hits: mult > 0 ? hitsOn(s, u, tiles) : [], ...extra });
   const self = pt(u.x, u.y);
   // 15.0: leap to (x, y) and hit tiles around the landing (never the tile the piece leaves)
-  const leapOpt = (x, y, tiles, mult) => { const tl = tiles.filter((t) => !(t.x === u.x && t.y === u.y)); o.push({ anchor: pt(x, y), tiles: tl, mult, hits: tl.map((t) => unitAt(s, t.x, t.y)).filter((v) => v && v !== u).map((v) => v.id), kind: 'leap', data: { x, y } }); };
+  // 17.0 (A0): one occupancy lookup per call instead of a unit scan per tile (Valor builds ~48 anchors x 24 tiles)
+  let occ = null; const occAt = (x, y) => { if (!occ) { occ = new Map(); for (const v of s.units) if (v.alive && !occ.has(v.y * 16 + v.x)) occ.set(v.y * 16 + v.x, v); } return occ.get(y * 16 + x) || null; };
+  const leapOpt = (x, y, tiles, mult) => { const tl = tiles.filter((t) => !(t.x === u.x && t.y === u.y)); o.push({ anchor: pt(x, y), tiles: tl, mult, hits: tl.map((t) => occAt(t.x, t.y)).filter((v) => v && v !== u).map((v) => v.id), kind: 'leap', data: { x, y } }); };
   switch (id) {
     case 'pawnStrike': for (const [dx, dy] of DIAG) if (inB(u.x + dx, u.y + dy)) opt(pt(u.x + dx, u.y + dy), [pt(u.x + dx, u.y + dy)], 1.0); break;
     case 'hollowClaw':
@@ -556,7 +566,8 @@ export const harmed = (u) => !!(u && u.status && u.status.some((q) => STATUS[q.k
 export const ascended = (u) => !!(u && u.kind === 'player' && ASCEND[u.piece] && ((u.hone && u.hone[u.piece]) || 0) >= MAX_HONE);
 // Boss King tuning (tools/sim15.mjs sweeps these). converge/focus: how hard bots gang up on it.
 // Tuned with 300-game sweeps for ~40% King wins in 8-bot Royale (15.0). HP pool = (piece HP x hp + 5) x (1 + hpPer per rival beyond 1).
-export const KING_T = { hp: 1.06, hpPer: 0.03, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
+export const BISHOP_T = { sideActs: 1 }; // 17.0 (C2): Sidestep spends the action (sim tunable: BISHOP_T.sideActs=0)
+export const KING_T = { floor: 0.9, hp: 1.09, /* 17.0 (C2): floor was 0.85, hp 1.06 (King 28-32% after Bishop Sidestep) */ hpPer: 0.03, aura: 2, expose: 0.2, exposeMax: 4, shock: 0.8, enrage: 1.25, heal: 0.0125, converge: 1.2, focus: 16 };
 export function addStatus(s, u, k, ev, o = {}) {
   if (!u || !u.alive || s.over || !STATUS[k]) return false;
   let t = Math.max(1, Math.round(o.t ?? STATUS[k].t));
@@ -884,7 +895,7 @@ function kill(s, v, killer, ev, cause = null) {
   }
   if (v.kind === 'player') {
     const wasKing = v.piece === 'king';
-    s.log.push(`${killer && killer !== v ? killer.name : cause === 'meteor' ? 'A meteor' : cause === 'lava' ? 'The lava' : cause === 'trap' ? 'A trap' : cause === 'geyser' ? 'A geyser' : cause === 'crumble' ? 'The crumbling floor' : cause === 'burn' ? 'Fire' : cause === 'poison' ? 'Poison' : WORLD_EVENTS[cause] ? 'The ' + WORLD_EVENTS[cause].name : 'The storm'} eliminated ${v.name}`);
+    s.log.push(`${killer && killer !== v ? killer.name : cause === 'meteor' ? 'A meteor' : cause === 'lava' ? 'The lava' : cause === 'trap' ? 'A trap' : cause === 'geyser' ? 'A geyser' : cause === 'crumble' ? 'The crumbling floor' : cause === 'burn' ? 'Fire' : cause === 'sudden' ? 'Sudden Death' : cause === 'poison' ? 'Poison' : WORLD_EVENTS[cause] ? 'The ' + WORLD_EVENTS[cause].name : 'The storm'} eliminated ${v.name}`);
     if (killer && killer !== v && killer.kind === 'player') {
       killer.kills++;
       if (killer.passive === 'momentum') killer.momentum = Math.min(4, killer.momentum + 1);
@@ -929,7 +940,7 @@ function mkHollow(s, x, y, extra) {
   h.hp = h.hpMax; s.units.push(h); return h;
 }
 export const isBossWave = (S, w) => !!S.gauntlet || w === S.waves || w === Math.floor(S.waves / 2);
-export const SIEGE_T = { spd: 0.4, c0: 1.5, cw: 0.3, hs: 0.1, as: 0.24, force: 4, boss: 0.84, ring: 3, pf0: 0.6, pf: 0.2, g: [1, 0.45, 0.85, 1.1, 1.4], gForce: 8, enrage: 10 };
+export const SIEGE_T = { spd: 0.4, c0: 1.5, cw: 0.3, hs: 0.1, as: 0.24, force: 4, boss: 0.84, ring: 3, pf0: 0.6, pf: 0.2, g: [1, 0.42, 0.87, 1.1, 1.4], gForce: 8, enrage: 10 };
 function siegeCleared(s, ev) {
   const S = s.siege;
   if (S.wave >= S.waves) {
@@ -1098,7 +1109,7 @@ function revive(s, v, by, ev) {
 }
 function crown(s, u, ev) {
   let st = baseStats(u);
-  if (PIECES[u.piece].tier < 3 && alivePlayers(s).length > 3) { const r = baseStats({ ...u, piece: 'rook' }); st = { hp: Math.max(st.hp, Math.round(r.hp * 0.85)), atk: Math.max(st.atk, Math.round(r.atk * 0.85)), def: Math.max(st.def, Math.round(r.def * 0.85)), spd: st.spd }; }
+  if (PIECES[u.piece].tier < 3 && alivePlayers(s).length > 3) { const r = baseStats({ ...u, piece: 'rook' }), f = KING_T.floor; st = { hp: Math.max(st.hp, Math.round(r.hp * f)), atk: Math.max(st.atk, Math.round(r.atk * f)), def: Math.max(st.def, Math.round(r.def * f)), spd: st.spd }; } // 17.0 (C2): floor a KING_T tunable (was 0.85; Sidestep lets more Bishops take the Crown)
   const before = stats(u).maxHp;
   st.maxHp = st.hp;
   u.kingFrom = u.piece;
@@ -1338,7 +1349,8 @@ export function applyAction(s, pid, a) {
     const m = legalMoves(s, u).find((q) => q.x === a.x && q.y === a.y);
     if (m) {
       if (s.turn.moved) s.turn.extraMoves--; else s.turn.moved = true;
-      moveUnit(s, u, m.x, m.y, ev, m.jump ? 'jump' : PIECES[u.piece] && u.piece !== 'pawn' && u.piece !== 'king' && !PIECES[u.piece].line ? 'slide' : 'step');
+      if (m.side && BISHOP_T.sideActs) s.turn.acted = true; // 17.0 (C2): a Sidestep before acting spends the action (no free re-aim of the diagonals)
+      moveUnit(s, u, m.x, m.y, ev, m.jump ? 'jump' : m.side ? 'step' : PIECES[u.piece] && u.piece !== 'pawn' && u.piece !== 'king' && !PIECES[u.piece].line ? 'slide' : 'step');
       ok = true;
     }
   } else if (a.type === 'ability' && canUse(s, u, a.slot)) {
@@ -1465,10 +1477,13 @@ function startTurn(s, u, ev) {
   if (lt && lt.t === 'poison') locPoisonPool(s, u, ev); // 15.0 (W)
   if (s.storm.ring >= STORM.maxRing && u.kind === 'player') {
     // Sudden death escalates: 6% plus 2% per round since it began, so healers can never out-sustain it forever.
+    // 17.0 (C2): this is Sudden Death, not the storm. The last ring never collapses; everyone on it burns. The event
+    // carries sd:true (storm:true kept for older consumers: check e.sd first) and a kill is cause 'sudden', so the
+    // feed / kill log never claim the storm reached a safe tile.
     if (s.storm.sdAt == null) s.storm.sdAt = s.round;
-    const d = Math.max(3, Math.round(stats(u).maxHp * (0.06 + 0.02 * Math.max(0, s.round - s.storm.sdAt))));
-    u.hp -= d; ev.push({ e: 'dmg', id: u.id, n: d, storm: true });
-    if (u.hp <= 0) { kill(s, u, null, ev); return; }
+    const d = Math.max(3, Math.round(stats(u).maxHp * suddenDeathPct(s)));
+    u.hp -= d; ev.push({ e: 'dmg', id: u.id, n: d, storm: true, sd: true });
+    if (u.hp <= 0) { kill(s, u, null, ev, 'sudden'); return; }
   }
   if (isVoid(s, u.x, u.y)) {
     const d = Math.max(4, Math.round(stats(u).maxHp * 0.2));
@@ -1920,6 +1935,13 @@ function onRound(s, ev) {
     }
     ev.push({ e: 'storm', phase: 'collapse', ring: s.storm.ring });
   }
+  // 17.0 (C2): announce Sudden Death every round it runs ({e:'suddenDeath', round, pct, first}) with the burn for the round
+  if (suddenDeath(s)) {
+    const first = s.storm.sdAt == null; if (first) s.storm.sdAt = r;
+    const pct = Math.round(suddenDeathPct(s) * 100);
+    ev.push({ e: 'suddenDeath', round: r, pct, first });
+    s.log.push(`Sudden Death: every piece burns ${pct}% max HP this turn`);
+  }
   // 15.0 (C): the Crown is telegraphed a round early (s.crownWarn, {e:'crownWarn'}) so claiming it is a race.
   const crownSpot = () => { const ft = freeTiles(s, Math.max(3, s.storm.ring + (s.storm.crack ? 3 : 2))); return ft.length ? ft[ri(s, ft.length)] : pt(7, 7); };
   if (!s.crownSpawned && !s.crownWarn && r >= R.crown - 1) {
@@ -2089,7 +2111,11 @@ export function planBot(s, u) {
   const bountyT = s.bounty ? unitById(s, s.bounty.id) : null;
   const sick = harmed(real), kingE = s.kingBoss && s.kingBoss.id !== real.id ? unitById(s, s.kingBoss.id) : null; // 15.0 (C)
 
-  const posScore = (x, y) => {
+  // 17.0 (A0): posScore depends only on the tile (not on where the planner has the bot standing), so memoize it per plan;
+  // leap/charge options re-scored the same tiles hundreds of times (Champion's Valor: 48 anchors x every move).
+  const psMemo = new Map();
+  const posScore = (x, y) => { const k = y * SIZE + x; let v = psMemo.get(k); if (v === undefined) { v = posScoreRaw(x, y); psMemo.set(k, v); } return v; };
+  const posScoreRaw = (x, y) => {
     let sc = 0;
     if (isVoid(s, x, y)) sc -= 60 + (s.storm.ring - ringOf(x, y)) * 14; else if (ringOf(x, y) < safeRing) sc -= 25; // deeper void scores worse, so bots climb out
     if (ringOf(x, y) < safeRing + 1 && s.round >= s.rules.first - 1) sc -= 4;
@@ -2171,7 +2197,7 @@ export function planBot(s, u) {
     real.x = m.x; real.y = m.y; // temporary
     const ps = posScore(m.x, m.y);
     let bestAct = null, as = 0;
-    if (canAct(s, real)) {
+    if (canAct(s, real) && !(m.side && BISHOP_T.sideActs)) { // 17.0 (C2): a Sidestep spends the action
       for (const slot of ['atk', 'sig', 'eq', 'ult']) {
         if (slot === 'ult' ? (real.ult || 0) < 100 : slot !== 'atk' && u.cd[slot] > 0) continue;
         const sid = slotAbility(u, slot); if (sid && ABILITIES[sid].free) continue;

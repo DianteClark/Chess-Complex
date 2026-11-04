@@ -12,6 +12,9 @@ import { LOCATIONS } from './locations.js'; // R 15.0: location weather (W)
 import { NET } from './net.js'; // R 15.1: NET.backlog lets the host's bots wait for the playback (real-speed turns)
 
 const ease = (t) => 1 - Math.pow(1 - t, 3);
+// R2 17.0 (player: "speeding past attacks and damage dealt, we miss that info"): readout timing, in timeline seconds
+const READ_MIN = 1.6, READ_NUM = 2.1, READ_HOLD = 0.85, READ_STACK = 4;
+const READ_EV = { dmg: 1, heal: 1, status: 1, stagger: 1, secondwind: 1, guard: 1, overkill: 1, resist: 1, steadfast: 1 };
 const easeBack = (t) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 const lerp = (a, b, t) => a + (b - a) * t;
 const byY = (a, b) => a.y - b.y;
@@ -230,6 +233,15 @@ export class Renderer {
   spectate(id) { const cd = this.cd; if (cd.specSet && cd.watch === id) return; cd.specSet = true; cd.watch = id; cd.user = false; cd.shotBack = null; const d = this.disp.get(id ?? cd.actor ?? (this.state && this.state.active)); if (d) cd.glide(d.tx + 0.5, d.ty + 0.5, this.defaultZoom(), { force: true }); }
   // R 15.1: is timeline time t (or the next `ahead` s) inside a calm span (my own actions, an ultimate, a kill)? pace() keeps those at 1x
   calmAt(t, ahead = 0) { const c = this.calm; if (!c || !c.length) return false; if (c[0][1] < t - 2) this.calm = c.filter((p) => p[1] >= t); for (const p of this.calm) if (p[0] <= t + ahead && p[1] >= t) return true; return false; }
+  // R2 17.0: a hit / heal / status readout over unit `id`. Lives READ_NUM s (or f.life if longer); at most READ_STACK per
+  // unit at once: a newer one sends the oldest into its fade, so a multi-hit never piles a tower of numbers
+  read(id, f) {
+    f.t = 0; f.ro = 1; f.uid = id; f.life = Math.max(f.life || 0, READ_NUM); f.L = 1;
+    let n = 0; for (let i = this.floats.length - 1; i >= 0; i--) { const q = this.floats[i]; if (q.uid === id && q.ro && q.t < q.life - 0.35 && ++n >= READ_STACK) q.t = q.life - 0.35; }
+    this.floats.push(f);
+  }
+  // R2 17.0: is a hit readout still being read (camdir keeps the pace at 1x while one is up)
+  readoutOn() { for (const f of this.floats) if (f.ro && f.t < f.life - 0.4) return true; return false; }
   setCamMode(m) { this.cd.mode = m === 'mine' || m === 'free' ? m : 'all'; }
   // real ms until the visuals of the latest state start playing (callouts wait this long so they land with the action)
   leadMs() { return Math.max(0, ((this.lastBase ?? this.time) - this.time) / (this.cd.speed || 1)) * 1000; }
@@ -260,7 +272,7 @@ export class Renderer {
   }
   overview() { this.setZoomLevel('board'); }
   closeup() { this.setZoomLevel('close'); }
-  reset() { this.zoomLevel = 'close'; this.zoomUI(); this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; this.banner = null; this.dim = null; this.lights = []; this.fcache = null; this.cd.reset(); this.beats = []; this.calm = []; this.cineFree = 0; this.lastActEnd = 0; this.introEnd = 0; this.lastBase = null; }
+  reset() { this.zoomLevel = 'close'; this.zoomUI(); this.disp.clear(); this.fx.reset(); this.floats = []; this.bubbles = []; this.timers = []; this.state = null; this.zoomSet = false; this.follow = true; this.hs = 0; this.slow = null; this.punch = 0; this.intro = null; this.marks = []; this.overlay = null; this.cine = null; this.hurt = 0; this.shake = 0; this.hitFlash.clear(); this.seqEnd = 0; this.bgCache = null; this.banner = null; this.dim = null; this.lights = []; this.fcache = null; this.cd.reset(); this.beats = []; this.calm = []; this.cineFree = 0; this.lastActEnd = 0; this.readAt = 0; this.introEnd = 0; this.lastBase = null; }
 
   kick(n) { if (this.shakeOn && !this.reduced) this.shake = Math.min(16, this.shake + n); }
   hitstop(t) { if (!this.reduced) this.hs = Math.max(this.hs, t); }
@@ -279,7 +291,7 @@ export class Renderer {
     for (const d of this.disp.values()) { if (d.deathAt != null) d.deathAt = f(d.deathAt); if (d.hideUntil != null) d.hideUntil = f(d.hideUntil); if (d.drop && !d.drop.landed) d.drop.t0 = f(d.drop.t0); }
     for (const b of this.beats) b.at = f(b.at);
     if (this.calm) for (const p of this.calm) { p[0] = f(p[0]); p[1] = f(p[1]); }
-    this.seqEnd = f(end); this.cineFree = f(this.cineFree || 0); this.lastActEnd = f(this.lastActEnd || 0); if (this.cd.myTurnAt > E) this.cd.myTurnAt = f(this.cd.myTurnAt);
+    this.seqEnd = f(end); this.cineFree = f(this.cineFree || 0); this.lastActEnd = f(this.lastActEnd || 0); this.readAt = f(this.readAt || 0); if (this.cd.myTurnAt > E) this.cd.myTurnAt = f(this.cd.myTurnAt);
     this.cd.stats.compress++;
   }
   flush() {
@@ -287,7 +299,7 @@ export class Renderer {
     const saveBase = this.base; this.base = this.time;
     for (const t of due) t.fn();
     this.base = saveBase;
-    this.seqEnd = this.time; this.beats = []; this.calm = []; this.cineFree = 0; this.lastActEnd = 0; this.cd.myTurnAt = -1; this.cd.stats.flush++;
+    this.seqEnd = this.time; this.beats = []; this.calm = []; this.cineFree = 0; this.lastActEnd = 0; this.readAt = 0; this.cd.myTurnAt = -1; this.cd.stats.flush++;
     for (const d of this.disp.values()) { d.t0 = -9; d.x = d.sx = d.tx; d.y = d.sy = d.ty; d.lunge = null; d.warp = null; }
   }
   sfx(n) { this.hooks.sfx && this.hooks.sfx(n); }
@@ -364,6 +376,7 @@ export class Renderer {
     // the camera leads a wide action by a beat (up to ~0.3 s) so the piece never runs out of frame
     let t = box && !ultEv ? Math.min(0.3, cd.actLead(box, actor) * 0.55) * quick : 0; let hits = 0; let lastAb = null; let cogAt = -1; // V 16.0: start of the current cog turn
     for (const e of events) {
+      if (READ_EV[e.e] && !(e.e === 'status' && e.on === false)) this.readAt = this.base + t; // R2 17.0: a readout pops here
       if (e.e === 'move') {
         const d = this.disp.get(e.id); if (!d) continue;
         const dist = Math.hypot(e.to.x - d.tx, e.to.y - d.ty);
@@ -393,18 +406,18 @@ export class Renderer {
           // R 10.3: one ultimate cine at a time; each gets its own framed moment (push-in on the whole action, then a
           // pure zoom back at impact, same centre)
           if (this.base + t < (this.cineFree || 0)) t = this.cineFree - this.base;
-          const st = t, ub = e.id === actor ? box : null; this.cineFree = this.base + st + 1.12;
-          this.calm.push([this.base + st, this.base + st + 1.6]); // R 15.1: an ultimate always plays at real speed
+          const st = t, ub = e.id === actor ? box : null; this.cineFree = this.base + st + 1.72; // 17.0 (D2): cine 1.65 s (was 1.05) so the name can be read
+          this.calm.push([this.base + st, this.base + st + 2.2]); // R 15.1: an ultimate always plays at real speed
           if (ub) this.camAt(st, () => cd.act(ub, actor, { push: 1.14, hitsMe }));
           this.later(st, () => {
             const u = unitById(this.state, e.id);
-            this.cine = { t: 0, life: 1.05, name: ABILITIES[e.ab].name, color: u ? u.color : '#ffd24d', who: u ? u.name : '', mine: e.id === this.myId, piece: u ? u.piece : 'pawn' };
+            this.cine = { t: 0, life: 1.65, name: ABILITIES[e.ab].name, color: u ? u.color : '#ffd24d', who: u ? u.name : '', mine: e.id === this.myId, piece: u ? u.piece : 'pawn' };
             if (this.dir) this.dir.cine(this.cine.life / Math.max(1, this.cd.speed)); // A1: the cine owns the hero lane; DOM callouts wait (R 10.3: at the timeline's pace)
             this.punch = Math.max(this.punch, 0.3); this.light(e.from.x + 0.5, e.from.y + 0.6, '#ffd24d', 3.2, 1.1);
             this.fx.ultCharge(e.from.x + 0.5, e.from.y + 0.5, u ? u.color : '#ffd24d', this.glowOf(e.id));
             this.sfx('ultcharge'); this.haptic([20, 30, 20, 30, 20]);
           });
-          t += 0.8;
+          t += 1.05; // 17.0 (D2): the strike lands once the ultimate's name has been on screen ~1 s (was 0.8)
           if (ub) this.camAt(t, () => cd.act(ub, actor, { hitsMe }));
         }
         const start = t;
@@ -452,6 +465,9 @@ export class Renderer {
         const hold = cd.worth(actor) ? 0.32 * quick * (e.id === this.myId ? 0.6 : 1) : 0.05; // my turn: hand control back sooner
         if (this.lastActEnd && this.base + t < this.lastActEnd + hold) t = this.lastActEnd + hold - this.base;
         this.lastActEnd = 0;
+        // R2 17.0: a hit / heal / status readout gets READ_HOLD s on screen before the camera leaves for the next actor
+        // (shorter when turns pile up; a bit shorter when it is my turn next, so control comes back promptly)
+        if (this.readAt) { const rh = READ_HOLD * quick * (e.id === this.myId ? 0.8 : 1); if (this.base + t < this.readAt + rh) t = this.readAt + rh - this.base; this.readAt = 0; }
         this.later(t, () => this.onFx(e));
         this.beatEnd = this.base + t; // this message's own visuals end here; what follows is the hand-off glide
         this.camAt(t, () => cd.turn(e.id));
@@ -502,24 +518,24 @@ export class Renderer {
     const srcD = e.src != null ? this.disp.get(e.src) : null, ang = srcD && srcD !== d ? Math.atan2(d.y - srcD.y, d.x - srcD.x) : -Math.PI / 2;
     const fxHit = () => this.fx.hit(x, y + 0.45, { n: e.n, crit: e.crit, elem: e.self ? 'self' : e.lava ? 'lava' : e.storm ? 'storm' : e.trap ? 'trap' : e.thorns ? 'thorns' : null, ang, dot: e.dot, shield: e.shield }); // V 15.0: dot / shield
     if (e.shield) { // R 15.0: absorb number in shield blue, no HP chip
-      this.floats.push({ x: x + (n > 1 ? (Math.random() - 0.5) * 0.3 : 0), y: y - 0.95, text: 'ABSORB ' + e.n, t: 0, life: 1, color: '#9fd0ff', size: 0.62 });
+      this.read(e.id, { x: x + (n > 1 ? (Math.random() - 0.5) * 0.3 : 0), y: y - 0.95, text: 'ABSORB ' + e.n, t: 0, life: 1, color: '#9fd0ff', size: 0.62 });
       fxHit(); this.light(x, y + 0.5, '#6fb4ff', 1.3, 0.25, 0.7); this.kick(Math.min(4, 1 + e.n / 12)); this.sfx('block');
       return;
     }
     if (e.dot) { // R 15.0: status ticks (burn / poison) read as their colour, small, no camera juice
-      this.floats.push({ x: x + 0.22, y: y - 0.85, text: '-' + e.n, t: 0, life: 1.05, color: e.dot === 'poison' ? '#9bff5a' : e.dot === 'burn' ? '#ff9a3d' : '#ffb0b0', size: 0.78 });
+      this.read(e.id, { x: x + 0.22, y: y - 0.85, text: '-' + e.n, t: 0, life: 1.7, color: e.dot === 'poison' ? '#9bff5a' : e.dot === 'burn' ? '#ff9a3d' : '#ffb0b0', size: 0.78 });
       fxHit(); this.hitFlash.set(e.id, 0.45); this.sfx('dot:' + e.dot); if (e.id === this.myId) { this.haptic(15); this.hurt = Math.max(this.hurt || 0, 0.5); }
       return;
     }
     if (e.self) { // Gambit's blood price: muted, no camera juice
-      this.floats.push({ x: x + 0.25, y: y - 0.8, text: '-' + e.n, t: 0, life: 1, color: '#c97a80', size: 0.7 });
+      this.read(e.id, { x: x + 0.25, y: y - 0.8, text: '-' + e.n, t: 0, life: 1.6, color: '#c97a80', size: 0.7 });
       fxHit(); this.hitFlash.set(e.id, 0.5);
       return;
     }
     const big = e.crit || e.n >= 25;
-    this.floats.push({ x: x + (n > 1 ? (Math.random() - 0.5) * 0.4 : 0), y: y - 0.9, text: String(e.n), t: 0, life: 1.15, color: e.lava ? '#ff9a3d' : e.trap ? '#ffb86b' : e.storm ? '#ff6b6b' : e.thorns ? '#b6ff7a' : e.crit ? '#ffd24d' : '#ffffff', size: big ? 1.4 : 1, crit: e.crit, rot: (Math.random() - 0.5) * 0.3 });
+    this.read(e.id, { x: x + (n > 1 ? (Math.random() - 0.5) * 0.4 : 0), y: y - 0.9, text: String(e.n), t: 0, life: 1.15, color: e.lava ? '#ff9a3d' : e.trap ? '#ffb86b' : e.storm ? '#ff6b6b' : e.thorns ? '#b6ff7a' : e.crit ? '#ffd24d' : '#ffffff', size: big ? 1.4 : 1, crit: e.crit, rot: (Math.random() - 0.5) * 0.3 });
     if (e.lava) { fxHit(); this.light(x, y + 0.6, '#ff8a3d', 1.6, 0.35); this.hitFlash.set(e.id, 1); d.recoil = null; this.kick(3); this.sfx('sizzle'); if (e.id === this.myId) { this.haptic(30); this.hurt = 1; } return; }
-    if (e.crit) this.floats.push({ x, y: y - 1.45, text: 'CRITICAL', t: 0, life: 0.9, color: '#ffd24d', size: 0.55 });
+    if (e.crit) this.floats.push({ x, y: y - 1.45, text: 'CRITICAL', t: 0, life: 1.9, L: 1, color: '#ffd24d', size: 0.55 }); // R2 17.0: a tag on the number, not a readout of its own (does not count toward the stack cap)
     this.hitFlash.set(e.id, 1);
     d.recoil = { t0: this.time, src: e.src };
     fxHit();
@@ -556,7 +572,7 @@ export class Renderer {
     const fx = this.fx, s = this.state;
     const at = (id) => { const d = this.disp.get(id); return d ? [d.x + 0.5, d.y] : [0, 0]; };
     switch (e.e) {
-      case 'heal': { const [x, y] = at(e.id); const d = this.disp.get(e.id); if (d) d.hp += e.n; this.floats.push({ x, y: y - 0.9, text: '+' + e.n, t: 0, life: 1, color: '#6dffa8', size: 0.9 }); fx.burst(x, y + 0.4, '#6dffa8', 10, 1.5, 'up'); if (e.id === this.myId) this.sfx('heal'); break; }
+      case 'heal': { const [x, y] = at(e.id); const d = this.disp.get(e.id); if (d) d.hp += e.n; this.read(e.id, { x, y: y - 0.9, text: '+' + e.n, t: 0, life: 1, color: '#6dffa8', size: 0.9 }); fx.burst(x, y + 0.4, '#6dffa8', 10, 1.5, 'up'); if (e.id === this.myId) this.sfx('heal'); break; }
       case 'aoe': for (const t of e.tiles) fx.flashTile(t.x, t.y, e.kind === 'hit' ? '#ff5d5d' : '#7fe0ff'); break;
       case 'crate': fx.burst(e.x + 0.5, e.y + 0.5, '#c9934d', 14, 3.5, 'chunk'); fx.burst(e.x + 0.5, e.y + 0.5, '#d6b05c', 6, 3, 'chunk'); this.kick(3); this.sfx('crate'); break;
       case 'rubble': fx.burst(e.x + 0.5, e.y + 0.5, '#8d8aa0', e.broke ? 16 : 6, 3, 'chunk'); this.sfx('rubble'); break;
@@ -593,7 +609,7 @@ export class Renderer {
           this.kick(14); this.sfx('storm'); this.haptic([60, 40, 120]);
         } else { this.kick(5); this.sfx(e.phase === 'crack' ? 'storm:crack' : 'warn'); }
         break;
-      case 'stagger': { const [x, y] = at(e.id); this.floats.push({ x, y: y - 1.25, text: 'STAGGERED', t: 0, life: 1, color: '#c9a6ff', size: 0.55 }); break; }
+      case 'stagger': { const [x, y] = at(e.id); this.read(e.id, { x, y: y - 1.25, text: 'STAGGERED', t: 0, life: 1.8, color: '#c9a6ff', size: 0.55 }); break; }
       case 'buff': { const [x, y] = at(e.id); fx.ring(x, y + 0.8, e.k === 'atk' ? '#ff4a2a' : e.k === 'def' ? '#7fb6ff' : e.k === 'spd' || e.k === 'move' ? '#ffe04d' : e.k === 'heal' ? '#6dffa8' : '#ffffff', 1.5, 0.6); this.sfx('buff'); break; }
       case 'rampart': fx.burst(e.x + 0.5, e.y + 0.6, '#b8b2c8', 14, 3, 'chunk'); fx.shock(e.x + 0.5, e.y + 0.6, 'rgba(200,190,220,0.4)', 0.9); this.kick(5); this.sfx('rampart'); break;
       case 'crownSpawn': this.light(e.x + 0.5, e.y + 0.5, '#ffd24d', 4, 1.6); fx.crownSpawn(e.x + 0.5, e.y + 0.62); this.kick(6); this.sfx('crownspawn'); break;
@@ -743,7 +759,7 @@ export class Renderer {
           if (d) { this.shot(d.x, d.y, 1.22, 1.1, 'shot', e.id); this.light(d.x + 0.5, d.y + 0.6, hard ? '#ff2a3a' : '#ffb03d', 4.2, 1.1); this.floats.push({ x: d.x + 0.5, y: d.y - 1.6, text: hard ? 'FINAL PHASE' : 'PHASE TWO', t: 0, life: 1.6, color: hard ? '#ff5a5a' : '#ffc46b', size: 0.8 }); }
           this.kick(hard ? 14 : 10); this.hitstop(0.1); this.slowmo(0.35, 0.8); this.punch = Math.max(this.punch, 0.14); this.fx.flash(hard ? 0.45 : 0.3, hard ? '#ff2a3a' : '#ffb03d'); this.haptic([60, 40, 100]);
         }
-        if (e.e === 'status' && e.k === 'exposed' && e.on !== false) { const d = this.disp.get(e.id); if (d) this.floats.push({ x: d.x + 0.5, y: d.y - 1.3, text: `EXPOSED x${e.n || 1}`, t: 0, life: 1.1, color: '#ff6b6b', size: 0.6 }); }
+        if (e.e === 'status' && e.k === 'exposed' && e.on !== false) { const d = this.disp.get(e.id); if (d) this.read(e.id, { x: d.x + 0.5, y: d.y - 1.3, text: `EXPOSED x${e.n || 1}`, t: 0, life: 1.8, color: '#ff6b6b', size: 0.6 }); }
         const SN = { split: 'split', shieldBreak: 'shieldbreak', summon: 'summon', bountyClaim: 'bountyclaim', enrage: 'enrage' };
         if (e.e === 'hazard' && e.kind) this.sfx('hazard:' + e.kind + ':' + (e.phase || 'go'));
         else if (e.e === 'hill') this.sfx(e.contested ? 'hill:contested' : 'hill:score');
@@ -809,7 +825,11 @@ export class Renderer {
     this.shake *= Math.pow(0.002, realDt);
     this.hurt = Math.max(0, (this.hurt || 0) - realDt * 2);
     for (const [id, f] of this.hitFlash) { const v = f - dt * 6; if (v <= 0) this.hitFlash.delete(id); else this.hitFlash.set(id, v); }
-    this.floats = this.floats.filter((p) => (p.t += dt) < p.life);
+    // R2 17.0: readable readouts. Every float lives at least READ_MIN s (D2's words too), numbers READ_NUM s (set in
+    // read()); floats age at most 1.4x real time, so a 2x/4x replay or a fast pace never flashes them past
+    const fdt = Math.min(dt, realDt * 1.4);
+    for (const p of this.floats) if (!p.L) { p.L = 1; if (!p.ro) p.life = Math.min(2.6, Math.max(READ_MIN, p.life * 1.5)); }
+    this.floats = this.floats.filter((p) => (p.t += fdt) < p.life);
     for (const m of this.motes) { m.y -= m.v * realDt; m.p += realDt; if (m.y < -0.5) { m.y = SIZE + 0.5; m.x = Math.random() * SIZE; } }
     if (this.underWheel()) return;
     this.draw();
@@ -1018,20 +1038,25 @@ export class Renderer {
     const occ = this.dir ? this.dir.occupied() : null, placed = [];
     const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
     for (const f of this.floats) {
-      const k = f.t / f.life;
-      const [sx, sy0] = this.toScreen(f.x, f.y - ease(Math.min(1, k * 1.4)) * 0.7);
-      const pop = k < 0.12 ? 1 + (1 - k / 0.12) * 0.8 : 1;
-      const px = Math.max(12, z * 0.42) * f.size * pop;
+      // R2 17.0: time-based motion so a longer life reads as a longer hold, not a slower drift: pop (0.14 s), rise
+      // 0.6 tiles over 0.55 s, hold, fade over the last 0.4 s. Floor sizes keep words >= 11 px and numbers >= 14 px
+      const k = f.t / f.life, rest = f.life - f.t;
+      const [sx, sy0] = this.toScreen(f.x, f.y - ease(Math.min(1, f.t / 0.55)) * 0.6);
+      const pop = f.t < 0.14 ? 1 + (1 - f.t / 0.14) * 0.7 : 1;
+      const px = Math.max(f.size >= 0.75 ? 14 : 11, Math.max(12, z * 0.42) * f.size) * pop;
       ctx.font = `800 ${px}px "Chakra Petch", system-ui, sans-serif`;
       const tw = ctx.measureText(f.text).width + 4;
       let lift = f.lift || 0;
-      const box = { x: sx + ox - tw / 2, y: sy0 + oy - px * 0.5 - lift, w: tw, h: px };
+      const box = { x: sx + ox - tw / 2 + (f.dx || 0), y: sy0 + oy - px * 0.5 - lift, w: tw, h: px };
+      // R2 17.0: a new float that lands on another first tries the free side (right, then left) at the same height, so
+      // a multi-hit fans out beside the piece instead of building a tower into the HUD; the side is kept for its life
+      if (f.dx == null) { f.dx = 0; if (placed.some((q) => hit(q, box))) for (const c of [1, -1]) { const d = c * (tw * 0.5 + 18), b2 = { x: box.x + d, y: box.y, w: tw, h: px }; if (!placed.some((q) => hit(q, b2))) { f.dx = d; box.x = b2.x; break; } } }
       for (let i = 0; i < 6; i++) { const p = placed.find((q) => hit(q, box)); if (!p) break; lift += box.y + box.h - p.y + 3; box.y = sy0 + oy - px * 0.5 - lift; }
       f.lift = lift; placed.push(box);
       if (occ && occ.some((o) => hit(o, box))) continue;
       const sy = sy0 - lift;
-      ctx.save(); ctx.translate(sx + ox, sy + oy); ctx.rotate((f.rot || 0) * (1 - k));
-      ctx.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : 1;
+      ctx.save(); ctx.translate(sx + ox + (f.dx || 0), sy + oy); ctx.rotate((f.rot || 0) * (1 - k));
+      ctx.globalAlpha = rest < 0.4 ? Math.max(0, rest / 0.4) : 1;
       ctx.lineWidth = Math.max(3, px * 0.2); ctx.strokeStyle = 'rgba(8,6,14,0.92)'; ctx.lineJoin = 'round'; ctx.strokeText(f.text, 0, 0);
       ctx.fillStyle = f.color; ctx.fillText(f.text, 0, 0);
       ctx.restore();
@@ -1115,7 +1140,7 @@ export class Renderer {
     const inA = Math.min(1, k * 7), outK = k > 0.8 ? (k - 0.8) / 0.2 : 0, a = inA * (1 - outK);
     const eo = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
     // dim + letterbox
-    ctx.globalAlpha = 0.42 * a; ctx.fillStyle = '#05040a'; ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 0.42 * a * (k > 0.6 ? Math.max(0.3, 1 - (k - 0.6) * 3) : 1); ctx.fillStyle = '#05040a'; ctx.fillRect(0, 0, W, H); // 17.0 (D2): the dim lifts once the strike lands (k ~0.64) so the hit reads
     const lb = H * 0.075 * eo(k * 5) * (1 - outK);
     ctx.globalAlpha = 0.92; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, lb); ctx.fillRect(0, H - lb, W, lb);
     const bh = R.h * 0.84 * (1 - outK * 0.9), by = R.y + (R.h - bh) / 2, sk = Math.min(18, bh * 0.16);

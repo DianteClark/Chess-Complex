@@ -353,42 +353,9 @@ const lib = {
   dark(o = {}) { const f = o.f || 55; T(f, o.d || 1, { type: 'sawtooth', v: 0.09, lp: { f: 900, to: 200 }, det: 12, hall: 0.5, at: o.at, a: 0.1 }); T(f * 1.06, o.d || 1, { type: 'sawtooth', v: 0.07, lp: { f: 700, to: 180 }, hall: 0.5, at: o.at, a: 0.12 }); N(o.d || 1, { c: 'brown', f: 400, v: 0.25, a: 0.3, at: o.at, hall: 0.4 }); },
 };
 
-// ---------------------------------------------------------------- announcer voice (formant vocoder, no speech APIs)
+// ---------------------------------------------------------------- 17.0 (D2): the spoken announcer (formant vocoder "voice")
+// is gone (player feedback: no voice-acted lines). Callouts keep their stinger; VOW stays for the choir pad.
 const VOW = { a: [760, 1250, 2650], e: [520, 1800, 2500], i: [300, 2250, 3000], o: [480, 820, 2550], u: [340, 760, 2350], r: [470, 1300, 1650], m: [280, 900, 2200], w: [300, 650, 2200] };
-// syl: [vowels (1-2 letters, glides between), duration, semitone offset, consonant]
-function voice(syl, o = {}) {
-  if (!ac || live > maxVoices() * 1.4) return;
-  const t0 = CUR.t0 + (o.at || 0), base = o.p || 92, intervals = o.chord || [0, 12, 19];
-  const total = syl.reduce((s, x) => s + x[1] + 0.03, 0) + 0.25;
-  const pre = ac.createGain(); pre.gain.value = 0;
-  const oscs = intervals.map((iv, k) => { const s = ac.createOscillator(); s.type = 'sawtooth'; s.detune.value = (k ? rr(-7, 7) : 0); const g = ac.createGain(); g.gain.value = [1, 0.45, 0.25, 0.2][k] || 0.2; s.connect(g); g.connect(pre); return { s, iv }; });
-  const fls = [0, 1, 2].map((j) => { const fl = ac.createBiquadFilter(); fl.type = 'bandpass'; fl.Q.value = [7, 11, 13][j]; return fl; });
-  const sum = ac.createGain(); sum.gain.value = 1.6;
-  fls.forEach((fl, j) => { const g = ac.createGain(); g.gain.value = [1, 0.7, 0.4][j]; pre.connect(fl); fl.connect(g); g.connect(sum); });
-  // consonants: one noise source with a moving band-pass and gated gain
-  const ns = ac.createBufferSource(); ns.buffer = NB.white; ns.loop = true; const nf = ac.createBiquadFilter(); nf.type = 'bandpass'; nf.Q.value = 1.5; const ng = ac.createGain(); ng.gain.value = 0; ns.connect(nf); nf.connect(ng);
-  let t = t0;
-  syl.forEach(([vw, d, semi = 0, cons], i) => {
-    const v1 = VOW[vw[0]] || VOW.a, v2 = VOW[vw[1] || vw[0]] || v1, f = base * st(semi);
-    if (cons) {
-      const c = { k: [2400, 0.035], t: [4500, 0.03], p: [1200, 0.03], s: [5500, 0.09], h: [3200, 0.09], f: [4000, 0.06], v: [3500, 0.05], d: [700, 0.025], b: [400, 0.025], g: [1500, 0.03], j: [3000, 0.06] }[cons] || [2000, 0.03];
-      nf.frequency.setValueAtTime(c[0], t); ng.gain.setValueAtTime(0, t); ng.gain.linearRampToValueAtTime(0.5, t + 0.005); ng.gain.exponentialRampToValueAtTime(0.001, t + c[1]);
-      t += c[1] * 0.6;
-    }
-    oscs.forEach(({ s, iv }) => { const fr = f * st(iv); if (i === 0) s.frequency.setValueAtTime(fr, t); else s.frequency.exponentialRampToValueAtTime(fr, t + 0.04); s.frequency.setValueAtTime(fr, t + 0.04); if (i === syl.length - 1 && o.fall !== 0) s.frequency.exponentialRampToValueAtTime(fr * st(o.fall == null ? -3 : o.fall), t + d); });
-    fls.forEach((fl, j) => { fl.frequency.setValueAtTime(v1[j], t); fl.frequency.linearRampToValueAtTime(v2[j], t + d); });
-    pre.gain.setValueAtTime(i ? 0.25 : 0, t); pre.gain.linearRampToValueAtTime(1, t + 0.025); pre.gain.setValueAtTime(1, t + d * 0.7); pre.gain.linearRampToValueAtTime(i === syl.length - 1 ? 0.0001 : 0.3, t + d);
-    t += d + 0.03;
-  });
-  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 160; sum.connect(hp);
-  const g = ac.createGain(); g.gain.value = (o.v || 0.5); hp.connect(g); g.connect(B.voice);
-  const hs = ac.createGain(); hs.gain.value = o.hall == null ? 0.45 : o.hall; g.connect(hs); hs.connect(verb);
-  const end = t + 0.2;
-  live += oscs.length + 1;
-  oscs.forEach(({ s }) => { s.start(t0); s.stop(end); }); ns.start(t0, rr(0, Math.max(0, NB.white.duration - 0.05))); ns.stop(end);
-  oscs[0].s.onended = () => { live = Math.max(0, live - oscs.length - 1); };
-  duck(0.45, total + 0.3);
-}
 // stinger under every callout: whoosh in, hit, shimmer; level 1..5 escalates
 function sting(level = 1, o = {}) {
   const L = clamp(level, 1, 6), root = o.root || [220, 233, 247, 262, 277, 294][L - 1];
@@ -399,47 +366,7 @@ function sting(level = 1, o = {}) {
   if (L >= 3) lib.sparkle(4 + L * 2, { at: 0.25, bus: 'voice' });
   if (L >= 4) lib.sub(55, 1, { at: 0.2, v: 0.3, to: 40, bus: 'voice' });
 }
-const P = (s) => s; // phrase literal marker (readability)
-const PHRASES = {
-  multi: P([['u', 0.14, 0, 'm'], ['i', 0.12, 2, 't'], ['i', 0.34, 3, 'k']]),
-  double: P([['u', 0.16, 0, 'd'], ['o', 0.1, -1, 'b'], ['i', 0.34, 2, 'k']]),
-  triple: P([['i', 0.16, 0, 't'], ['o', 0.1, -1, 'p'], ['i', 0.34, 3, 'k']]),
-  quad: P([['ao', 0.3, 0, 'k'], ['i', 0.34, 3, 'k']]),
-  rampage: P([['a', 0.16, 0, ''], ['ae', 0.34, 3, 'p']]),
-  final: P([['ai', 0.2, 0, 'f'], ['o', 0.12, -2, ''], ['u', 0.14, 0, 'd'], ['eo', 0.36, 2, '']]),
-  shutdown: P([['u', 0.18, 2, 'h'], ['au', 0.42, -1, 'd']]),
-  regicide: P([['e', 0.12, 0, ''], ['i', 0.12, 2, 'j'], ['ai', 0.42, 4, 's']]),
-  revive: P([['i', 0.12, 0, ''], ['ai', 0.42, 4, 'v']]),
-  wave: P([['wei', 0.42, 0, '']]),
-  boss: P([['o', 0.3, 0, 'b'], ['wei', 0.42, -2, 's']]),
-  victory: P([['i', 0.15, 0, 'v'], ['o', 0.12, 2, 't'], ['i', 0.44, 4, '']]),
-  defeat: P([['i', 0.14, 0, 'd'], ['i', 0.5, -3, 'f']]),
-  waveclear: P([['we', 0.22, 0, ''], ['ia', 0.42, 4, 'k']]),
-  firstblood: P([['r', 0.18, 0, 'f'], ['u', 0.42, 3, 'b']]),
-  crowned: P([['au', 0.5, 2, 'k']]),
-  ultimate: P([['u', 0.1, 0, ''], ['i', 0.1, 2, 't'], ['a', 0.36, 4, 'm']]),
-  streak: P([['i', 0.4, 2, 's']]),
-  unstoppable: P([['u', 0.1, 0, ''], ['o', 0.14, 2, 't'], ['a', 0.1, 0, 'p'], ['u', 0.3, -2, 'b']]),
-  storm: P([['o', 0.42, 0, 's']]),
-  fight: P([['ai', 0.42, 3, 'f']]),
-  ready: P([['e', 0.14, 0, ''], ['i', 0.34, 3, 'd']]),
-  go: P([['ou', 0.4, 4, 'g']]),
-  crown: P([['au', 0.48, 2, 'k']]),
-  laststand: P([['a', 0.16, 0, ''], ['a', 0.36, 3, 's']]),
-  comeback: P([['u', 0.14, 0, 'k'], ['a', 0.36, 3, 'b']]),
-  domination: P([['o', 0.1, 0, 'd'], ['i', 0.1, 2, 'm'], ['e', 0.12, 3, 'n'], ['u', 0.3, 0, 'h']]),
-  godlike: P([['o', 0.16, 0, 'g'], ['ai', 0.36, 4, '']]),
-  legendary: P([['e', 0.12, 0, ''], ['e', 0.1, 2, 'j'], ['e', 0.1, 3, 'd'], ['i', 0.3, 5, 'r']]),
-  promoted: P([['o', 0.1, 0, 'p'], ['ou', 0.18, 2, 'm'], ['e', 0.3, 4, 't']]),
-};
 function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
-// Unknown callouts still get a voice: syllables derived from the name.
-function phraseFor(name) {
-  const key = name.toLowerCase().replace(/[^a-z]/g, '');
-  if (PHRASES[key]) return PHRASES[key];
-  const vs = key.match(/[aeiou]+/g) || ['a']; const cs = key.match(/[^aeiou]+/g) || [''];
-  return vs.slice(0, 4).map((v, i, arr) => [v.slice(0, 2), i === arr.length - 1 ? 0.36 : 0.13, [0, 2, 3, 4][i] || 3, (cs[i] || '')[0] || '']);
-}
 
 // ---------------------------------------------------------------- chains / escalation state
 const chain = { kill: 0, killT: -9, hit: 0, hitT: -9, crit: 0, critT: -9 };
@@ -601,7 +528,7 @@ const promoteTier = (tier) => {
   if (k >= 3) lib.choir([root, root * 1.26, root * 1.5], 1 + k * 0.2, { at: t1, v: 0.04 + k * 0.01, vowel: 'a' });
   if (k >= 2) lib.sparkle(3 + k * 2, { at: t1 + 0.1 });
   if (k >= 4) { lib.bell(root * 4, 1.4, { at: t1 + 0.1, v: 0.05 }); lib.sub(root / 4, 1.2, { at: t1, v: 0.3 }); duck(0.5, 1.2); }
-  if (k >= 5) { lib.chime([root * 2, root * 2.52, root * 3, root * 4], { at: t1 + 0.3, v: 0.05, roll: 0.1, d: 1.2 }); voice(PHRASES.crowned, { at: t1 + 0.25, p: 98, v: 0.35 }); }
+  if (k >= 5) { lib.chime([root * 2, root * 2.52, root * 3, root * 4], { at: t1 + 0.3, v: 0.05, roll: 0.1, d: 1.2 }); }
 };
 for (let n = 1; n <= 5; n++) S['promote:' + n] = () => promoteTier(n);
 S.crown = () => promoteTier(5);
@@ -799,7 +726,7 @@ const reveal = (r) => {
 };
 for (const r of Object.keys(RAR)) S['reveal:' + r] = () => reveal(r);
 
-// ---- announcer callouts: stinger + formant voice
+// ---- announcer callouts: stinger only (17.0 (D2): the formant voice is gone)
 const ANN = {
   multi: { lv: 3, p: 98 }, double: { lv: 2, p: 98 }, triple: { lv: 3, p: 104 }, quad: { lv: 4, p: 110 }, rampage: { lv: 5, p: 116 },
   final: { lv: 4, p: 87, minor: true }, shutdown: { lv: 4, p: 92, minor: true }, regicide: { lv: 5, p: 87, minor: true },
@@ -811,15 +738,14 @@ const ANN = {
 function announce(name) {
   const key = name.toLowerCase().replace(/[^a-z]/g, ''), a = ANN[key] || { lv: 2 + (hashStr(key) % 3), p: 92 + (hashStr(key) % 4) * 6 };
   CUR.bus = 'voice';
-  sting(a.lv, { minor: a.minor });
-  voice(phraseFor(key), { at: 0.12, p: a.p, v: 0.42 });
+  sting(a.lv, { minor: a.minor }); // 17.0 (D2): stinger only, no spoken line
 }
-S['announce:boss'] = () => { CUR.bus = 'voice'; [0, 0.45, 0.9].forEach((a) => { K(60, 30, 0.6, { v: 0.5, at: a }); N(0.35, { c: 'brown', f: 400, v: 0.4, at: a, hall: 0.4 }); }); lib.dark({ f: 46, d: 2, at: 0.2 }); T(138.6, 1.6, { type: 'sawtooth', v: 0.05, at: 0.5, lp: { f: 1200, to: 300 }, hall: 0.6 }); voice(PHRASES.boss, { at: 1.1, p: 73, chord: [0, 7, 12], v: 0.45 }); duck(0.7, 2.4); };
-S['announce:victory'] = () => { CUR.bus = 'voice'; [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => T(f, 0.6, { type: 'triangle', v: 0.09, at: i * 0.09, hall: 0.5 })); lib.choir([262, 330, 392, 523], 1.8, { at: 0.4, v: 0.06 }); lib.sparkle(12, { at: 0.4, gap: 0.05 }); K(110, 40, 0.6, { v: 0.35, at: 0.45 }); voice(PHRASES.victory, { at: 0.5, p: 110, v: 0.42 }); };
-S['announce:defeat'] = () => { CUR.bus = 'voice'; T(220, 1.6, { type: 'sawtooth', v: 0.06, to: 110, lp: { f: 1500, to: 300 }, hall: 0.6 }); T(233, 1.6, { type: 'sawtooth', v: 0.05, to: 116, lp: { f: 1200, to: 250 }, hall: 0.6 }); N(1.2, { c: 'brown', f: 300, to: 120, v: 0.4, hall: 0.5 }); lib.sub(40, 1.4, { v: 0.4, to: 28 }); voice(PHRASES.defeat, { at: 0.35, p: 73, chord: [0, 12, 15], v: 0.4, fall: -5 }); };
+S['announce:boss'] = () => { CUR.bus = 'voice'; [0, 0.45, 0.9].forEach((a) => { K(60, 30, 0.6, { v: 0.5, at: a }); N(0.35, { c: 'brown', f: 400, v: 0.4, at: a, hall: 0.4 }); }); lib.dark({ f: 46, d: 2, at: 0.2 }); T(138.6, 1.6, { type: 'sawtooth', v: 0.05, at: 0.5, lp: { f: 1200, to: 300 }, hall: 0.6 }); duck(0.7, 2.4); };
+S['announce:victory'] = () => { CUR.bus = 'voice'; [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => T(f, 0.6, { type: 'triangle', v: 0.09, at: i * 0.09, hall: 0.5 })); lib.choir([262, 330, 392, 523], 1.8, { at: 0.4, v: 0.06 }); lib.sparkle(12, { at: 0.4, gap: 0.05 }); K(110, 40, 0.6, { v: 0.35, at: 0.45 }); };
+S['announce:defeat'] = () => { CUR.bus = 'voice'; T(220, 1.6, { type: 'sawtooth', v: 0.06, to: 110, lp: { f: 1500, to: 300 }, hall: 0.6 }); T(233, 1.6, { type: 'sawtooth', v: 0.05, to: 116, lp: { f: 1200, to: 250 }, hall: 0.6 }); N(1.2, { c: 'brown', f: 300, to: 120, v: 0.4, hall: 0.5 }); lib.sub(40, 1.4, { v: 0.4, to: 28 }); };
 for (const k of Object.keys(ANN)) S['announce:' + k] = () => announce(k);
 S['announce:waveclear'] = () => { S.waveclear(); announce('waveclear'); };
-S['announce:wave'] = () => { CUR.bus = 'voice'; N(0.45, { c: 'brown', f: 600, to: 150, v: 0.3, hall: 0.4 }); K(80, 35, 0.5, { v: 0.4 }); T(220, 0.6, { type: 'sawtooth', v: 0.05, lp: { f: 2000, to: 500 }, hall: 0.5 }); T(330, 0.6, { type: 'sawtooth', v: 0.04, at: 0.12, lp: { f: 2000, to: 500 }, hall: 0.5 }); voice(PHRASES.wave, { at: 0.15, p: 82, v: 0.42 }); };
+S['announce:wave'] = () => { CUR.bus = 'voice'; N(0.45, { c: 'brown', f: 600, to: 150, v: 0.3, hall: 0.4 }); K(80, 35, 0.5, { v: 0.4 }); T(220, 0.6, { type: 'sawtooth', v: 0.05, lp: { f: 2000, to: 500 }, hall: 0.5 }); T(330, 0.6, { type: 'sawtooth', v: 0.04, at: 0.12, lp: { f: 2000, to: 500 }, hall: 0.5 }); };
 
 // ---- abilities: every id gets a signature
 const AB = {

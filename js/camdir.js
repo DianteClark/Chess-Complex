@@ -10,6 +10,7 @@
 // fade. Holds and glides shrink and the timeline speeds up (pace) when the backlog of queued turns grows.
 // R 15.1: real speed (1x) by default; pace ramps smoothly to at most 1.4x only when several seconds behind, and never
 // during the viewer's own actions, ultimates or kills (render.js marks those spans 'calm'). Glides are ~15% slower.
+// R2 17.0: also 1x while a damage / heal / status readout is on screen (render.readoutOn), unless > 5 s behind.
 import { unitById } from './engine.js';
 
 const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -159,6 +160,9 @@ export class CamDirector {
     const r = this.r, mine = this.myTurnAt > r.time, lo = mine ? 1.5 : 2.5, x = clampN((back - lo) / 4, 0, 1);
     let k = 1 + 0.4 * x * x * (3 - 2 * x);
     if (k > 1 && (r.cine || (r.calmAt && r.calmAt(r.time, 0.4)))) k = 1;
+    // R2 17.0: never faster than real speed while a hit / heal / status readout is up, unless genuinely far behind
+    // (> 5 s, where compress() would otherwise squeeze whole turns); the ramp then starts from 1x as before
+    if (k > 1 && back < 5 && r.readoutOn && r.readoutOn()) k = 1;
     this.speed += (k - this.speed) * Math.min(1, realDt * (k < this.speed ? 7 : 1.2));
     if (Math.abs(this.speed - k) < 0.01) this.speed = k;
     return this.speed;

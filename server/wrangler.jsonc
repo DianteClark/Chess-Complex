@@ -1,0 +1,35 @@
+// Chess Complex 17.0: one Worker serves the game (static files from the repo root) and the cloud server.
+// Workers Builds deploys it from GitHub with root directory `server`; imports of ../js/*.js bundle.
+// Nothing here needs creating by hand: Durable Objects, Analytics Engine, Workers AI, rate limits and crons all
+// come up on first deploy. Optional secrets (set in the dashboard, see docs/SETUP_CLOUDFLARE.md): TURN_KEY_ID,
+// TURN_KEY_API_TOKEN, TURNSTILE_SECRET, ADMIN_KEY. Optional var: TURNSTILE_SITE_KEY.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chess-complex",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "../", "binding": "ASSETS", "not_found_handling": "none" },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOM", "class_name": "Room" },
+      { "name": "PLAYER", "class_name": "Player" },
+      { "name": "BOARD", "class_name": "Board" },
+      { "name": "REPLAY", "class_name": "Replay" },
+      { "name": "STATS", "class_name": "Stats" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room", "Player"] },
+    { "tag": "v2", "new_sqlite_classes": ["Board", "Replay", "Stats"] }
+  ],
+  "analytics_engine_datasets": [ { "binding": "AE", "dataset": "cc_matches" } ],
+  "ai": { "binding": "AI" },
+  "ratelimits": [
+    { "name": "RL_NEW", "namespace_id": "1701", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RL_API", "namespace_id": "1702", "simple": { "limit": 240, "period": 60 } }
+  ],
+  "triggers": { "crons": ["5 0 * * *", "10 0 * * 1"] },
+  // keep_vars: dashboard variables (TURNSTILE_SITE_KEY) survive every GitHub-triggered deploy; secrets always do
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}

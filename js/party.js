@@ -42,6 +42,7 @@ export function mount(deps) {
     const s = D.session(); if (!s) return;
     const a = b.dataset.party, v = b.dataset.v;
     if (a === 'ready' && s.mode === 'client') { if (b.disabled) return; s.client.send({ t: 'ready', on: !s.amReady }); s.amReady = !s.amReady; renderMember(s); D.sfx.select(); return; }
+    if (s.cloud) { if (s.lead) cloudLead(s, a, v, b); return; } // 17.0 (N2): cloud party: the Room owns the options
     if (s.mode !== 'host' || s.started) return;
     const P = hostParty(s);
     if (a === 'group') { const list = modesIn(v); if (!list.length) return; P.group = v; if (v !== 'custom' && groupOf(s.gameMode) !== v) setMode(s, list[0]); else if (v === 'custom') P.custom ||= defaultRules(); }
@@ -73,7 +74,7 @@ function setMode(s, id) {
 // What the engine gets: { location?, custom? }
 export function matchOpts(s) {
   const P = hostParty(s), o = {};
-  if (P.loc && P.loc !== 'random') o.location = P.loc;
+  if (P.group === 'custom' && P.loc && P.loc !== 'random') o.location = P.loc; // 17.0 (D2): the leader picks the location only in Custom; every other match rolls one
   if (P.group === 'custom') o.custom = cleanRules(P.custom);
   return o;
 }
@@ -110,7 +111,8 @@ export function onStart(s) { const P = hostParty(s); P.ready.clear(); P.back.cle
 // Public party info that rides on the lobby message.
 export function pub(s) {
   const P = hostParty(s);
-  return { group: P.group, mode: s.gameMode, loc: P.loc, locName: locName(P.loc), custom: P.group === 'custom' ? cleanRules(P.custom) : null, live: !!s.started, leader: (s.players[0] || {}).name || 'Leader' };
+  const loc = P.group === 'custom' ? P.loc : 'random'; // 17.0 (D2)
+  return { group: P.group, mode: s.gameMode, loc, locName: locName(loc), custom: P.group === 'custom' ? cleanRules(P.custom) : null, live: !!s.started, leader: (s.players[0] || {}).name || 'Leader' };
 }
 // leader | bot | ready | wait (in the lobby, not ready) | results (still on the last match's results) | away (reconnecting)
 export function memberState(s, p) {
@@ -121,24 +123,62 @@ export function memberState(s, p) {
 }
 
 function seg(act, cur, list, extra = '') { return `<div class="party-seg" role="group">${list.map(([v, l]) => `<button type="button" data-party="${act}" data-v="${esc(String(v))}"${extra} class="${String(v) === String(cur) ? 'on' : ''}" aria-pressed="${String(v) === String(cur)}">${esc(l)}</button>`).join('')}</div>`; }
-export function renderHost(s) {
-  const el = $('#party-opts'); if (!el) return;
-  const P = hostParty(s);
+function optsHTML(P, gameMode) {
   const modes = modesIn(P.group).map((id) => [id, MODES[id].short || MODES[id].name]);
   const locs = [['random', 'Random'], ...LOCS.map((l) => [l.id, l.name])];
   let h = `<div class="lbl">Party</div>`;
   h += `<div class="party-row"><span>Group</span>${seg('group', P.group, GROUPS.filter(([g]) => modesIn(g).length))}</div>`;
-  h += `<div class="party-row"><span>Mode</span>${seg('mode', s.gameMode, modes)}</div>`;
-  if (MODES[s.gameMode]) h += `<p class="party-desc">${esc(MODES[s.gameMode].desc || '')}</p>`;
-  h += `<div class="party-row party-loc"><span>Location</span>${seg('loc', P.loc, locs)}</div>`;
+  h += `<div class="party-row"><span>Mode</span>${seg('mode', gameMode, modes)}</div>`;
+  if (MODES[gameMode]) h += `<p class="party-desc">${esc(MODES[gameMode].desc || '')}</p>`;
+  // 17.0 (D2): location picker only in Custom; elsewhere the wheel rolls a random location every match
+  h += P.group === 'custom' ? `<div class="party-row party-loc"><span>Location</span>${seg('loc', P.loc, locs)}</div>` : `<div class="party-row party-loc"><span>Location</span><b>Random every match</b></div>`;
   if (P.group === 'custom') { const c = cleanRules(P.custom); h += RULES.map((r) => `<div class="party-row party-rule"><span>${esc(r.name)}</span>${seg('rule', c[r.k], r.opts, ` data-k="${r.k}"`)}</div>`).join(''); }
-  el.innerHTML = h;
-  const bots = s.players.some((p) => p.isBot), cb = $('#s-host [data-party="clear-bots"]'); if (cb) cb.disabled = !bots;
+  return h;
+}
+function startBtn(players, gameMode, st) {
+  const bots = players.some((p) => p.isBot), cb = $('#s-host [data-party="clear-bots"]'); if (cb) cb.disabled = !bots;
   const btn = $('#btn-start-host'); if (!btn) return;
-  const minP = Math.max(2, MODES[s.gameMode].players[0]), st = canStart(s);
-  if (s.players.length < minP) { btn.disabled = true; btn.textContent = `Needs ${minP} players`; }
+  const minP = Math.max(2, MODES[gameMode].players[0]);
+  if (players.length < minP) { btn.disabled = true; btn.textContent = `Needs ${minP} players`; }
   else if (!st.ok) { btn.disabled = true; btn.textContent = st.why; }
   else { btn.disabled = false; btn.textContent = 'Start Match'; }
+}
+export function renderHost(s) {
+  const el = $('#party-opts'); if (!el) return;
+  el.innerHTML = optsHTML(hostParty(s), s.gameMode);
+  startBtn(s.players, s.gameMode, canStart(s));
+}
+
+// ---------- 17.0 (N2): cloud party leader ----------
+// In a cloud room the leader is a client too: the options come from the server's lobby message (s.party = pub info,
+// s.players = seats with st) and every control sends {t:'lead', op, ...}; the Room validates and broadcasts the lobby.
+function cloudLead(s, a, v, b) {
+  const P = s.party || {}, send = (o) => s.client.send({ t: 'lead', ...o });
+  if (P.live && a !== 'clear-bots') return;
+  if (a === 'group') { if (!modesIn(v).length || v === P.group) return; send({ op: 'group', group: v }); }
+  else if (a === 'mode') {
+    const M = MODES[v]; if (!M || !modesIn(P.group || groupOf(v)).includes(v)) return;
+    const humans = (s.players || []).filter((p) => !p.isBot).length;
+    if (humans > M.players[1]) { D.toast(`${M.name} seats ${M.players[1]}. Remove someone first.`); D.sfx.error(); return; }
+    send({ op: 'mode', mode: v });
+    const pf = D.profile(); if (pf && pf.mode !== v) { pf.mode = v; D.save(); }
+  }
+  else if (a === 'loc') { const loc = v === 'random' || LOCS.some((l) => l.id === v) ? v : 'random'; send({ op: 'location', loc, location: loc }); }
+  else if (a === 'rule') { const r = RULES.find((x) => x.k === b.dataset.k); if (!r) return; const o = r.opts.find(([x]) => String(x) === v); if (!o) return; send({ op: 'custom', custom: { ...cleanRules(P.custom), [r.k]: o[0] } }); }
+  else if (a === 'clear-bots') send({ op: 'clear-bots' });
+  else return;
+  D.sfx.tap();
+}
+// Members who still have to ready up, from the server's seat states.
+export function cloudWaiting(s) { return (s.players || []).filter((p) => !p.isBot && p.st !== 'leader' && p.st !== 'ready' && p.st !== 'away'); }
+export function renderCloudHost(s) {
+  const el = $('#party-opts'); if (!el) return;
+  const P = s.party || {}, gm = MODES[s.gameMode] ? s.gameMode : 'royale';
+  const view = { group: P.group && GROUPS.some(([g]) => g === P.group) ? P.group : groupOf(gm), loc: P.loc || 'random', custom: P.custom || null };
+  el.innerHTML = optsHTML(view, gm);
+  const w = cloudWaiting(s);
+  const st = P.live ? { ok: false, why: 'Match in progress' } : w.length ? { ok: false, why: `Waiting for ${w.length === 1 ? w[0].name : w.length + ' players'} to ready up` } : { ok: true };
+  startBtn(s.players || [], gm, st);
 }
 
 // ---------- member (client) ----------
@@ -155,7 +195,7 @@ export function renderMember(s) {
   if (!P || s.byeReason) { el.innerHTML = ''; btn.classList.add('hidden'); return; }
   const M = MODES[P.mode] || MODES.royale, g = (GROUPS.find(([k]) => k === P.group) || [0, ''])[1];
   const rules = P.custom ? RULES.map((r) => `${r.name}: ${(r.opts.find(([v]) => v === P.custom[r.k]) || [0, '-'])[1]}`).join(', ') : '';
-  el.innerHTML = `<div class="party-row"><span>Mode</span><b>${esc(M.name)}</b>${g ? `<em>${esc(g)}</em>` : ''}</div><div class="party-row party-loc"><span>Location</span><b>${esc(P.locName || 'Random')}</b></div>${rules ? `<div class="party-row party-rule"><span>Rules</span><b>${esc(rules)}</b></div>` : ''}`;
+  el.innerHTML = `<div class="party-row"><span>Mode</span><b>${esc(M.name)}</b>${g ? `<em>${esc(g)}</em>` : ''}</div><div class="party-row party-loc"><span>Location</span><b>${esc(P.group === 'custom' ? P.locName || 'Random' : 'Random every match')}</b></div>${rules ? `<div class="party-row party-rule"><span>Rules</span><b>${esc(rules)}</b></div>` : ''}`;
   btn.classList.remove('hidden');
   btn.disabled = !!P.live;
   btn.classList.toggle('on', !!s.amReady && !P.live);
@@ -169,6 +209,7 @@ export function backToParty(s) {
   if (!s || s.mode !== 'client' || s.byeReason) return false;
   s.benched = true; s.amReady = false;
   s.client.send({ t: 'back' });
+  if (s.cloud && s.lead) { D.go('host'); return true; } // 17.0 (N2): the cloud leader's party lobby is the Host screen
   D.go('join');
   const st = $('#join-status'); st.textContent = 'In the party lobby.'; st.classList.remove('err');
   if (s.lobbyMsg) D.drawLobby(s.lobbyMsg);

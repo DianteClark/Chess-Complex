@@ -113,6 +113,7 @@ async function runMode(browser, mode, vp) {
   await page.evaluate(hookRenderer);
   const bots = mode === 'siege' ? 3 : 7;
   await page.evaluate(([b, m]) => { window.__cc.startSolo(b, m); window.__cc.session.host.setBot('me'); }, [bots, mode]);
+  await page.waitForTimeout(400); await page.evaluate(() => { const i = window.__cc.intro; i && i.skipAll && i.skipAll(); }); // 17.0 (D2): solo's briefing now waits for a tap; the intro has its own probe (/tmp/d217/intro.cjs)
   const st = { mode, samples: 0, pairSamples: 0, samplesWithOverlap: 0, floatFloat: 0, onHud: 0, kinds: {}, pairs: {}, maxVisible: 0, shots: [], errors };
   const t0 = Date.now(); let shotN = 0, lastShot = 0;
   while (Date.now() - t0 < SECS * 1000) {

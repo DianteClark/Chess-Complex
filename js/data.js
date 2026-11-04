@@ -9,7 +9,7 @@ export const PIECES = {
   knight: { ult: 'fork', name: 'Knight', tier: 2, hp: 90,  atk: 16, def: 8,  spd: 12, attack: 'tstrike',    sig: 'vault',     equips: ['trample', 'stagger', 'rally', 'lance', 'outflank', 'hoarfrost', 'skirmish'],
             moveDesc: 'L-shaped jump. Ignores anything in the way.' },
   bishop: { ult: 'excommunicate', name: 'Bishop', tier: 2, hp: 80,  atk: 14, def: 6,  spd: 11, attack: 'ray',        sig: 'transpose', equips: ['sanctuary', 'cross', 'blink', 'penance', 'consecrate', 'blessing', 'hex'],
-            moveDesc: 'Slides diagonally up to 4 tiles.' },
+            moveDesc: 'Slides diagonally up to 4 tiles. Or Sidestep 1 tile straight to change colour: it uses your action, so strike first.' },
   rook:   { ult: 'castling', name: 'Rook',   tier: 3, hp: 134, atk: 18, def: 14, spd: 7,  attack: 'slam',       sig: 'charge',    equips: ['rampart', 'fortify', 'siege', 'quake', 'repel', 'bombard', 'scorch', 'concuss'],
             moveDesc: 'Slides straight up to 4 tiles.' },
   queen:  { ult: 'nova', name: 'Queen',  tier: 4, hp: 150, atk: 22, def: 10, spd: 12, attack: 'starburst',  sig: 'decree',    equips: ['dominion', 'execute', 'checkmate', 'gambit', 'gravity', 'frostNova', 'plague'],
@@ -177,10 +177,10 @@ PIECES.knight.equips.push('seize'); PIECES.bishop.equips.push('hourglass'); PIEC
 export const STAT_POINTS = 10;
 export const STAT_GAIN = { hp: 7, atk: 2, def: 1.5, spd: 1 };
 export const PRESETS = {
-  bruiser:  { name: 'Bruiser',  pts: { hp: 4, atk: 4, def: 2, spd: 0 }, /* 16.0 (C): was hp 3 atk 5 (Overkill + Thorns won 30%) */ passive: 'thorns',    blurb: 'Hits hard, takes a punch.' },
+  bruiser:  { name: 'Bruiser',  pts: { hp: 4, atk: 3, def: 1, spd: 2 }, /* 16.0 (C): was hp 3 atk 5 (Overkill + Thorns won 30%); 17.0 (C2): was atk 4 def 2 spd 0 (28-30% after Bishop Sidestep) */ passive: 'thorns',    blurb: 'Takes a punch and hits back.' },
   scout:    { name: 'Scout',    pts: { hp: 3, atk: 3, def: 1, spd: 3 }, passive: 'scavenger', blurb: 'First to the loot, first to evolve.' },
   tank:     { name: 'Tank',     pts: { hp: 4, atk: 2, def: 2, spd: 2 }, passive: 'regen',     blurb: 'Outlast everyone.' },
-  assassin: { name: 'Assassin', pts: { hp: 2, atk: 4, def: 0, spd: 4 }, passive: 'first',     blurb: 'Opens fights with a devastating first blow.' },
+  assassin: { name: 'Assassin', pts: { hp: 3, atk: 4, def: 0, spd: 3 }, /* 17.0 (C2): was hp 2 spd 4 (19-21%) */ passive: 'first',     blurb: 'Opens fights with a devastating first blow.' },
 };
 
 export const TEAM_COLORS = ['#4dabff', '#ffd24d', '#5cff9d', '#c77dff']; // no red: red reads as danger
@@ -315,6 +315,7 @@ export const COMBOS = [
   { name: 'Double Jump', pieces: ['Knight'], text: 'Vault is free. Vault, jump twice to close distance, and you still have your action for a T-Strike.' },
   { name: 'Initiative Lock', pieces: ['Knight'], text: 'Stagger pushes targets later in the next round\'s turn order. Pair it with Rally Cry and you act before them two rounds running.' },
   { name: 'Shrine Anchor', pieces: ['Bishop'], text: 'Drop a Blink Mark on a shrine, go fight, then blink home when you are hurt.' },
+  { name: 'Change Colour', pieces: ['Bishop'], text: 'Fire your Piercing Ray first, then Sidestep 1 tile straight: next turn your diagonals cover the other colour.' }, // 17.0 (C2)
   { name: 'Hostile Takeover', pieces: ['Bishop'], text: 'Transpose swaps places with ANY piece in diagonal sight, enemies included. Think about where that leaves them.' },
   { name: 'Barricade and Ram', pieces: ['Rook'], text: 'Raise a Rampart behind a target, then Battering Charge into them. The knockback has nowhere to go.' },
   { name: 'Dash and Finish', pieces: ['Queen'], text: 'Royal Decree through a group to soften them up, then Execute whoever drops below 30%.' },

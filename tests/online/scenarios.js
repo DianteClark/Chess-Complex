@@ -1,7 +1,13 @@
 // Chess Complex online lifecycle scenario matrix.
 // Usage: node tests/online/scenarios.js [--iters 3] [--par 3] [--only S2b-host,S4c]
 // Requires: `python3 -m http.server 8141` running in the repo root, and Playwright installed.
+// 17.0 (N2): --cloud http://localhost:8787 runs every page with ?cloud=<url> against `wrangler dev --var ROOM_TEST:1`
+// (from server/) instead of ?net=local; results go to <tmp>/<CC_TAG or results>-cloud.json.
+{ const i = process.argv.indexOf('--cloud'); if (i > 0 && process.argv[i + 1]) { process.env.CC_CLOUD = process.argv[i + 1]; process.env.CC_TAG = (process.env.CC_TAG || 'results') + '-cloud'; } }
 const L = require('./lib');
+// Cloud rooms change three host rules on purpose: the match runs on the server, so the leader leaving (Menu, tab
+// close, forfeit + Menu) never ends it for the others and needs no warning, and the party passes to the next human.
+const CLOUD = !!process.env.CC_CLOUD;
 const fs = require('fs');
 const { sleep, tap, view, autoplay, hostKill, killAllExcept, advancing, waitResults, waitDead, waitFor } = L;
 
@@ -19,7 +25,10 @@ async function match(run, { mode = 'royale', clients = 1, bots = 6, auto = true,
 }
 // Exactly-once reward check: results visible, then nothing changes for 6s more (the 'over' event re-fires showResults at +4.8s).
 async function rewardsOnce(run, label) {
-  const p = run.pages[label]; const a = await view(p); await sleep(6000); const b = await view(p);
+  const p = run.pages[label]; const a = await view(p);
+  if (process.env.CC_TRACE) { const tl = []; for (let i = 0; i < 12; i++) { await sleep(500); tl.push(await p.evaluate(() => [window.__cc.profile.marks, (window.__toasts || []).slice(-2).join(' | ').slice(0, 120), window.__cc.profile.level, (window.__cc.profile.achievements || []).length])); } run.note(label + ' trace ' + JSON.stringify(tl)); }
+  else await sleep(6000);
+  const b = await view(p);
   const before = run.before[label];
   run.check(a.marks === b.marks && a.played === b.played, `${label}: rewards changed after results were shown (${a.marks}->${b.marks})`);
   run.check(b.played - before.played === 1, `${label}: match recorded ${b.played - before.played} times (expected 1)`);
@@ -104,7 +113,7 @@ for (const who of ['host', 'client']) for (const sub of ['a-stay', 'b-menu', 'c-
       run.check(!sv.modals.includes('m-results') && await L.visible(dp, '#spec-bar'), `${dl}: confirm button says "Keep spectating" but host is left on the results screen [${sv.modals}]`);
       if (!(await L.visible(dp, '#m-results [data-act="to-title"]'))) { await tap(dp, '#spec-bar [data-act="results"]').catch(() => {}); }
       await pressMenu(run, dl, 'yes');
-    } else if (who === 'host') run.check(false, 'host: no warning before Menu ends the live match for every client');
+    } else if (who === 'host' && !CLOUD) run.check(false, 'host: no warning before Menu ends the live match for every client');
     await screenIs(run, dl, 's-title');
     const ov = await view(op);
     run.note(`${other} after ${dl} left: screen=${ov.screen} modals=[${ov.modals}] title="${ov.rTitle}" toasts=${JSON.stringify(ov.toasts)}`);
@@ -115,7 +124,7 @@ for (const who of ['host', 'client']) for (const sub of ['a-stay', 'b-menu', 'c-
       run.check(!/takes over/.test(feed), `host: feed says a bot "takes over" for an already-eliminated client: "${feed}"`);
       await expectAdvancing(run, other, 4000, `after ${dl} pressed Menu`);
     }
-    else if (!cf) run.check(!ov.modals.includes('m-results'), `${other}: match ended for them when ${dl} pressed Menu (results "${ov.rTitle}", toasts ${JSON.stringify(ov.toasts)})`);
+    else if (!cf) { run.check(!ov.modals.includes('m-results'), `${other}: match ended for them when ${dl} pressed Menu (results "${ov.rTitle}", toasts ${JSON.stringify(ov.toasts)})`); if (CLOUD) await expectAdvancing(run, other, 4000, 'cloud: after the leader left'); }
     else run.check(ov.modals.includes('m-results') && (/\bhost\b/i.test(ov.rTitle || '') || ov.toasts.some((t) => /\bhost\b/i.test(t))), `${other}: no clear feedback after host confirmed leaving`);
     if (who === 'host' && ov.modals.includes('m-results')) run.check(ov.rTitle !== 'Forfeit', `${other}: results say "Forfeit" although the HOST left (client did not forfeit)`);
   } else {
@@ -168,7 +177,7 @@ for (const who of ['host', 'client']) S[`S3-forfeit-${who}`] = async (run) => {
   run.note(`${fl} forfeit results: keep-spectating ${await L.visible(fp, '#btn-keepspec') ? 'offered' : 'not offered'}`);
   const cf = await pressMenu(run, fl, 'yes');
   const ov = await view(run.pages[other]);
-  if (who === 'host' && !cf) run.check(false, 'host: forfeit then Menu ends the match for clients with no warning');
+  if (who === 'host' && !cf && !CLOUD) run.check(false, 'host: forfeit then Menu ends the match for clients with no warning');
   if (who === 'client' || !cf) run.check(!ov.modals.includes('m-results'), `${other}: match ended when forfeiting ${fl} pressed Menu ("${ov.rTitle}", ${JSON.stringify(ov.toasts)})`);
   else { run.note(`${other} after host forfeit+confirm: "${ov.rTitle}" ${JSON.stringify(ov.toasts)}`); run.check(ov.rTitle !== 'Forfeit', `${other}: results say "Forfeit" although the HOST left`); }
   await run.shot(other, 'after-forfeiter-menu');
@@ -203,6 +212,13 @@ S['S4c-host-close'] = async (run) => {
   const { host, c } = await match(run);
   run.before.c1 = await view(c);
   await host.close(); await sleep(1500);
+  if (CLOUD) { // the Room keeps the match: a bot takes the leader's seat and c1 plays on
+    const v = await view(c); run.check(v.screen === 's-game' && !v.modals.includes('m-results'), `c1: cloud match ended when the leader closed the tab (${v.screen} [${v.modals}])`);
+    await expectAdvancing(run, 'c1', 4000, 'cloud: after the leader closed the tab');
+    const lead = await c.evaluate(() => window.__cc.session.lobbyMsg && window.__cc.session.lobbyMsg.leader === window.__cc.session.myPid);
+    run.check(lead, 'c1: did not become the party leader after the leader closed the tab');
+    return;
+  }
   const v = await view(c);
   run.check(v.modals.includes('m-results'), `c1: no feedback after host closed (${v.screen} [${v.modals}])`);
   run.note(`c1 after host close: "${v.rTitle}" toasts ${JSON.stringify(v.toasts)} marks +${v.marks - run.before.c1.marks}`);
@@ -232,7 +248,7 @@ S['S5a-rematch'] = async (run) => {
   await tap(host, '#btn-start-host');
   const ok = await waitFor(c, (t) => window.__cc.game.s && !window.__cc.game.s.over && window.__cc.game.s.turnNo < 50 && document.querySelector('#m-results').classList.contains('hidden'), null, 8000);
   run.check(ok, 'c1: did not enter the rematch');
-  await host.evaluate(() => { window.__cc.session.host.fast = true; }); await sleep(3500);
+  await host.evaluate(() => { const h = window.__ccHost(); h.fast = true; h.go && h.go(); }); await sleep(3500); // 17.0 (N2): skip the ~15 s intro hold (15.1) like startMatch does
   await autoplay(host); await autoplay(c);
   await expectAdvancing(run, 'c1', 3000, 'in rematch');
   run.before = { host: await view(host), c1: await view(c) };
@@ -320,7 +336,7 @@ S['S7-lobby-full-kick-rejoin'] = async (run) => {
 async function teamKill(host, pid, { soul = true } = {}) {
   return host.evaluate(async ([pid, soul]) => {
     if (window.__protect) window.__protect.delete(pid);
-    const E = await import('/js/engine.js'); const h = window.__cc.session.host, s = h.s;
+    const E = await import('/js/engine.js'); const h = window.__ccHost(), s = h.s;
     const v = s.units.find((u) => u.pid === pid && u.kind === 'player'); if (!v || !v.alive || s.over) return false;
     v.alive = false; v.hp = 0;
     const ev = [{ e: 'death', id: v.id, by: null, x: v.x, y: v.y, cause: null }];
@@ -350,6 +366,9 @@ const canOpenResults = (p) => p.evaluate(() => {
 const mySoul = (p) => p.evaluate(() => { const g = window.__cc.game; return !!(g.s && g.me && g.s.items.some((i) => i.k === 'soul' && i.id === g.me.id)); });
 
 // 8. Squads: host + friend are Team 1 with 6 bots. Friend dies -> Downed, spectates, cannot open results while the host lives -> team wins -> both see Squad Victory.
+// 17.0 (A0): bots in test 'fast' mode act instantly and outrun the 17.0 readable playback by several rounds, so a
+// death shows on screen after its soul already expired. Real play paces bots to the host's playback; do the same here.
+const realPace = (host) => host.evaluate(() => { const h = window.__cc.session && window.__cc.session.host; if (h) h.fast = false; }).catch(() => {});
 S['S8-squads-team-spectate'] = async (run) => {
   const { host, code } = await L.hostLobby(run, { mode: 'squads' });
   const c = await L.clientJoin(run, 'c1', code);
@@ -361,17 +380,17 @@ S['S8-squads-team-spectate'] = async (run) => {
   run.check(tags.length === 8 && tags[0] === 'Team 1' && tags[1] === 'Team 1' && tags[7] === 'Team 4', `c1: lobby team labels wrong ${JSON.stringify(tags)}`);
   run.check(/Squads/.test(label), `c1: lobby label "${label}" does not name Squads`);
   await run.shot('c1', 'lobby');
-  await L.startMatch(run, host, { clients: [c] });
+  await L.startMatch(run, host, { clients: [c] }); await realPace(host);
   const cpid = await L.clientPid(c);
   run.before = { host: await view(host), c1: await view(c) };
-  const teams = await host.evaluate((cp) => { const s = window.__cc.session.host.s; const t = (pid) => s.units.find((u) => u.pid === pid).team; return { host: t('me'), c1: t(cp), mode: s.mode, teams: s.teams }; }, cpid);
+  const teams = await host.evaluate((cp) => { const s = window.__ccHost().s; const t = (pid) => s.units.find((u) => u.pid === pid).team; return { host: t('me'), c1: t(cp), mode: s.mode, teams: s.teams }; }, cpid);
   run.check(teams.teams === 2 && teams.host === teams.c1, `host and c1 not on the same team ${JSON.stringify(teams)}`);
   const hud = await c.evaluate(() => document.querySelector('#h-alive').innerText);
   run.check(/HostH/i.test(hud), `c1: HUD does not show teammate HostH ("${hud}")`);
   await autoplay(host); await autoplay(c); await L.protectHumans(host);
   // friend goes down
-  await teamKill(host, cpid);
-  run.check(await waitDead(c), 'c1: Downed modal never appeared');
+  await c.bringToFront(); await teamKill(host, cpid);
+  run.check(await waitDead(c, 20000), 'c1: Downed modal never appeared');
   let d = await deadView(c);
   run.note(`c1 dead modal: "${d.body}"`);
   run.check(d.title === 'Downed', `c1: dead modal title "${d.title}" (expected Downed while soul is up)`);
@@ -410,6 +429,7 @@ S['S8-squads-team-spectate'] = async (run) => {
 // 8b. Squads: whole friend team wiped while other teams fight on -> results become available mid-match.
 S['S8b-squads-team-out'] = async (run) => {
   const { host, c, cpid } = await match(run, { mode: 'squads', bots: 6 });
+  await realPace(host);
   await teamKill(host, cpid, { soul: false });
   run.check(await waitDead(c), 'c1: dead modal never appeared');
   let cr = await canOpenResults(c); run.check(!cr.deadBtn, `c1: results offered while host teammate lives ${JSON.stringify(cr)}`);
@@ -445,9 +465,9 @@ S['S9-siege-coop'] = async (run) => {
   run.before = { host: await view(host), c1: await view(c) };
   const sg = await c.evaluate(() => ({ siege: window.__cc.game.s.siege, hud: document.querySelector('#h-alive').innerText }));
   run.check(sg.siege && sg.siege.waves >= 1, `c1: no siege state ${JSON.stringify(sg)}`);
-  await autoplay(host); await autoplay(c);
+  await autoplay(host); await autoplay(c); await realPace(host);
   // protect every defender so the run reaches the final wave deterministically
-  await host.evaluate(async () => { const E = await import('/js/engine.js'); window.__protect = new Set(window.__cc.session.host.s.units.filter((u) => u.kind === 'player').map((u) => u.pid)); clearInterval(window.__pt); window.__pt = setInterval(() => { const h = window.__cc.session && window.__cc.session.host; if (!h) return; for (const u of h.s.units) if (u.alive && window.__protect.has(u.pid) && u.hp < E.stats(u).maxHp * 0.6) u.hp = E.stats(u).maxHp; }, 30); });
+  await host.evaluate(async () => { const E = await import('/js/engine.js'); window.__protect = new Set(window.__ccHost().s.units.filter((u) => u.kind === 'player').map((u) => u.pid)); if (window.__ccHost().cloud) { window.__ccHost().protect([...window.__protect]); return; } /* 17.0 (N2): the Room heals them */ clearInterval(window.__pt); window.__pt = setInterval(() => { const h = window.__cc.session && window.__ccHost(); if (!h) return; for (const u of h.s.units) if (u.alive && window.__protect.has(u.pid) && u.hp < E.stats(u).maxHp * 0.6) u.hp = E.stats(u).maxHp; }, 30); });
   await sleep(1500);
   await teamKill(host, cpid);
   if (!(await waitDead(c))) {
@@ -463,10 +483,10 @@ S['S9-siege-coop'] = async (run) => {
   await run.shot('c1', 'siege-spectate');
   // hand both human seats to the AI and let the siege play out
   await autoplay(host, false); await autoplay(c, false);
-  await host.evaluate((cp) => { const h = window.__cc.session.host; h.fast = true; h.setBot('me'); h.setBot(cp); }, cpid);
+  await host.evaluate((cp) => { const h = window.__ccHost(); h.fast = true; h.setBot('me'); h.setBot(cp); }, cpid);
   let last = -1; const t0 = Date.now();
   while (Date.now() - t0 < 9 * 60000) {
-    const st = await host.evaluate(() => { const s = window.__cc.session.host.s; return { over: s.over, wave: s.siege.wave, round: s.round }; });
+    const st = await host.evaluate(() => { const s = window.__ccHost().s; return { over: s.over, wave: s.siege.wave, round: s.round }; });
     if (st.wave !== last) { last = st.wave; run.note(`wave ${st.wave} at round ${st.round} (${Math.round((Date.now() - t0) / 1000)}s)`); }
     if (st.over) break;
     await sleep(1000);

@@ -23,8 +23,27 @@ class Run {
       else this.errors.push(`[${label}] pageerror: ${e.message} @ ${where}`);
     });
     p.on('console', (m) => { if (m.type() === 'error' && !/unpkg|peerjs|ERR_FAILED|Failed to load resource/i.test(m.text())) this.errors.push(`[${label}] console: ${m.text()}`); });
-    await p.goto(BASE + '?net=local', { waitUntil: 'load' });
+    // 17.0 (N2): CC_CLOUD=<url> (scenarios.js --cloud <url>) runs every page against a cloud Room (wrangler dev with
+    // ROOM_TEST:1) instead of ?net=local. window.__ccHost() is the host lever for both: the PeerJS host's GameHost, or
+    // in cloud runs a shim over the leader's lockstep state whose fast/go/kill/protect go to the Room's test ops.
+    await p.addInitScript(() => {
+      window.__ccHost = () => {
+        const cc = window.__cc, s = cc && cc.session; if (!s) return undefined;
+        if (s.host) return s.host;
+        if (!s.cloud || !s.client) return undefined;
+        const op = (m) => s.client.send({ t: 'test', ...m });
+        const me = (pid) => (pid === 'me' ? s.myPid : pid);
+        // s: a copy of the lockstep state in which the leader's own seat reads pid 'me', like the PeerJS host's; edit it
+        // and call publish(ev) (the PeerJS lever pattern) to send it to the Room as test op 'put' (snap with ev)
+        let last = null;
+        return { cloud: true, get s() { const st = (s.client.match && s.client.match.s) || cc.game.s; if (!st) return st; const c = structuredClone(st); for (const u of c.units) if (u.pid === s.myPid) u.pid = 'me'; last = c; return c; }, publish(ev) { if (!last) return; const st = structuredClone(last); for (const u of st.units) if (u.pid === 'me') u.pid = s.myPid; op({ op: 'set', T: { fast: false } }); op({ op: 'put', state: st, ev: ev || [] }); }, /* real bot pace from here: a fast Room would play out a soul's 3 rounds before the Downed modal shows */ set fast(v) { op({ op: 'set', T: { fast: !!v } }); }, go() { op({ op: 'go' }); }, kill(pid) { op({ op: 'kill', pid: me(pid) }); }, protect(pids) { op({ op: 'protect', pids: pids.map(me) }); }, setBot(pid, on = true) { op({ op: 'bot', pid: pid === 'me' ? s.myPid : pid, on }); }, schedule() {} };
+      };
+    });
+    // (&net=local too: voice keeps its offline loopback transport; hostLobby/clientJoin check the session really is cloud)
+    await p.goto(BASE + (process.env.CC_CLOUD ? '?cloud=' + encodeURIComponent(process.env.CC_CLOUD) + '&net=local' : '?net=local'), { waitUntil: 'load' });
     await p.waitForFunction(() => window.__cc && window.__cc.game, null, { timeout: 15000 });
+    // 17.0 (N2): a loaded test box can miss the 1.5 s health check and fall back to PeerJS (aborted here): allow 8 s
+    if (process.env.CC_CLOUD) await p.evaluate(async () => { const C = await import('/js/cloud.js'); C.HEALTH.timeout = 8000; C.HEALTH.failFor = 0; return C.healthy(); });
     // 10.0: in a match toast() is routed to the Director hint lane (#gm-tip), so watch both
     await p.evaluate(() => { window.__toasts = []; for (const sel of ['#toast', '#gm-tip']) { const t = document.querySelector(sel); if (!t) continue; new MutationObserver(() => { const s = t.textContent.trim(); if (s && window.__toasts[window.__toasts.length - 1] !== s) window.__toasts.push(s); }).observe(t, { childList: true, characterData: true, subtree: true }); } });
     await sleep(900); // splash
@@ -106,6 +125,7 @@ async function autoplay(p, on = true, delay = 250) {
 // Host-side lever: eliminate a unit by pid exactly the way engine.kill() does, then publish.
 async function protectHumans(host) {
   await host.evaluate(async () => {
+    { const h = window.__ccHost(); if (h && h.cloud) { window.__protect = new Set(h.s.units.filter((u) => u.kind === 'player' && !u.bot).map((u) => u.pid)); h.protect([...window.__protect]); return; } } // 17.0 (N2): the Room heals them
     const E = await import('/js/engine.js'); window.__protect = new Set(window.__cc.session.host.s.units.filter((u) => u.kind === 'player' && !u.bot).map((u) => u.pid));
     clearInterval(window.__pt); window.__pt = setInterval(() => { const h = window.__cc.session && window.__cc.session.host; if (!h) return; for (const u of h.s.units) if (u.alive && window.__protect.has(u.pid) && u.hp < E.stats(u).maxHp * 0.6) u.hp = E.stats(u).maxHp; }, 50);
   });
@@ -113,6 +133,7 @@ async function protectHumans(host) {
 async function hostKill(host, pid) {
   return host.evaluate(async (pid) => {
     if (window.__protect) window.__protect.delete(pid);
+    { const h = window.__ccHost(); if (h && h.cloud) { const v = h.s.units.find((u) => u.pid === pid && u.kind === 'player'); if (!v || !v.alive || h.s.over) return false; h.protect([...(window.__protect || [])]); h.kill(pid); await new Promise((r) => setTimeout(r, 150)); return true; } } // 17.0 (N2)
     const E = await import('/js/engine.js');
     const h = window.__cc.session.host; const s = h.s;
     const v = s.units.find((u) => u.pid === pid && u.kind === 'player'); if (!v || !v.alive || s.over) return false;
@@ -125,7 +146,7 @@ async function hostKill(host, pid) {
     return true;
   }, pid);
 }
-async function pids(host) { return host.evaluate(() => window.__cc.session.host.s.units.filter((u) => u.kind === 'player').map((u) => ({ pid: u.pid, alive: u.alive, bot: !!u.bot, name: u.name }))); }
+async function pids(host) { return host.evaluate(() => window.__ccHost().s.units.filter((u) => u.kind === 'player').map((u) => ({ pid: u.pid === window.__cc.session.myPid ? 'me' : u.pid, alive: u.alive, bot: !!u.bot, name: u.name }))); } // cloud: the leader's own seat reads 'me' like the PeerJS host's
 // Kill every bot except `keep` survivors (pids) to drive the match to its end.
 async function killAllExcept(host, keep) {
   for (const u of await pids(host)) if (u.alive && !keep.includes(u.pid)) { await hostKill(host, u.pid); await sleep(60); }
@@ -137,7 +158,8 @@ async function hostLobby(run, { mode = 'royale' } = {}) {
   await host.evaluate((m) => { window.__cc.profile.mode = m; window.__cc.profile.name = 'HostH'; }, mode);
   await tap(host, '#s-title [data-go="play"]').catch(async () => host.evaluate(() => document.querySelector('[data-go="play"]').click()));
   await tap(host, '#btn-host');
-  await host.waitForFunction(() => /Room open/.test(document.querySelector('#host-status').textContent), null, { timeout: 5000 });
+  await host.waitForFunction(() => /Room open/.test(document.querySelector('#host-status').textContent), null, { timeout: process.env.CC_CLOUD ? 12000 : 5000 });
+  if (process.env.CC_CLOUD) run.check(await host.evaluate(() => !!(window.__cc.session && window.__cc.session.cloud)), 'host: not in a cloud room (fell back to the local/PeerJS host)');
   return { host, code: await host.textContent('#host-code') };
 }
 async function clientJoin(run, label, code, { expect = 'lobby' } = {}) {
@@ -146,8 +168,9 @@ async function clientJoin(run, label, code, { expect = 'lobby' } = {}) {
   if (!(await visible(c, '#in-code'))) await tap(c, '#s-title [data-go="join"]');
   await c.fill('#in-code', code);
   await tap(c, '#s-join [data-act="join"]');
-  if (expect === 'lobby') await c.waitForFunction(() => /In the lobby/.test(document.querySelector('#join-status').textContent), null, { timeout: 5000 });
+  if (expect === 'lobby') await c.waitForFunction(() => /In the lobby/.test(document.querySelector('#join-status').textContent), null, { timeout: process.env.CC_CLOUD ? 10000 : 5000 });
   else await sleep(1200);
+  if (process.env.CC_CLOUD && expect === 'lobby') run.check(await c.evaluate(() => !!(window.__cc.session && window.__cc.session.cloud)), `${label}: not in the cloud room (fell back to PeerJS/local)`);
   return c;
 }
 async function startMatch(run, host, { bots = 0, clients = [] } = {}) {
@@ -155,10 +178,10 @@ async function startMatch(run, host, { bots = 0, clients = [] } = {}) {
   await readyAll(host, clients); // 15.0 (N): party members ready up before the leader can start
   await tap(host, '#btn-start-host');
   const all = [host, ...clients];
-  for (const p of all) await p.waitForFunction(() => window.__cc.game.s && document.querySelector('.screen.active').id === 's-game', null, { timeout: 8000 });
-  await host.evaluate(() => { window.__cc.session.host.fast = true; });
+  for (const p of all) await p.waitForFunction(() => window.__cc.game.s && document.querySelector('.screen.active').id === 's-game', null, { timeout: process.env.CC_CLOUD ? 20000 : 8000 });
+  await host.evaluate(() => { window.__ccHost().fast = true; });
   // 15.2: the intro now runs ~15 s; skip it on the host so the first turn starts right away
-  await host.evaluate(() => { const h = window.__cc.session.host; h && h.go && h.go(); });
+  await host.evaluate(() => { const h = window.__ccHost(); h && h.go && h.go(); });
   for (const p of all) await p.evaluate(() => { const i = window.__cc.intro; i && i.skipAll && i.skipAll(); }).catch(() => {});
   await sleep(1200);
 }
@@ -183,6 +206,6 @@ async function waitFor(p, fn, arg, ms = 10000) {
   if (typeof fn === 'function' && fn.constructor && fn.constructor.name === 'AsyncFunction') { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch {} await sleep(150); } return false; }
   try { await p.waitForFunction(fn, arg, { timeout: ms }); return true; } catch { return false; } }
 const waitResults = (p, ms = 12000) => waitFor(p, () => !document.querySelector('#m-results').classList.contains('hidden'), null, ms);
-const waitDead = (p, ms = 6000) => waitFor(p, () => !document.querySelector('#m-dead').classList.contains('hidden'), null, ms);
+const waitDead = (p, ms = 12000) => waitFor(p, () => !document.querySelector('#m-dead').classList.contains('hidden'), null, ms);
 
 module.exports = { protectHumans, chromium, Run, sleep, tap, visible, view, autoplay, hostKill, killAllExcept, pids, hostLobby, clientJoin, startMatch, clientPid, advancing, waitFor, waitResults, waitDead, readyAll };

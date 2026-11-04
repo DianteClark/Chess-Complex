@@ -1,5 +1,16 @@
 # Changelog
 
+## 17.0 "Cloud" (November 2026)
+- **Cloudflare server** (server/, one Worker serving the game as static assets plus the API): Room Durable Objects run online matches authoritatively in lockstep (clients replay ~100-byte actions with the same engine, 32-bit state hash every 8 actions, snapshot on mismatch); WebSocket Hibernation + alarms; seats held 60 s for reconnects, leader handoff, chat filter and voice-signaling relay. Phone-hosted PeerJS play remains the automatic fallback.
+- **Cloud save + transfer codes** (Player DO): automatic, no sign-up; 26-char code with check character + offline QR; merge rules that never duplicate Marks; GitHub Pages -> Cloudflare move card that carries progress over (#transfer=).
+- **Leaderboards** (Board DO): Crown Rating (multiplayer Elo, verified players only), weekly Seasons (Monday cron), Daily Challenge verified server-side by replaying the run in chunks; first run of the day counts, quitting is a DNF.
+- **Replays** (Replay DO): share links, viewer with play/pause, 1x/2x/4x, jump to round, Play of the Match for online games; 30-day expiry.
+- **Platform**: Cloudflare TURN for voice (when the key is set), Workers AI moderation of custom chat phrases (cached, budgeted, word-filter fallback), Turnstile on player creation (when set), rate limits, Analytics Engine events, room location hints, /admin real-match balance dashboard (ADMIN_KEY).
+- **Gameplay**: Bishops can Sidestep (1 orthogonal step, uses the action); Sudden Death is labelled and explained (it was reading as storm damage on a safe tile); co-op retune (Gauntlet scaling 0.42 / 0.87); presets Bruiser 4/3/1/2, Assassin 3/4/0/3; King floor 0.9, HP 1.09. Roads 11.9-13.2%, King ~39%.
+- **Readability**: damage/heal/status numbers 2.1 s and fanned out, camera holds per hit, callouts and ultimate cut-ins longer, location briefing waits for a tap; location random outside Custom on a fitted card; spoken announcer removed; Witchwood poison pools aligned to tiles; canvas guard for negative radii.
+- **Fixes**: party member reconnecting at match start keeps their seat (no intro restart), duplicate Start refused, leave buttons after a reconnect; bot planner memoized (server p99 ~6 ms per step).
+- **Tests**: server/test suites (rooms 26, platform 19 + 10 e2e, replays 7, leaderboards 26 + 28 e2e, stats 8, player 33, merge 15, cloud save 42 e2e), tests/q17, online suite in cloud and phone-hosted modes, smoke 29/29.
+
 ## 16.0 "Tactics" (November 2026)
 - **Stat edges:** every stat now has a named secondary rule. SPD: Speed Edge (15.2). ATK: **Overkill**, damage past a kill spills 50% into the attacker's nearest enemy adjacent to the victim (players only, one hop). DEF: **Guard**, a single hit takes at most (60 - DEF)% of max HP, floor 35% (players and the King; not ticks, storm or Hollows). HP: **Second Wind**, once per match a hit that leaves you under 25% heals 10% max HP + 1 per HP point (not the crowned King). Damage previews and bot estimates respect Guard.
 - **Hold:** `{type:'hold'}` on your turn before moving, acting or using an ability, once per round, not while frozen or stunned: you act after everyone still waiting; next round starts 3 SPD later. Held turns don't re-tick statuses or cooldowns. Bots hold ~2% of turns.

@@ -193,7 +193,10 @@ export class GameHost {
   // 15.0 (N): party options reach the engine: location (a LOCATIONS id; omitted = seeded pick) and custom rules
   constructor(players, emit, { seed, state, noTimer, mode, location, custom } = {}) {
     const o = { mode }; if (location) o.location = location; if (custom) o.custom = custom;
-    this.s = state || createMatch(players, seed, o);
+    const P0 = state ? null : JSON.parse(JSON.stringify(players)), O0 = JSON.parse(JSON.stringify(o)); // 17.0 (RP): replay record
+    const sd = Number.isInteger(seed) ? seed : (Math.random() * 2 ** 31) | 0; // engine default, but known (s.seed is the live RNG state)
+    this.s = state || createMatch(players, sd, o);
+    this.rec = P0 ? { players: P0, seed: sd, opts: O0, actions: [], end: false } : null; // createMatch inputs + accepted actions (js/replay.js)
     this.noTimer = !!noTimer;
     this.emit = emit;
     this.lastTurn = -1; this.deadline = 0;
@@ -210,9 +213,12 @@ export class GameHost {
   act(pid, a) {
     if (this.s.over) return false;
     const r = applyAction(this.s, pid, a);
-    if (r.ok) { this.publish(r.ev); this.schedule(); }
+    if (r.ok) { this.log(pid, a); this.publish(r.ev); this.schedule(); }
     return r.ok;
   }
+  // 17.0 (RP): every accepted action, in order (bots and timeouts included), so a solo / phone-hosted match can be
+  // shared as a replay; end = the match finished inside the engine (stop() also sets s.over, outside applyAction)
+  log(pid, a) { const R = this.rec; if (!R || R.actions.length >= 8000) return; R.actions.push([pid, JSON.parse(JSON.stringify(a))]); if (this.s.over) R.end = true; }
   setBot(pid) { const u = this.s.units.find((v) => v.pid === pid); if (u) { u.bot = true; if (this.s.active === u.id) this.schedule(); } }
   schedule() {
     clearTimeout(this.aiT); clearTimeout(this.timerT);
@@ -241,7 +247,7 @@ export class GameHost {
       if (s.over || s.active !== id || s.turnNo !== turn) return;
       if (i >= plan.length) { this.act(u.pid, { type: 'end' }); return; }
       const ok = applyAction(s, u.pid, plan[i]);
-      if (ok.ok) this.publish(ok.ev);
+      if (ok.ok) { this.log(u.pid, plan[i]); this.publish(ok.ev); }
       if (s.over || s.active !== id || s.turnNo !== turn) { this.schedule(); return; }
       this.aiT = setTimeout(() => step(i + 1), this.fast ? 0 : u.kind === 'hollow' ? 220 : 480);
     };

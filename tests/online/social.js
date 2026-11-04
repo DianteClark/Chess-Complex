@@ -11,7 +11,7 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
   const chatLog = (p, who) => p.evaluate(async (who) => (await import('/js/chat.js')).chat.log.filter((l) => !who || l.name === who).map((l) => `${l.name}: ${l.text}`), who || null);
   const say = (p, ref) => p.evaluate(async (ref) => (await import('/js/chat.js')).chat.say(ref), ref);
   const raw = (p, m) => p.evaluate((m) => window.__cc.session.client.send(m), m);
-  const unitOf = (p, pid) => p.evaluate((pid) => { const u = window.__cc.game.s.units.find((v) => v.pid === pid); return u && { id: u.id, name: u.name, team: u.team }; }, pid);
+  const unitOf = (p, pid) => p.evaluate((pid) => { const ss = window.__cc.session; if (pid === 'me' && ss && ss.cloud) pid = ss.myPid; /* 17.0 (N2): cloud leader */ const u = window.__cc.game.s.units.find((v) => v.pid === pid); return u && { id: u.id, name: u.name, team: u.team, pid: u.pid }; }, pid);
   const errorsOn = (run) => run.errors.length;
 
   // C1: presets both ways through the picker UI, bubble on the sender's piece, recent list updated, bots can talk
@@ -46,8 +46,8 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
     await sleep(1600); await raw(c, { t: 'emote', k: 'gg' }); await sleep(600);
     run.check((await chatLog(host)).filter((l) => l === `${cu.name}: GG`).length >= 1, 'host: legacy emote message not shown');
     // bots speak curated lines only
-    const bots = await host.evaluate(() => window.__cc.session.host.s.units.filter((u) => u.bot).map((u) => u.pid));
-    const ok = await host.evaluate(async (pid) => { const C = await import('/js/chat.js'); const s = window.__cc.session.host.s; return !!C.hostCheck({}, pid, { k: 'r.nice' }, s) && !C.hostCheck({}, pid, { x: 'free text' }, s); }, bots[0]);
+    const bots = await host.evaluate(() => window.__ccHost().s.units.filter((u) => u.bot).map((u) => u.pid));
+    const ok = await host.evaluate(async (pid) => { const C = await import('/js/chat.js'); const s = window.__ccHost().s; return !!C.hostCheck({}, pid, { k: 'r.nice' }, s) && !C.hostCheck({}, pid, { x: 'free text' }, s); }, bots[0]);
     run.check(ok, 'host: bot preset should pass and bot free text should be refused');
     run.check(!errorsOn(run), 'page errors');
   };
@@ -199,7 +199,7 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
     const bad = [
       { t: 'chat' }, { t: 'chat', k: '__proto__' }, { t: 'chat', k: 'constructor' }, { t: 'chat', k: 'toString' }, { t: 'chat', k: 123 }, { t: 'chat', k: ['k.gg'] },
       { t: 'chat', x: 'A'.repeat(5000) }, { t: 'chat', x: { toString: 1 } }, { t: 'chat', x: '   ' }, { t: 'chat', x: '<script>' }, { t: 'chat', x: '‮​\u0000' },
-      { t: 'chat', a: 'slow' }, { t: 'chat', k: 'k.gg', id: hu.id, pid: 'me', tm: 1 }, null, 'chat', 42,
+      { t: 'chat', a: 'slow' }, { t: 'chat', k: 'k.gg', id: hu.id, pid: hu.pid, tm: 1 }, null, 'chat', 42,
       { t: 'vc', a: 'join', vid: '<img src=x>' }, { t: 'vc', a: 'join', vid: 'x'.repeat(200) }, { t: 'vc', a: 'talk', on: 1 }, { t: 'vc', a: 'roster', list: [{ pid: 'me', vid: 'evil-peer-1' }] }, { t: 'vc' }, { t: 'vc', a: { x: 1 } },
     ];
     for (const m of bad) { await c.evaluate((m) => window.__cc.session.client.send(m), m); await sleep(30); }
@@ -208,11 +208,12 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
     run.check(hl.length === 1 && hl[0] === `${cu.name}: GG`, `host log after malicious burst ${JSON.stringify(hl)}`);
     const roster = await host.evaluate(() => [...(window.__cc.session.vc || new Map())].length);
     run.check(roster === 0, `host: voice roster accepted junk (${roster})`);
-    run.check(await host.evaluate(() => !!window.__cc.session.host && !window.__cc.session.host.s.over), 'host: match broke');
+    run.check(await host.evaluate(() => !!window.__ccHost() && !window.__ccHost().s.over), 'host: match broke');
     // a malicious host: the client re-validates everything it receives
     const r = await c.evaluate(async ([hid, cid]) => {
       const { chat } = await import('/js/chat.js'); const n0 = chat.log.length;
-      chat.receive({ t: 'chat', id: hid, pid: 'me', x: '<img src=x onerror="window.__pwn=1">ok' });
+      const hp = (window.__cc.game.s.units.find((u) => u.id === hid) || {}).pid || 'me'; // 'me' on PeerJS, the leader's seat id in the cloud
+      chat.receive({ t: 'chat', id: hid, pid: hp, x: '<img src=x onerror="window.__pwn=1">ok' });
       chat.receive({ t: 'chat', id: hid, pid: 'someone-else', k: 'k.gg' });
       chat.receive({ t: 'chat', id: hid, pid: 'me', k: '__proto__' });
       chat.receive({ t: 'chat', id: 99999, pid: 'me', k: 'k.gg' });
@@ -280,27 +281,27 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
     await say(c, 's.revive'); await sleep(900);
     run.check(await c.evaluate(() => !!document.querySelector('#chat-sheet .cs-row.tm .qc-tm')), 'sheet: team-only line not marked');
     // stick to the bottom, then the "new messages" pill when scrolled up
-    await recv(Array.from({ length: 40 }, (_, i) => ({ t: 'chat', id: hu.id, pid: 'me', k: i % 2 ? 'r.nice' : 'r.wow' }))); await sleep(200);
+    await recv(Array.from({ length: 40 }, (_, i) => ({ t: 'chat', id: hu.id, pid: hu.pid, k: i % 2 ? 'r.nice' : 'r.wow' }))); await sleep(200);
     sh = await sheet(); run.check(sh.bottom && !sh.pill, `sheet did not stay at the bottom ${JSON.stringify(sh)}`);
     await c.evaluate(() => { document.querySelector('#chat-sheet .cs-list').scrollTop = 0; }); await sleep(150);
-    await recv([{ t: 'chat', id: hu.id, pid: 'me', k: 'k.gg' }]); await sleep(200);
+    await recv([{ t: 'chat', id: hu.id, pid: hu.pid, k: 'k.gg' }]); await sleep(200);
     sh = await sheet(); run.check(sh.pill && sh.top < 40, `scrolled-up sheet jumped or showed no pill ${JSON.stringify(sh)}`);
     await run.shot('c1', 'chat-sheet');
     await c.evaluate(() => document.querySelector('#chat-sheet .cs-new').click()); await sleep(700);
     sh = await sheet(); run.check(sh.bottom && !sh.pill, `pill did not scroll to the newest line ${JSON.stringify(sh)}`);
     // custom text renders as plain text only
-    await recv([{ t: 'chat', id: hu.id, pid: 'me', x: '<img src=x onerror="window.__pwn=1">hello there' }]); await sleep(150);
+    await recv([{ t: 'chat', id: hu.id, pid: hu.pid, x: '<img src=x onerror="window.__pwn=1">hello there' }]); await sleep(150);
     sh = await sheet();
     run.check(/hello there$/.test(sh.last) && !(await c.evaluate(() => window.__pwn || document.querySelectorAll('#chat-sheet img, #chat-log img').length)), `sheet: custom text not plain ${sh.last}`);
     // the history is capped at 300 lines
-    await recv(Array.from({ length: 320 }, (_, i) => ({ t: 'chat', id: hu.id, pid: 'me', k: ['r.nice', 'r.wow', 'r.ouch'][i % 3] })));
+    await recv(Array.from({ length: 320 }, (_, i) => ({ t: 'chat', id: hu.id, pid: hu.pid, k: ['r.nice', 'r.wow', 'r.ouch'][i % 3] })));
     const cap = await c.evaluate(async () => ({ log: (await import('/js/chat.js')).chat.log.length, rows: document.querySelectorAll('#chat-sheet .cs-row').length }));
     run.check(cap.log === 300 && cap.rows <= 300, `history cap ${JSON.stringify(cap)}`);
     // strip off + sheet closed -> unread badge; opening the log clears it
     await c.evaluate(() => document.querySelector('#chat-sheet [data-cs="strip"]').click());
     await c.evaluate(() => document.querySelector('#chat-sheet [data-cs="close"]').click()); await sleep(300);
     run.check(!(await sheet()).open && !(await badge()), 'sheet did not close, or a badge for lines already read');
-    await recv([{ t: 'chat', id: hu.id, pid: 'me', k: 'g.hey' }, { t: 'chat', id: hu.id, pid: 'me', k: 'g.ready' }]); await sleep(400);
+    await recv([{ t: 'chat', id: hu.id, pid: hu.pid, k: 'g.hey' }, { t: 'chat', id: hu.id, pid: hu.pid, k: 'g.ready' }]); await sleep(400);
     run.check((await badge()) === '2', `unread badge "${await badge()}" (expected 2)`);
     run.check(await c.evaluate(() => document.querySelector('#chat-log').classList.contains('yield')), 'strip still shown with Hide Chat Strip on');
     await tap(c, '#s-game [data-act="emotes"]');
@@ -313,7 +314,7 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
     await c.evaluate(() => document.querySelector('#chat-sheet [data-cs="close"]').click());
     await tap(c, '#s-game [data-act="emotes"]');
     await c.evaluate(() => document.querySelector('#emote-menu [data-tab="players"]').click()); await sleep(150);
-    await c.evaluate(() => document.querySelector('#emote-menu [data-mute="me"]').click()); await sleep(150);
+    await c.evaluate((hp) => document.querySelector(`#emote-menu [data-mute="${hp}"]`).click(), hu.pid); await sleep(150); // 'me' on PeerJS, the leader's seat id in the cloud
     await c.evaluate(() => document.querySelector('#emote-menu [data-qc="close"]').click());
     const hn = hu.name;
     const muted = await c.evaluate((hn) => ({ strip: [...document.querySelectorAll('#chat-log .cl-row b')].filter((b) => b.textContent === hn).length }), hn);
@@ -336,7 +337,7 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
     await sleep(1500);
     // a downed Squads player may wait on a revive instead of the results card: start spectating directly then
     await c.evaluate(() => { const b = document.querySelector('#btn-keepspec'); if (b && b.offsetParent) b.click(); else { document.querySelector('#m-results').classList.add('hidden'); window.__cc.game.startSpectate(); } }); await sleep(600);
-    await recv([{ t: 'chat', id: hu.id, pid: 'me', k: 'k.ty' }]); await sleep(400);
+    await recv([{ t: 'chat', id: hu.id, pid: hu.pid, k: 'k.ty' }]); await sleep(400);
     const sp = await c.evaluate(() => ({ spec: document.querySelector('#s-game').classList.contains('spectating'), rows: [...document.querySelectorAll('#chat-log .cl-row')].map((r) => r.textContent) }));
     run.note(`spectating ${JSON.stringify(sp)}`);
     run.check(sp.spec && sp.rows.some((t) => /Thanks!$/.test(t)), `spectator strip missed a line ${JSON.stringify(sp)}`);

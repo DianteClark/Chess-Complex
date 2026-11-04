@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="css/menus10.css">
   <link rel="stylesheet" href="css/menus15.css">
   <link rel="stylesheet" href="css/store10.css">
+  <link rel="stylesheet" href="css/lb17.css">
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" defer></script>
 </head>
 <body>
@@ -115,8 +116,8 @@
       </div>
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
-    <div class="corner-tr"><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v16.0</div>
+    <div class="corner-tr"><button class="icon-btn lb-open" data-go="ranks" aria-label="Leaderboards"><svg><use href="#m-crown"/></svg></button><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
+    <div class="version">v17.0</div>
   </section>
 
   <!-- LOADOUT -->
@@ -300,6 +301,14 @@
     <div class="scroll" id="profile-body"></div>
   </section>
 
+  <!-- LEADERBOARDS (L2 17.0, js/leaderboard.js) -->
+  <section class="screen" id="s-ranks">
+    <header class="bar"><button class="back" data-go="title">Back</button><h2>Leaderboards</h2><button class="hdr-btn" data-lb="refresh">Refresh</button></header>
+    <div class="lb-tabs seg" id="lb-tabs" role="tablist" aria-label="Leaderboard"></div>
+    <div class="scroll" id="lb-body"></div>
+    <div class="lb-pin hidden" id="lb-pin" aria-label="Your rank"></div>
+  </section>
+
   <!-- QUESTS -->
   <section class="screen" id="s-quests">
     <header class="bar"><button class="back" data-go="title">Back</button><h2>Quests</h2><div class="marks"><i class="mark-ico"></i><b id="marks-quests">0</b></div></header>
@@ -322,7 +331,7 @@
       <div class="panel ht-edge"><h3>Every stat has an edge</h3><p>Each stat does its usual job and has one extra rule, shown when it fires:</p><ul class="ht-edges"><li><b class="e-spd">SPD - Speed Edge</b>: +3% damage per SPD point over your target, up to 15%.</li><li><b class="e-atk">ATK - Overkill</b>: damage past what a kill needed spills 50% into the nearest enemy next to the victim (one hop, never chains).</li><li><b class="e-def">DEF - Guard</b>: no single hit can take more than 60% minus your DEF of your max HP (never below 35%). Burn, poison and the storm are not hits.</li><li><b class="e-hp">HP - Second Wind</b>: once per match, the first hit that leaves you under 25% HP heals you 10% of max HP plus 1 per HP point.</li></ul></div>
       <div class="panel"><h3>Hold your turn</h3><p>Tap Hold (H on a keyboard) on your turn, before you move or act, to wait: you act last this round, after everyone still waiting. Use it to strike after an enemy steps in, or to see where the King goes. Once per round, and your next round starts 3 SPD later. The strip at the top marks held pieces and shows where the next round begins.</p></div>
       <div class="panel"><h3>Shard Interest</h3><p>At the start of every round you gain +1 shard for every 5 you hold, up to +2. Banking shards for a Queen is a real plan; the shard bar shows what you will earn next round.</p></div>
-      <div class="panel"><h3>Evolve</h3><p>Collect Promotion Shards from the floor, crates, Hollows and fallen players, then tap Promote. The ladder is Pawn, then Knight or Bishop (2 shards), then Rook (4 more), then Queen (5 more), and promoting never uses your action. Or Hone your current piece instead: +15% stats and a stronger Signature per level, up to 3. A piece honed to 3 Ascends (Ascended Knight, Archbishop, Fortress Rook, Empress Queen): a passive of its own and an empowered ultimate.</p></div>
+      <div class="panel"><h3>Evolve</h3><p>Collect Promotion Shards from the floor, crates, Hollows and fallen players, then tap Promote. The ladder is Pawn, then Knight or Bishop (2 shards), then Rook (4 more), then Queen (5 more), and promoting never uses your action. Knights jump in an L; Bishops slide diagonally, or Sidestep 1 tile straight to change tile colour (a Sidestep uses your action, so strike first). Or Hone your current piece instead: +15% stats and a stronger Signature per level, up to 3. A piece honed to 3 Ascends (Ascended Knight, Archbishop, Fortress Rook, Empress Queen): a passive of its own and an empowered ultimate.</p></div>
       <div class="panel"><h3>The pawn line</h3><p>Love your Pawn? Promote it to a Veteran (3 shards), then a Champion (6 more). They stay pawn-shaped and step one tile at a time, but hit hard, take a beating and bring their own signature and ultimate. Riding the Pawn all the way is a real plan.</p></div>
       <div class="panel"><h3>Status effects</h3><p>Burn and Poison deal damage at the start of your turn (Poison stacks up to 3 and halves healing). Freeze stops you moving for a turn, Stun stops you acting. Slow and Haste change SPD by 3. A Shield soaks damage before your HP. Fire melts Freeze, and Freeze puts out Burn. Look for the icons over each piece.</p></div>
       <div class="panel"><h3>Attunement</h3><p>Every shard you pick up also attunes you for the rest of the match: +1% HP, +0.8% ATK and +0.5% DEF per shard, plus +1 SPD every 6 shards, up to 30. Spending shards never removes attunement, so keep collecting even after you max out your piece. Every 5 attunement adds an orbiting crystal so everyone can see how strong you are.</p></div>
@@ -332,7 +341,7 @@
       <div class="panel"><h3>Ways to play</h3><p><b>Competitive:</b> Battle Royale, the full game; Blitz, with 15-second turns and a faster storm; Duel, one on one in a 10 by 10 arena; Squads, teams of two who can revive each other. <b>Co-op:</b> Siege, eight waves of Hollows; Gauntlet, a boss rush. <b>Party:</b> King of the Hill, hold the golden Throne to score; Chaos, two hazards and an event every round. <b>Challenge:</b> the Daily, with the location of the day and the same build for every piece. <b>Custom:</b> host a lobby and pick the mode, location, mirror builds, hazards, storm speed and bots.</p></div>
       <div class="panel"><h3>Parties</h3><p>Host Online opens a party. Friends join with the code and ready up; the leader picks the mode, location and rules and starts. When a match ends, everyone taps Back to Party and lands in the same lobby for the next one.</p></div>
       <div class="panel"><h3>The board</h3><p>Walls block movement and shots. Rubble and crates break when hit. Brambles stop slides and cost initiative. Shrines heal 40% once, then recharge. Hollows guard shard caches.</p></div>
-      <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later, and the storm closes in again every 3 rounds. The void burns 20% of your max HP at the start of each of your turns there. You can still move and act, so get out fast. Once the board is fully closed, everyone burns 6% a turn, plus 2% more every round, so the last stand always ends.</p></div>
+      <div class="panel"><h3>The storm</h3><p>From round 5 the outer ring cracks, then collapses a round later, and the storm closes in again every 3 rounds. The void burns 20% of your max HP at the start of each of your turns there. You can still move and act, so get out fast. Once the board is fully closed, the middle four tiles never fall: that is Sudden Death, and every piece burns 6% of its max HP a turn, plus 2% more every round, even on safe ground, so the last stand always ends.</p></div>
       <div class="panel"><h3>The Crown</h3><p>A round before the Crown appears, everyone sees where it will land, so it is a race. Whoever takes it becomes the King, a raid boss with a huge HP pool, a boss bar everyone can see and a royal aura. At 66% and 33% HP the King lets out a free shockwave and enrages for a moment. The King only takes slow single steps, and every different attacker that hits it in a round leaves it Exposed (less DEF), so gang up. Kill the King and the Crown shatters into 4 shards.</p></div>
       <div class="panel"><h3>Controls</h3><p>Tap a highlighted tile to move. Pick an ability, tap a target to preview the damage, tap again to confirm. Hold an action button to see what it does. Drag to pan, pinch or scroll to zoom. On a keyboard: 1-4 for actions, P to promote, H to hold, Space or E to end your turn, Esc to cancel.</p></div>
     </div>
@@ -378,6 +387,18 @@
       <div class="spec-who"><small id="spec-label">Spectating</small><b id="spec-name">Auto</b></div>
       <button class="icon-btn" data-act="spec-next" aria-label="Next player"><svg viewBox="0 0 24 24" class="stroke"><path d="M9 5l7 7-7 7"/></svg></button>
       <button class="btn small" data-act="results">Results</button>
+      <div class="rp-ctl hidden" id="rp-ctl" role="group" aria-label="Replay controls"><!-- 17.0 (RP) -->
+        <div class="rp-row1">
+          <button class="icon-btn" data-rp="restart" aria-label="Restart"><svg viewBox="0 0 24 24" class="stroke"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></svg></button>
+          <button class="icon-btn" data-rp="prev" aria-label="Previous round"><svg viewBox="0 0 24 24" class="stroke"><path d="M18 6l-6 6 6 6M8 6v12"/></svg></button>
+          <button class="icon-btn rp-play" data-rp="play" data-state="pause" aria-label="Pause"><svg viewBox="0 0 24 24" class="rp-i-play"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg><svg viewBox="0 0 24 24" class="rp-i-pause"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg><svg viewBox="0 0 24 24" class="stroke rp-i-again"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></svg></button>
+          <button class="icon-btn" data-rp="next" aria-label="Next round"><svg viewBox="0 0 24 24" class="stroke"><path d="M6 6l6 6-6 6M16 6v12"/></svg></button>
+          <button class="btn small rp-speed" data-rp="speed" aria-label="Playback speed">1x</button>
+          <button class="btn small rp-potm hidden" data-rp="potm">POTM</button>
+          <button class="btn small" data-rp="exit">Exit</button>
+        </div>
+        <div class="rp-row2"><small id="rp-tag">Replay</small><input type="range" id="rp-round" min="1" max="1" value="1" step="1" aria-label="Jump to round"><span id="rp-rlabel">Round 1</span></div>
+      </div>
     </div>
     <div class="hud-bottom">
       <div class="card" id="h-card">
@@ -462,6 +483,7 @@
         <div class="r-sec" aria-hidden="true"><span>Standings</span></div>
         <ol class="r-board" id="r-board"></ol>
         <button class="btn wide potm hidden" data-act="potm" id="btn-potm">Play of the Match</button>
+        <div class="row2 rp-share hidden" id="rp-row"><button class="btn wide hidden" id="btn-rp-watch">Watch Replay</button><button class="btn wide hidden" id="btn-rp-share">Share Replay</button></div><!-- 17.0 (RP) -->
         <div class="row2"><button class="btn big gold wide shine hidden" data-act="keep-spectating" id="btn-keepspec">Spectate</button><button class="btn big wide" data-act="to-title" id="btn-menu">Menu</button><button class="btn big gold wide shine" data-act="rematch" id="btn-rematch">Play Again</button></div>
       </div>
     </div>
@@ -479,7 +501,7 @@
       <div class="setting sub"><span>Interface</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxUi" aria-label="Interface volume"></div>
       <div class="setting sub"><span>Combat</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxCombat" aria-label="Combat volume"></div>
       <div class="setting sub"><span>World</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxWorld" aria-label="World volume"></div>
-      <div class="setting sub"><span>Announcer</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxVoice" aria-label="Announcer volume"></div>
+      <div class="setting sub"><span>Callout Stingers</span><input type="range" min="0" max="1" step="0.05" data-vol="sfxVoice" aria-label="Callout stinger volume"></div>
     </details>
     <div class="set-sec">Feel</div>
     <label class="setting toggle"><span>Screen Shake</span><input type="checkbox" id="set-shake"><i></i></label>
@@ -502,6 +524,7 @@
     <div class="vc-err mic-help" id="mic-help" hidden></div>
     <p class="set-note vc-privacy" id="vc-privacy"><b>Voice chat privacy.</b> Voice is off until you tap Join Voice in an online lobby or match, and it is never turned on for you. Audio goes directly to the players in your room (peer to peer, sometimes through a relay server) and is never recorded or stored. Your microphone is only live while you hold the Talk button, or while Open Mic is on. You can mute or turn down any player.</p>
     <div class="set-sec">Profile</div>
+    <div class="setting cs-row" id="cs-row"><span>Cloud Save<small id="cs-state" aria-live="polite">Off</small></span><button class="btn small" data-act="cloud-transfer">Transfer Code</button></div>
     <div class="row2"><button class="btn small" data-act="export-profile">Copy Backup Code</button><button class="btn small" data-act="import-profile">Restore Backup</button></div>
     <div class="set-links"><a href="privacy.html" target="_blank" rel="noopener">Privacy</a><a href="#" data-act="credits">Credits</a><a href="#" data-act="whatsnew">What's New</a></div>
     <button class="btn wide" data-act="close-settings">Done</button>

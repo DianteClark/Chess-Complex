@@ -504,33 +504,67 @@ export function tile(r, ctx, t, x, y, T) {
 }
 
 // ---------- R 15.0: poison pools (Witchwood Bog, tile t:'poison'). Drawn per frame like lava (pools can appear
-// mid-match): one cached sludge sprite per neighbour mask (pools merge into one body), plus a few bubbles that swell
-// and pop. Under reduced motion the bubbles drift slowly; lowQ draws one bubble per tile.
-function poolSprite(m, v) {
-  return sprite('pool' + m + '|' + v, 1.2, 1.2, 0.1, 0.1, (g) => {
-    const r = rng(41 + v * 7 + m), n = m & 1 ? -0.1 : 0.1, e = m & 2 ? 1.1 : 0.9, so = m & 4 ? 1.1 : 0.9, w = m & 8 ? -0.1 : 0.1;
-    const shape = (ins) => { g.beginPath(); const x0 = w + ins, y0 = n + ins, x1 = e - ins, y1 = so - ins, q = Math.min(0.3, (x1 - x0) / 2, (y1 - y0) / 2);
-      g.moveTo(x0 + q, y0); g.quadraticCurveTo((x0 + x1) / 2, y0 - (m & 1 ? 0 : 0.04), x1 - q, y0); g.quadraticCurveTo(x1, y0, x1, y0 + q); g.quadraticCurveTo(x1 + (m & 2 ? 0 : 0.04), (y0 + y1) / 2, x1, y1 - q);
-      g.quadraticCurveTo(x1, y1, x1 - q, y1); g.quadraticCurveTo((x0 + x1) / 2, y1 + (m & 4 ? 0 : 0.04), x0 + q, y1); g.quadraticCurveTo(x0, y1, x0, y1 - q); g.quadraticCurveTo(x0 - (m & 8 ? 0 : 0.04), (y0 + y1) / 2, x0, y0 + q); g.quadraticCurveTo(x0, y0, x0 + q, y0); g.closePath(); };
-    shape(-0.02); g.fillStyle = '#0d1a08'; g.fill(); // muddy rim
-    shape(0.03); g.fillStyle = lg(g, 0, 0, 1, 1, [[0, '#3f9a1a'], [0.55, '#25670d'], [1, '#143a06']]); g.fill();
-    g.save(); shape(0.03); g.clip();
-    for (let i = 0; i < 4; i++) { const x = 0.15 + r() * 0.7, y = 0.15 + r() * 0.7, rad = 0.12 + r() * 0.16, gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, 'rgba(160,255,90,0.35)'); gr.addColorStop(1, 'rgba(160,255,90,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
-    g.strokeStyle = 'rgba(210,255,170,0.35)'; g.lineWidth = 0.02; for (let i = 0; i < 2; i++) { const x = 0.25 + r() * 0.5, y = 0.25 + r() * 0.5; g.beginPath(); g.ellipse(x, y, 0.12 + r() * 0.1, 0.05, 0, 0, TAU); g.stroke(); }
-    for (let i = 0; i < 3; i++) { const x = 0.2 + r() * 0.6, y = 0.2 + r() * 0.6, rad = 0.025 + r() * 0.03; g.fillStyle = 'rgba(190,255,130,0.5)'; g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill(); g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(x - rad * 0.4, y - rad * 0.5, rad * 0.4, rad * 0.4); }
+// mid-match). R2 17.0: every pool sprite is exactly one tile (no bleed into neighbours) and is copied onto that tile's
+// own whole-pixel rect, so pools sit on the floor grid at every zoom / DPR / orientation. Neighbouring pool tiles merge
+// into one body: a connected side runs flat to the tile edge (rim and deep water continue straight into the next tile),
+// a free side gets a muddy rim inset INS with rounded outer corners, and an inside corner whose diagonal is dry gets a
+// small rounded notch. Sprite key = 4 side bits + 4 inside-corner bits + variant. Bubbles stay in the tile's middle.
+// Under reduced motion the bubbles drift slowly; lowQ draws one bubble per tile.
+const P_INS = 0.07, P_RIM = 0.035, P_DEEP = 0.12;
+function poolShape(g, m, ins, rad) { // m: 1 N, 2 E, 4 S, 8 W connected; rounded corner only where both sides are free
+  const n = m & 1 ? 0 : ins, e = m & 2 ? 1 : 1 - ins, so = m & 4 ? 1 : 1 - ins, w = m & 8 ? 0 : ins;
+  const rNE = !(m & 1) && !(m & 2) ? rad : 0, rSE = !(m & 4) && !(m & 2) ? rad : 0, rSW = !(m & 4) && !(m & 8) ? rad : 0, rNW = !(m & 1) && !(m & 8) ? rad : 0;
+  g.beginPath(); g.moveTo(w + rNW, n); g.lineTo(e - rNE, n); if (rNE) g.quadraticCurveTo(e, n, e, n + rNE);
+  g.lineTo(e, so - rSE); if (rSE) g.quadraticCurveTo(e, so, e - rSE, so);
+  g.lineTo(w + rSW, so); if (rSW) g.quadraticCurveTo(w, so, w, so - rSW);
+  g.lineTo(w, n + rNW); if (rNW) g.quadraticCurveTo(w, n, w + rNW, n); g.closePath();
+}
+function poolSprite(m, c, v) { // c: inside corners with a dry diagonal, 1 NE, 2 SE, 4 SW, 8 NW
+  return sprite('pool' + m + '|' + c + '|' + v, 1, 1, 0, 0, (g) => {
+    const r = rng(41 + v * 7 + m * 3 + c);
+    g.save(); g.beginPath(); g.rect(0, 0, 1, 1); g.clip();
+    poolShape(g, m, P_INS - P_RIM, 0.26); g.fillStyle = '#0d1a08'; g.fill(); // muddy rim
+    poolShape(g, m, P_INS, 0.24); g.fillStyle = '#3f9a1a'; g.fill(); // shallows
+    poolShape(g, m, P_INS + P_DEEP, 0.2); g.fillStyle = '#25670d'; g.fill(); // deep water (continuous across merged tiles)
+    // dry inside corners: a rounded mud notch so an L-shaped pool reads as one body
+    const CN = [[1, 1, 0], [2, 1, 1], [4, 0, 1], [8, 0, 0]];
+    for (const [bit, cx, cy] of CN) if (c & bit) {
+      g.fillStyle = '#3f9a1a'; g.beginPath(); g.arc(cx, cy, P_INS + P_DEEP, 0, TAU); g.fill(); // same bands as a free side
+      g.fillStyle = '#0d1a08'; g.beginPath(); g.arc(cx, cy, P_INS, 0, TAU); g.fill();
+      g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(cx, cy, P_INS - P_RIM, 0, TAU); g.fill(); g.globalCompositeOperation = 'source-over';
+    }
+    // highlights stay in the middle of the tile, away from the edges, so merged pools show no seams
+    g.save(); poolShape(g, m, P_INS + P_DEEP, 0.2); g.clip();
+    for (let i = 0; i < 3; i++) { const x = 0.32 + r() * 0.36, y = 0.32 + r() * 0.36, rad = 0.1 + r() * 0.08, gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, 'rgba(160,255,90,0.3)'); gr.addColorStop(1, 'rgba(160,255,90,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
+    g.strokeStyle = 'rgba(210,255,170,0.32)'; g.lineWidth = 0.02; for (let i = 0; i < 2; i++) { const x = 0.35 + r() * 0.3, y = 0.35 + r() * 0.3; g.beginPath(); g.ellipse(x, y, 0.1 + r() * 0.06, 0.045, 0, 0, TAU); g.stroke(); }
+    for (let i = 0; i < 3; i++) { const x = 0.28 + r() * 0.44, y = 0.28 + r() * 0.44, rad = 0.022 + r() * 0.025; g.fillStyle = 'rgba(190,255,130,0.5)'; g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill(); g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(x - rad * 0.4, y - rad * 0.5, rad * 0.4, rad * 0.4); }
+    g.restore();
     g.restore();
   });
 }
 function poolMask(s, x, y) { return (isT(s, x, y - 1, 'poison') ? 1 : 0) | (isT(s, x + 1, y, 'poison') ? 2 : 0) | (isT(s, x, y + 1, 'poison') ? 4 : 0) | (isT(s, x - 1, y, 'poison') ? 8 : 0); }
+function poolCorners(s, x, y, m) {
+  return ((m & 3) === 3 && !isT(s, x + 1, y - 1, 'poison') ? 1 : 0) | ((m & 6) === 6 && !isT(s, x + 1, y + 1, 'poison') ? 2 : 0) |
+    ((m & 12) === 12 && !isT(s, x - 1, y + 1, 'poison') ? 4 : 0) | ((m & 9) === 9 && !isT(s, x - 1, y - 1, 'poison') ? 8 : 0);
+}
+// Copy a 1x1-tile sprite onto the tile's own device-pixel rect: both edges rounded from the same transform, so the
+// tile and its neighbours share edges exactly (no 1 px gaps or overlaps between merged pool tiles at any zoom).
+function blitTile(ctx, p, x, y) {
+  const m = ctx.getTransform();
+  if (m.b || m.c || m.a <= 0 || m.d <= 0) { ctx.drawImage(p.c, x, y, 1, 1); return; }
+  const x0 = Math.round(m.a * x + m.e), x1 = Math.round(m.a * (x + 1) + m.e), y0 = Math.round(m.d * y + m.f), y1 = Math.round(m.d * (y + 1) + m.f);
+  if (x1 <= x0 || y1 <= y0) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); blitExact(ctx, p.c, x0, y0, x1 - x0, y1 - y0); ctx.setTransform(m.a, 0, 0, m.d, m.e, m.f);
+}
 function drawPool(r, ctx, x, y, T) {
-  const s = r.state; blit(ctx, poolSprite(poolMask(s, x, y), (x * 3 + y * 5) % 3), x, y);
+  const s = r.state, m = poolMask(s, x, y); blitTile(ctx, poolSprite(m, poolCorners(s, x, y, m), (x * 3 + y * 5) % 3), x, y);
   const sp = r.reduced ? 0.25 : 1, nb = r.lowQ ? 1 : 2;
   for (let i = 0; i < nb; i++) {
-    const h = ((x * 73 + y * 151 + i * 37) % 97) / 97, ph = (T * 0.55 * sp + h) % 1, bx = x + 0.25 + ((h * 7 + i * 0.4) % 1) * 0.5, by = y + 0.3 + ((h * 13 + i * 0.3) % 1) * 0.45;
-    if (ph < 0.86) { const rad = 0.025 + ph * 0.07; ctx.globalAlpha = 0.85; ctx.fillStyle = '#9bea3a'; ctx.beginPath(); ctx.arc(bx, by, rad, 0, TAU); ctx.fill(); ctx.fillStyle = 'rgba(240,255,220,0.8)'; ctx.fillRect(bx - rad * 0.45, by - rad * 0.55, rad * 0.38, rad * 0.38); }
-    else { const k = (ph - 0.86) / 0.14; ctx.globalAlpha = 0.7 * (1 - k); ctx.strokeStyle = '#c8ff8a'; ctx.lineWidth = 0.018; ctx.beginPath(); ctx.ellipse(bx, by, 0.1 + k * 0.1, 0.05 + k * 0.04, 0, 0, TAU); ctx.stroke(); }
+    const h = ((x * 73 + y * 151 + i * 37) % 97) / 97, ph = (T * 0.55 * sp + h) % 1, bx = x + 0.3 + ((h * 7 + i * 0.4) % 1) * 0.4, by = y + 0.32 + ((h * 13 + i * 0.3) % 1) * 0.36;
+    if (ph < 0.86) { const rad = 0.025 + ph * 0.06; ctx.globalAlpha = 0.85; ctx.fillStyle = '#9bea3a'; ctx.beginPath(); ctx.arc(bx, by, rad, 0, TAU); ctx.fill(); ctx.fillStyle = 'rgba(240,255,220,0.8)'; ctx.fillRect(bx - rad * 0.45, by - rad * 0.55, rad * 0.38, rad * 0.38); }
+    else { const k = (ph - 0.86) / 0.14; ctx.globalAlpha = 0.7 * (1 - k); ctx.strokeStyle = '#c8ff8a'; ctx.lineWidth = 0.018; ctx.beginPath(); ctx.ellipse(bx, by, 0.08 + k * 0.08, 0.04 + k * 0.03, 0, 0, TAU); ctx.stroke(); }
   }
-  if (!r.lowQ) { ctx.globalCompositeOperation = 'lighter'; dot(ctx, '#7dff4a', x + 0.5, y + 0.5, 0.75, 0.1 + 0.05 * Math.sin(T * 2 * sp + x + y)); ctx.globalCompositeOperation = 'source-over'; }
+  if (!r.lowQ) { ctx.globalCompositeOperation = 'lighter'; dot(ctx, '#7dff4a', x + 0.5, y + 0.5, 0.6, 0.08 + 0.04 * Math.sin(T * 2 * sp + x + y)); ctx.globalCompositeOperation = 'source-over'; }
   ctx.globalAlpha = 1;
 }
 

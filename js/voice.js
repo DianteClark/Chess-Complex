@@ -13,6 +13,26 @@
 import { music } from './music.js';
 import { buses, settings, getCtx, setVoiceMode, onCtxSwap, holdContext, voiceOut } from './audio.js';
 import { PEER_OPTS } from './net.js';
+import { endpoint as cloudEndpoint } from './cloud.js';
+// 17.0 (S2): ICE servers from the cloud (GET /turn: Cloudflare TURN when the server has keys, else the same public
+// list); no cloud, an error or a 2 s timeout keeps PEER_OPTS. Good answers are reused for 30 min.
+let iceCache = null;
+function peerOpts() {
+  const now = Date.now();
+  if (iceCache && now < iceCache.until) return iceCache.p;
+  const p = (async () => {
+    const base = await Promise.resolve(cloudEndpoint && cloudEndpoint());
+    if (!base) return { o: PEER_OPTS, ok: false };
+    const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 2000);
+    try {
+      const j = await (await fetch(base + '/turn', { signal: ac.signal })).json();
+      if (!j || !Array.isArray(j.iceServers) || !j.iceServers.length) return { o: PEER_OPTS, ok: false };
+      return { o: { ...PEER_OPTS, config: { ...PEER_OPTS.config, iceServers: j.iceServers } }, ok: true };
+    } finally { clearTimeout(to); }
+  })().catch(() => ({ o: PEER_OPTS, ok: false })).then((r) => { iceCache.until = Date.now() + (r.ok ? 1800000 : 60000); return r.o; });
+  iceCache = { p, until: Infinity };
+  return p;
+}
 
 const VID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 const MAX_MEMBERS = 8;
@@ -47,10 +67,11 @@ export function opusSdp(sdp) {
 }
 const SDP_OPTS = { sdpTransform: opusSdp };
 // T = { id, onCall(cb), call(remoteId, stream) -> C, close() }   C = { peer, answer(stream), onStream(cb), onClose(cb), close() }
-function peerTransport() {
+async function peerTransport() {
+  const opts = await peerOpts(); // 17.0 (S2)
   return new Promise((res, rej) => {
     if (!window.Peer) { rej(new Error('no-peer')); return; }
-    const peer = new window.Peer(PEER_OPTS); let done = false;
+    const peer = new window.Peer(opts); let done = false;
     const to = setTimeout(() => { if (!done) { done = true; try { peer.destroy(); } catch {} rej(new Error('timeout')); } }, 12000);
     const wrap = (c) => {
       const C = { peer: c.peer, _s: [], _c: [], answer: (s) => c.answer(s, SDP_OPTS), onStream(f) { this._s.push(f); }, onClose(f) { this._c.push(f); }, close() { try { c.close(); } catch {} } };
