@@ -20,6 +20,8 @@ export const T = {
   hashEvery: 8,
   planSplit: 6,         // ms: a bot plan slower than this defers its first step to the next alarm
   saveGap: 2000,        // persist when the next timer is further away than this (idle points)
+  qpWait: 45000,        // 17.1 (MM): Quick Play lobby countdown once 2+ humans are in (empty seats -> bots)
+  qpFull: 3000,         // 17.1 (MM): ... and when every seat is a human
 };
 const VER = protoVer();
 const PIECE_ORDER = ['pawn', 'knight', 'bishop', 'rook', 'queen'];
@@ -94,7 +96,7 @@ export class RoomCore {
   get now() { return this.io.now(); }
 
   // ---------- lifecycle ----------
-  async init(code) {
+  async init(code, o) {
     const R = this.R;
     if (R && (R.players.length || this.io.sockets().length || this.now - R.created < this.T.reserve)) return false;
     this.R = {
@@ -103,6 +105,8 @@ export class RoomCore {
       t: { clean: this.now + this.T.reserve }, bl: {}, chatRL: {}, vc: {}, vcRL: {},
     };
     if (this.test) this.R.T = {};
+    // 17.1 (MM): a Quick Play room (made by the Matchmaker): public, mode fixed, auto-start countdown, no leader options
+    if (o && o.qp && modesIn('custom').includes(o.mode)) { this.setMode(o.mode, true); Object.assign(this.R, { qp: true, pub: true, loc: o.loc || null, pubIp: o.ip || null }); this.R.mmKey = 'placed'; }
     await this.flush(true);
     return true;
   }
@@ -133,6 +137,7 @@ export class RoomCore {
     if (p.away) return 'away';
     if (p.pid === R.leader) return 'leader';
     if (p.isBot) return 'bot';
+    if (R.qp && !this.live()) return 'ready'; // 17.1 (MM): Quick Play has no ready step
     if (this.live() && R.m.seats.includes(p.pid) && !p.back) return 'play';
     if (p.ready) return 'ready';
     return R.mid && !p.back && R.m && R.m.seats.includes(p.pid) ? 'results' : 'wait';
@@ -146,9 +151,51 @@ export class RoomCore {
   lobbyMsg() {
     const R = this.R;
     const players = R.players.map((p) => { const o = { pid: p.pid, name: p.name, skin: p.skin, isBot: !!p.isBot, title: p.title || '', st: this.memberState(p) }; if (p.avatar) o.avatar = p.avatar; return o; });
-    return { t: 'lobby', players, code: R.code, mode: R.gameMode, maxP: R.maxP, leader: R.leader, party: this.partyPub() };
+    return { t: 'lobby', players, code: R.code, mode: R.gameMode, maxP: R.maxP, leader: R.leader, party: this.partyPub(), pub: !!R.pub, qp: !!R.qp, cd: R.t.qp && !this.live() ? Math.max(0, R.t.qp - this.now) : 0 }; // 17.1 (MM): pub/qp/cd (ms to the Quick Play start)
   }
-  lobby() { this.bcast(this.lobbyMsg()); this.dirty = true; this.lobbyChanged = true; }
+  lobby() { this.qpCheck(); this.bcast(this.lobbyMsg()); this.dirty = true; this.lobbyChanged = true; this.mmSync(); }
+
+  // ---------- 17.1 (MM): public matchmaking ----------
+  // Quick Play countdown: 2+ humans online -> qpWait (45 s), every seat a human -> qpFull (3 s); fewer than 2 cancels.
+  qpCheck() {
+    const R = this.R; if (!R) return;
+    if (!R.qp || this.live()) { if (R.t.qp) R.t.qp = 0; return; }
+    const hum = this.humans().filter((p) => this.online(p.pid)).length;
+    if (hum >= 2 && hum >= R.maxP) { const at = this.now + this.T.qpFull; if (!R.t.qp || R.t.qp > at) R.t.qp = at; }
+    else if (hum >= 2) { if (!R.t.qp) R.t.qp = this.now + this.T.qpWait; }
+    else R.t.qp = 0;
+  }
+  // countdown over (or the lone leader's Start Now): fill the empty seats with bots and start
+  qpGo(force) {
+    const R = this.R; R.t.qp = 0;
+    if (!R.qp || this.live()) return null;
+    const hum = this.humans().filter((p) => this.online(p.pid)).length;
+    if (hum < (force ? 1 : 2)) { this.lobby(); return 'Waiting for players'; }
+    R.players = R.players.filter((p) => p.isBot || this.online(p.pid) || (p.away && p.awayUntil > this.now));
+    while (R.players.length < R.maxP) this.addBot('normal');
+    for (const p of R.players) if (!p.isBot) p.ready = true;
+    const e = this.start();
+    if (e) { R.players = R.players.filter((p) => !p.isBot); this.lobby(); }
+    return e;
+  }
+  // Report the public listing to the Matchmaker when it changed (in the background: never waits on it). Private rooms
+  // are never sent; a room going live, private or away is unlisted.
+  mmSync() {
+    const R = this.R; if (!R || !this.io.mm) return;
+    const listed = !!R.pub && !this.live();
+    const info = listed ? { code: R.code, mode: R.gameMode, n: R.players.length, h: this.humans().filter((p) => this.online(p.pid)).length, cap: R.maxP, st: R.t.qp ? 'starting' : 'lobby', qp: !!R.qp, loc: R.loc || null, created: R.created, ip: R.pubIp || null } : null;
+    const key = info ? JSON.stringify(info) : '';
+    if (key === (R.mmKey || '')) return;
+    const was = R.mmKey; R.mmKey = key; this.dirty = true;
+    if (!info) { if (was) this.io.mm({ op: 'unreg', code: R.code }); return; }
+    const code = R.code;
+    this.io.mm({ op: 'reg', ...info }).then((r) => {
+      if (!r || r.ok !== false || r.why !== 'cap' || !this.R || this.R.code !== code || this.R.qp) return;
+      this.R.pub = false; this.R.mmKey = '';
+      this.sendTo(this.R.leader, { t: 'err', op: 'public', why: 'You already have open public matches. Close one to list this party.' });
+      this.lobby(); return this.flush(true);
+    });
+  }
 
   // ---------- timers (one DO alarm = the earliest of these) ----------
   async arm() {
@@ -200,8 +247,9 @@ export class RoomCore {
     const R = this.R, t = R.t, now = this.now;
     if (t.clean && t.clean <= now) {
       t.clean = 0;
-      if (!this.socks().length) { this.R = null; await this.io.arm(0); await this.io.wipe(); return; }
+      if (!this.socks().length) { if (R.mmKey && this.io.mm) this.io.mm({ op: 'unreg', code: R.code }); this.R = null; await this.io.arm(0); await this.io.wipe(); return; } // 17.1 (MM): unlisted with it
     }
+    if (t.qp && t.qp <= now) this.qpGo(false); // 17.1 (MM): Quick Play countdown over
     if (t.intro && t.intro <= now) { t.intro = 0; this.go(); }
     if (t.turn && t.turn <= now) { t.turn = 0; this.timeout(); }
     if (t.bot && t.bot <= now) { t.bot = 0; this.botStep(); }
@@ -232,7 +280,7 @@ export class RoomCore {
       R.players.push(p);
       if (!R.leader || !this.player(R.leader) || this.player(R.leader).isBot) {
         R.leader = pid;
-        if (R.players.filter((x) => !x.isBot).length === 1 && !R.mid) { const gm = pr.mode === 'daily' ? 'royale' : pr.mode; if (modesIn('custom').includes(gm)) this.setMode(gm, true); }
+        if (R.players.filter((x) => !x.isBot).length === 1 && !R.mid && !R.qp) { const gm = pr.mode === 'daily' ? 'royale' : pr.mode; if (modesIn('custom').includes(gm)) this.setMode(gm, true); } // 17.1 (MM): !R.qp = a Quick Play room keeps its mode
       }
     }
     this.io.bind(ws, pid);
@@ -350,7 +398,18 @@ export class RoomCore {
   lead(ws, pid, m) {
     const R = this.R, P = R.party, err = (why) => this.sendWs(ws, { t: 'err', op: m.op, why });
     if (this.live() && m.op !== 'kick') return err('Wait for the match to finish');
+    // 17.1 (MM): Quick Play lobbies have no leader options; a leader on their own may start now (bots fill the seats)
+    if (R.qp) {
+      if (m.op !== 'start') return err('Quick Play matches start by themselves');
+      if (this.humans().filter((p) => this.online(p.pid)).length > 1) return err('Starting when the countdown ends');
+      const e = this.qpGo(true); if (e) err(e); return;
+    }
     switch (m.op) {
+      case 'public': { // 17.1 (MM): list this party in Browse (the Matchmaker may refuse: per-IP cap -> back to Private + err)
+        const on = !!m.on;
+        if (on && !R.pub) { const me = this.io.meta ? this.io.meta(ws) : {}; R.pubIp = me.ip || null; R.loc = me.loc || R.loc || null; }
+        R.pub = on; break;
+      }
       case 'group': { const g = m.group ?? m.v; const list = modesIn(g); if (!list.length) return err('Unknown group'); P.group = g; if (g !== 'custom' && groupOf(R.gameMode) !== g) { const e = this.setMode(list[0]); if (e) return err(e); } else if (g === 'custom') P.custom ||= defaultRules(); break; }
       case 'mode': { const v = m.mode ?? m.v; if (!modesIn(P.group).includes(v)) return err('That mode is not in this group'); const e = this.setMode(v); if (e) return err(e); break; }
       case 'location': { const v = m.loc ?? m.location ?? m.v; P.loc = v === 'random' || own(LOCATIONS, v) ? v : 'random'; break; }
@@ -501,6 +560,7 @@ export class RoomCore {
     this.bcast({ t: 'h', v: s.v, x: stateHash(s) });
     this.bcast({ t: 'over', mid: m.mid, v: s.v, winner: s.winner });
     for (const p of R.players) if (p.left) { const h = m.hum && m.hum[p.pid]; if (h) h.left = true; p.left = false; }
+    if (R.qp) { R.qp = false; R.pub = false; } // 17.1 (MM): after its match a Quick Play room is a normal private party of the same players (Back to Party works; the leader may list it again)
     this.lobby();
     this.ended();
   }
@@ -593,9 +653,13 @@ export class RoomCore {
     } else if (m.a === 'leave') { if (R.vc[pid]) { delete R.vc[pid]; this.vcRoster(); } }
     else if (m.a === 'talk') {
       if (!R.vc[pid]) return;
-      const now = this.now, st = R.vcRL[pid] || (R.vcRL[pid] = { n: 6, at: now });
-      st.n = Math.min(6, st.n + (now - st.at) / 250); st.at = now; if (st.n < 1) return; st.n -= 1;
-      this.bcast({ t: 'vc', a: 'talk', pid, on: m.on ? 1 : 0 });
+      // 17.1 (A0, mirrors V2's voice.js fix): only "started talking" is rate limited; a "stopped talking" is always relayed
+      // when the last relayed state for that pid was on, so nobody stays lit after a burst
+      const now = this.now, st = R.vcRL[pid] || (R.vcRL[pid] = { n: 6, at: now, on: 0 }), on = m.on ? 1 : 0;
+      if (on) { st.n = Math.min(6, st.n + (now - st.at) / 250); st.at = now; if (st.n < 1) return; st.n -= 1; }
+      else if (!st.on) return;
+      st.on = on;
+      this.bcast({ t: 'vc', a: 'talk', pid, on });
     }
   }
 

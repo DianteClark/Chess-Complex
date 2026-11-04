@@ -15,8 +15,10 @@ import * as stats from './stats.js';       // A: /admin, /stats/* aggregate matc
 import { Board } from './board.js';
 import { Replay } from './replay.js';
 import { Stats } from './stats.js';
+import * as match from './match.js';       // 17.1 (MM): /mm/* Quick Play + Browse open matches (Matchmaker DO)
+import { Matchmaker } from './match.js';
 
-export { Room, Player, Board, Replay, Stats };
+export { Room, Player, Board, Replay, Stats, Matchmaker };
 
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}$/;
@@ -68,13 +70,15 @@ export default {
         if (o && !allowOrigin(o) && o !== url.origin) return json({ error: 'origin' }, 403); // 17.0 (S2): same origin = the Worker-served game
         const stub = env.ROOM.get(env.ROOM.idFromName(code));
         const u = new URL(req.url); u.searchParams.set('code', code);
-        return stub.fetch(new Request(u.toString(), req));
+        const fwd = new Request(u.toString(), req);
+        try { fwd.headers.set('X-CC-IP', await match.ipHash(req)); fwd.headers.set('X-CC-Loc', platform.locationHint(req.cf) || ''); } catch {} // 17.1 (MM): hashed IP + region for a leader who makes the room Public
+        return stub.fetch(fwd);
       }
       if (path === '/player' || path.startsWith('/player/')) {
         const ip = req.headers.get('CF-Connecting-IP') || 'local';
         return cors(req, await handlePlayer(req, env, ip));
       }
-      for (const mod of [platform, board, replay, stats]) { const r = await mod.routes(req, env, url, ctx); if (r) return cors(req, r); }
+      for (const mod of [platform, board, replay, stats, match]) { const r = await mod.routes(req, env, url, ctx); if (r) return cors(req, r); }
       return cors(req, json({ error: 'not found' }, 404));
     } catch (e) {
       return cors(req, json({ error: 'server', msg: String(e && e.message || e).slice(0, 200) }, 500));

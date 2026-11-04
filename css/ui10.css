@@ -288,6 +288,19 @@ body.reduced .vc-ring { animation: none; }
 /* 10.2.1: mic help reads as guidance, with a clear retry button */
 .vc-err { color: #ffc9c9; line-height: 1.45; background: rgba(255, 77, 109, .1); border: 1px solid rgba(255, 77, 109, .35); border-radius: 10px; padding: 8px 10px; }
 .vc-allow { margin-top: 8px; min-height: 40px; }
+/* V2 17.1: voice mode switch (Push to Talk / Open Mic), Open Mic mute, and a speaking glow that party ready states
+   (.lobby .pcard.pm-ready / pm-wait pulse, menus15.css) can no longer override */
+.vc-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.vc-seg { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(0,0,0,.35); }
+.vc-seg button { min-height: 40px; padding: 0 12px; border: 0; border-radius: 9px; background: none; color: var(--mute); font: inherit; font-size: 13px; font-weight: 800; white-space: nowrap; }
+.vc-seg button.on { color: #062a14; background: var(--green); }
+.vc-mute-me { min-height: 40px; }
+.vc-mute-me.on { border-color: var(--red); color: #ffb3bf; }
+.vc-ptt.muted { background: rgba(255,77,109,.18); border-color: var(--red); box-shadow: none; }
+.vc-ptt.muted svg { fill: #ff8a95; }
+.vc-ptt.muted::before { content: ''; position: absolute; left: 50%; top: 50%; width: 26px; height: 2px; background: #ff8a95; border-radius: 1px; transform: translate(-50%, -50%) rotate(-45deg); pointer-events: none; }
+.vc-ptt.open.muted::after { content: 'MUTED'; color: #fff; background: var(--red); }
+.pcard.speaking .pc-av, .lobby .pcard.speaking .pc-av { box-shadow: 0 0 0 3px var(--green), 0 0 14px rgba(92,255,157,.7) !important; }
 
 /* N 10.3: chat strip (last 3 lines), chat history sheet, unread badge, microphone permission card and Settings row */
 .chat-log .cl-row { pointer-events: auto; cursor: pointer; max-width: 100%; box-sizing: border-box; animation: none; transition: opacity .25s; }

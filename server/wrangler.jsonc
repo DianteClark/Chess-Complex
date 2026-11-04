@@ -15,12 +15,14 @@
       { "name": "PLAYER", "class_name": "Player" },
       { "name": "BOARD", "class_name": "Board" },
       { "name": "REPLAY", "class_name": "Replay" },
-      { "name": "STATS", "class_name": "Stats" }
+      { "name": "STATS", "class_name": "Stats" },
+      { "name": "MM", "class_name": "Matchmaker" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Room", "Player"] },
-    { "tag": "v2", "new_sqlite_classes": ["Board", "Replay", "Stats"] }
+    { "tag": "v2", "new_sqlite_classes": ["Board", "Replay", "Stats"] },
+    { "tag": "v3", "new_sqlite_classes": ["Matchmaker"] }
   ],
   "analytics_engine_datasets": [ { "binding": "AE", "dataset": "cc_matches" } ],
   "ai": { "binding": "AI" },
@@ -34,5 +36,7 @@
   "workers_dev": true,
   // Preview URLs are not generated for Workers with Durable Objects anyway
   "preview_urls": false,
-  "observability": { "enabled": true }
+  // Every Durable Object WebSocket message and alarm is an invocation that Workers Logs records (~3,300 events per online
+  // match at 100%). The free plan keeps 200,000 events/day, so sample 2%: about 65 events per match, errors still show up.
+  "observability": { "enabled": true, "head_sampling_rate": 0.02 }
 }

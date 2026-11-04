@@ -122,6 +122,7 @@ function analyse(R) {
     await page.waitForTimeout(900);
     if (CAM) await page.evaluate(async (m) => { const A = await import('/js/audio.js'); A.settings.cam = m; if (window.__cc.game.r.setCamMode) window.__cc.game.r.setCamMode(m); }, CAM);
     await page.evaluate(() => { window.__cc.startSolo(7, 'royale'); window.__cc.session.host.setBot('me'); });
+    await page.waitForTimeout(400); await page.evaluate(() => { const i = window.__cc.intro; i && i.skipAll && i.skipAll(); }); // IX 17.1: solo's briefing waits for a tap since 17.0 (D2)
     await page.evaluate(hook, !NOULT);
     const t0 = Date.now(); let overridden = null;
     while (Date.now() - t0 < SECS * 1000) {

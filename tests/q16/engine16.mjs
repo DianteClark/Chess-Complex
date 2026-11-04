@@ -102,6 +102,12 @@ safe('SW', 'triggers once', () => {
   check('SW', 'a heal event too', evs(r.ev, 'heal', (q) => q.id === V.id && q.n === want).length === 1);
   V.hp = 3; forceTurn(s, A); const r2 = atk(s, A, 6, 6);
   check('SW', 'never twice in a match', !evs(r2.ev, 'secondwind').length);
+  // 17.1 (A0, player report): promoting must not re-arm it (evolve and hone both keep u.sw)
+  V.hp = E.stats(V).maxHp; V.shards = 30; forceTurn(s, V); E.applyAction(s, V.pid, { type: 'promote', to: 'knight' });
+  const pr = E.applyAction(s, V.pid, { type: 'promote', to: V.piece }); // hone
+  check('SW', 'promotion keeps Second Wind spent', V.sw === true && V.piece !== 'pawn', `sw ${V.sw} piece ${V.piece}`);
+  V.hp = Math.ceil(E.stats(V).maxHp * 0.26); if (s.active === V.id) E.applyAction(s, V.pid, { type: 'end' }); place(A, 5, 5); place(V, 6, 6); forceTurn(s, A); const r3 = atk(s, A, 6, 6);
+  check('SW', 'no second Second Wind after promoting', V.alive ? !evs(r3.ev, 'secondwind').length : true, JSON.stringify(evs(r3.ev, 'secondwind')));
 });
 safe('SW', 'not from DoTs, not when the hit kills, not for Hollows', () => {
   const s = mk(), [A, V] = s.units; const mx = E.stats(V).maxHp; V.hp = Math.ceil(mx * 0.27);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 17.1 (November 2026)
+- **Quick Play + Browse** (server/src/match.js Matchmaker DO, mmcore.js, js/matchmaking.js): public online matches without a code; fullest open lobby for the mode (region preferred) or a new one; 45 s countdown with 2+ humans, bots fill, 3 s when full; Public/Private switch for hosts; per-IP limits; stale cleanup. Tests 9 + 21 e2e.
+- **Taps**: the tile above your piece is no longer swallowed by the piece's sprite (128/128 in tests/tap/above.cjs, was 25/96 failing).
+- **Camera**: held-back moves no longer replay stale positions; a pan on your turn ends at the next player's turn; Follow-every-turn resumes after 6 s; stuck touches release after 8 s.
+- **Voice**: Open Mic mic button mutes/unmutes (no silent switch to PTT); mode switch both ways in lobby and match; speaking glow survives Back to Party (CSS specificity); voice rejoins after a dropped link; talk-off always relayed (client and Room).
+- **Ops**: Workers Logs head sampling 2% (one online match was ~3,300 log events at 100%).
+- Second Wind verified once per match across promotions (test added).
+
 ## 17.0 "Cloud" (November 2026)
 - **Cloudflare server** (server/, one Worker serving the game as static assets plus the API): Room Durable Objects run online matches authoritatively in lockstep (clients replay ~100-byte actions with the same engine, 32-bit state hash every 8 actions, snapshot on mismatch); WebSocket Hibernation + alarms; seats held 60 s for reconnects, leader handoff, chat filter and voice-signaling relay. Phone-hosted PeerJS play remains the automatic fallback.
 - **Cloud save + transfer codes** (Player DO): automatic, no sign-up; 26-char code with check character + offline QR; merge rules that never duplicate Marks; GitHub Pages -> Cloudflare move card that carries progress over (#transfer=).

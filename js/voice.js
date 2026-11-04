@@ -142,7 +142,7 @@ function rosterMsg(sess) { return { t: 'vc', a: 'roster', list: [...(sess.vc || 
 class Voice {
   constructor() {
     this.state = 'off'; this.roster = new Map(); this.calls = new Map(); this.mutedV = new Set(); this.vol = {}; this.flag = new Map();
-    this.speaking = new Set(); this.open = false; this.ptt = false; this.listenOnly = false; this.sess = null; this.T = null; this.mic = null; this.ac = null; this.ducked = false; this.err = '';
+    this.speaking = new Set(); this.open = false; this.muted = false; this.ptt = false; this.listenOnly = false; this.sess = null; this.T = null; this.mic = null; this.ac = null; this.ducked = false; this.err = '';
     this.stats = { calls: 0, streams: 0, refused: 0, drops: 0 }; this.tries = {};
   }
   // deps: { session(), toast(msg), game, sfx, screen(), names() -> {pid: name} }
@@ -172,7 +172,9 @@ class Voice {
     this.renderLobby();
   }
   bindHold(b) {
-    const down = (e) => { e.preventDefault(); if (this.state !== 'on' || this.listenOnly) return; if (this.open) { this.setOpen(false); return; } try { b.setPointerCapture(e.pointerId); } catch {} this.setPtt(true); };
+    // 17.1 (V2): in Open Mic a tap mutes / unmutes (it never changes the mode; that is the voice panel's Push to Talk /
+    // Open Mic switch, in the lobby and in the match's quick chat > Players); in Push to Talk: hold to talk, as before.
+    const down = (e) => { e.preventDefault(); if (this.state !== 'on' || this.listenOnly) return; if (this.open) { this.setMuted(!this.muted); return; } try { b.setPointerCapture(e.pointerId); } catch {} this.setPtt(true); };
     const up = () => { if (!this.open) this.setPtt(false); };
     b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
     b.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -197,9 +199,14 @@ class Voice {
     } else if (m.a === 'leave') { if (sess.vc.delete(pid)) hostSend(sess, rosterMsg(sess), this); }
     else if (m.a === 'talk') {
       if (!sess.vc.has(pid)) return;
-      const rl = (sess.vcRL ||= {}); const now = Date.now(), st = rl[pid] || (rl[pid] = { n: 6, at: now });
-      st.n = Math.min(6, st.n + (now - st.at) / 250); st.at = now; if (st.n < 1) return; st.n -= 1;
-      hostSend(sess, { t: 'vc', a: 'talk', pid, on: m.on ? 1 : 0 }, this);
+      const rl = (sess.vcRL ||= {}); const now = Date.now(), st = rl[pid] || (rl[pid] = { n: 6, at: now, on: 0 });
+      // 17.1 (V2): only talk-on is rate limited; a talk-off after a relayed talk-on always goes through (a dropped
+      // off left the speaker lit for up to 30 s), and repeated offs are dropped, so offs never outnumber ons
+      const on = m.on ? 1 : 0;
+      if (on) { st.n = Math.min(6, st.n + (now - st.at) / 250); st.at = now; if (st.n < 1) return; st.n -= 1; }
+      else if (!st.on) return;
+      st.on = on;
+      hostSend(sess, { t: 'vc', a: 'talk', pid, on }, this);
     }
   }
   hostDrop(sess, pid) { if (sess && sess.vc && sess.vc.delete(pid)) hostSend(sess, rosterMsg(sess), this); }
@@ -219,6 +226,13 @@ class Voice {
       }
       this.roster = r; this.rosterSess = this.d && this.d.session();
       for (const pid of [...this.flag.keys()]) if (!r.has(pid)) this.flag.delete(pid);
+      // 17.1 (V2): the host / Room drops a member's voice when its link drops (a phone screen off between matches); a
+      // device still in voice that finds itself gone from the roster joins again (a few times, spaced out)
+      if (this.state === 'on' && this.myVid) {
+        if ([...r.values()].includes(this.myVid)) this.rejoins = 0;
+        else if (this.wasIn && (this.rejoins || 0) < 5 && Date.now() - (this.rejoinAt || 0) > 2000) { this.rejoins = (this.rejoins || 0) + 1; this.rejoinAt = Date.now(); setTimeout(() => { if (this.state === 'on' && !this.inRoster()) this.send({ a: 'join', vid: this.myVid }); }, 300); }
+        if ([...r.values()].includes(this.myVid)) this.wasIn = true;
+      }
       this.reconcile(); this.changed();
     } else if (m.a === 'talk' && typeof m.pid === 'string') {
       if (!this.roster.has(m.pid)) return;
@@ -255,7 +269,7 @@ class Voice {
     catch { this.d.toast('Voice could not connect. The match is not affected.'); this.stop(true); return; }
     if (this.d.session() !== sess || this.state !== 'starting') { try { this.T.close(); } catch {} return; }
     this.T.onCall((C) => this.incoming(C));
-    this.myVid = this.T.id; this.state = 'on'; this.open = false; this.ptt = false;
+    this.myVid = this.T.id; this.state = 'on'; this.open = false; this.muted = false; this.ptt = false;
     this.send({ a: 'join', vid: this.myVid });
     this.changed(); this.d.sfx && this.d.sfx.select && this.d.sfx.select();
   }
@@ -317,7 +331,7 @@ class Voice {
   stop(quiet) {
     if (this.state === 'off') return;
     if (!quiet) this.send({ a: 'leave' });
-    this.state = 'off'; this.ptt = false; this.open = false;
+    this.state = 'off'; this.ptt = false; this.open = false; this.muted = false;
     for (const vid of [...this.calls.keys()]) this.drop(vid, true);
     try { this.T && this.T.close(); } catch {} this.T = null;
     if (this.mic) { this.mic.getTracks().forEach((t) => t.stop()); if (!this.test) setSession('playback'); resumeAudio(); } this.mic = null; this.out = null; this.myAn = null;
@@ -325,7 +339,7 @@ class Voice {
     this.ac = null; this.syncMode(); // the shared context stays (it is the game's); voice mode ends once the mic is gone
     if (this.held) { this.held = false; holdContext(false); }
     this.myVid = null; this.flag.clear(); this.unduck(); this.sess = null; this.tries = {}; this.myOn = false;
-    this.speaking.clear(); this.changed();
+    this.speaking.clear(); this.wasIn = false; this.rejoins = 0; this.changed();
   }
 
   // ---- mesh
@@ -392,14 +406,24 @@ class Voice {
     if (on && this.d.sfx && this.d.sfx.tap) this.d.sfx.tap();
     this.changed();
   }
+  // the mode: Open Mic (on) or Push to Talk (off). A mute only lives inside Open Mic; switching modes clears it.
   setOpen(on) {
     if (this.state !== 'on' || this.listenOnly) return;
-    this.open = !!on; this.ptt = false; this.applyMic();
-    if (!this.open) this.send({ a: 'talk', on: 0 });
-    this.d.toast(this.open ? 'Open mic on: everyone in voice can hear you' : 'Open mic off: hold the mic button to talk');
+    on = !!on; if (on === this.open && !this.muted) { this.changed(); return; }
+    this.open = on; this.muted = false; this.ptt = false; this.applyMic();
+    if (!this.open) { this.myOn = false; this.send({ a: 'talk', on: 0 }); }
+    this.d.toast(this.open ? 'Open Mic: everyone in voice hears you. Tap the mic to mute.' : 'Push to Talk: hold the mic button to talk');
     this.changed();
   }
-  applyMic() { if (this.mic) for (const t of this.mic.getAudioTracks()) t.enabled = this.open || this.ptt; }
+  setMuted(on) {
+    if (this.state !== 'on' || this.listenOnly || !this.open) return;
+    this.muted = !!on; this.applyMic();
+    if (this.muted && this.myOn) { this.myOn = false; this.send({ a: 'talk', on: 0 }); }
+    if (this.d.sfx && this.d.sfx.tap) this.d.sfx.tap();
+    this.d.toast(this.muted ? 'Mic muted. Tap the mic to unmute.' : 'Mic on: everyone in voice hears you');
+    this.changed();
+  }
+  applyMic() { if (this.mic) for (const t of this.mic.getAudioTracks()) t.enabled = (this.open && !this.muted) || this.ptt; }
   level(an) { if (!an) return 0; const b = this._buf || (this._buf = new Float32Array(512)); an.getFloatTimeDomainData(b); let s = 0; for (let i = 0; i < b.length; i++) s += b[i] * b[i]; return Math.sqrt(s / b.length); }
   setVolume(pid, v) { this.vol[pid] = Math.max(0, Math.min(1, +v || 0)); this.applyVol(pid); }
   applyVol(pid) {
@@ -412,6 +436,8 @@ class Voice {
     if (this.sess && this.d.session() !== this.sess) this.stop(true);
     if (this.rosterSess && this.d.session() !== this.rosterSess) { this.rosterSess = null; this.roster = new Map(); this.mutedV.clear(); this.vol = {}; this.flag.clear(); this.changed(); }
     const now = Date.now(), sp = new Set();
+    // 17.1 (V2): meters must sit on the game's live context; if a rebuild slipped past onCtxSwap (or ours was closed), re-wire
+    if (this.state === 'on') { try { const B = buses(); if (B.ac && (this.ac !== B.ac || (this.ac && this.ac.state === 'closed'))) this.rewire(B.ac); } catch {} }
     if (this.state === 'on') {
       for (const e of this.calls.values()) {
         if (this.mutedV.has(e.pid)) continue;
@@ -420,13 +446,17 @@ class Voice {
       }
       for (const [pid, t] of this.flag) if (now - t > 30000) this.flag.delete(pid); // a lost talk-off never sticks
       const me = this.sess && this.sess.myPid;
-      if (this.open && this.myAn) { const lv = this.level(this.myAn); if (lv > 0.012) this.myHot = now; const on = now - (this.myHot || 0) < 600; if (on !== this.myOn) { this.myOn = on; this.send({ a: 'talk', on: on ? 1 : 0 }); } if (on && me) sp.add(me); }
+      if (this.open && !this.muted && this.myAn) { const lv = this.level(this.myAn); if (lv > 0.012) this.myHot = now; const on = now - (this.myHot || 0) < 600; if (on !== this.myOn) { this.myOn = on; this.send({ a: 'talk', on: on ? 1 : 0 }); } if (on && me) sp.add(me); }
       else if (this.ptt && me) sp.add(me);
     }
     const others = [...sp].some((p) => !this.sess || p !== this.sess.myPid);
     if (others) this.duck(); else this.unduck();
     const key = [...sp].sort().join(',');
+    // 17.1 (V2): lobby cards / player rows are rebuilt by other code (party lobby, Back to Party, chat): re-apply the
+    // classes while anyone speaks and now and then while a roster exists, not only when the speaking set changes
+    this._tk = ((this._tk || 0) + 1) % 5;
     if (key !== this.spKey) { this.spKey = key; this.speaking = sp; this.indicators(); }
+    else if (sp.size || (this.roster.size && !this._tk)) this.indicators();
     if (sp.size) this.rings();
     else if (this.ringBox && this.ringBox.childElementCount) this.ringBox.textContent = '';
   }
@@ -462,9 +492,10 @@ class Voice {
       this.renderLobby(); this.indicators();
       if (this.pttBtn) {
         const show = this.state === 'on' && !this.listenOnly;
-        this.pttBtn.classList.toggle('hidden', !show); this.pttBtn.classList.toggle('on', this.ptt || this.open); this.pttBtn.classList.toggle('open', this.open);
-        this.pttBtn.setAttribute('aria-label', this.open ? 'Open mic on. Tap to turn off' : 'Hold to talk');
-        this.pttBtn.setAttribute('aria-pressed', this.ptt || this.open ? 'true' : 'false');
+        const live = this.ptt || (this.open && !this.muted);
+        this.pttBtn.classList.toggle('hidden', !show); this.pttBtn.classList.toggle('on', live); this.pttBtn.classList.toggle('open', this.open); this.pttBtn.classList.toggle('muted', this.open && this.muted);
+        this.pttBtn.setAttribute('aria-label', !this.open ? 'Hold to talk' : this.muted ? 'Open mic muted. Tap to unmute' : 'Open mic on. Tap to mute');
+        this.pttBtn.setAttribute('aria-pressed', live ? 'true' : 'false');
       }
       if (this.d && this.d.onChange) this.d.onChange();
     }, 0);
@@ -480,10 +511,17 @@ class Voice {
     } else if (this.state === 'starting') { st.textContent = 'Connecting voice...'; }
     else {
       const b = el('button', 'btn small', 'Leave Voice'); b.dataset.vc = 'leave'; head.appendChild(b);
-      if (!this.listenOnly) { const o = el('button', 'btn small' + (this.open ? ' on' : ''), this.open ? 'Open Mic: On' : 'Open Mic: Off'); o.dataset.vc = 'open'; o.setAttribute('aria-pressed', this.open ? 'true' : 'false'); head.appendChild(o); }
-      st.textContent = this.listenOnly ? 'Listening only' : this.open ? 'Open mic: everyone in voice hears you' : lobby ? 'Hold the button below to talk' : 'Hold the mic button to talk';
+      st.textContent = this.listenOnly ? 'Listening only' : this.open ? (this.muted ? 'Open mic muted: nobody hears you' : 'Open mic: everyone in voice hears you') : lobby ? 'Hold the button below to talk' : 'Hold the mic button to talk';
     }
     head.appendChild(st); w.appendChild(head);
+    // 17.1 (V2): the mode switch (both ways) and, in Open Mic, a mute
+    if (this.state === 'on' && !this.listenOnly) {
+      const row = el('div', 'vc-mode'); const seg = el('div', 'vc-seg'); seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', 'Voice mode');
+      for (const [k, t, on] of [['mode-ptt', 'Push to Talk', !this.open], ['mode-open', 'Open Mic', this.open]]) { const x = el('button', on ? 'on' : '', t); x.type = 'button'; x.dataset.vc = k; x.setAttribute('aria-pressed', on ? 'true' : 'false'); seg.appendChild(x); }
+      row.appendChild(seg);
+      if (this.open) { const mu = el('button', 'btn small vc-mute-me' + (this.muted ? ' on' : ''), this.muted ? 'Unmute Mic' : 'Mute Mic'); mu.type = 'button'; mu.dataset.vc = 'mute-me'; mu.setAttribute('aria-pressed', this.muted ? 'true' : 'false'); row.appendChild(mu); }
+      w.appendChild(row);
+    }
     const ms = this.micStatus(); const pl = el('p', 'vc-perm ' + ms.key); pl.dataset.mic = ms.key;
     pl.append(el('span', '', 'Microphone: '), el('b', '', ms.label)); if (ms.hint) pl.append(document.createTextNode(' ' + ms.hint)); w.appendChild(pl);
     if (this.err && this.state === 'on') {
@@ -522,6 +560,8 @@ class Voice {
     if (act === 'join') { s && s.tap && s.tap(); this.join(); }
     else if (act === 'leave') { s && s.tap && s.tap(); this.stop(); }
     else if (act === 'open') this.setOpen(!this.open);
+    else if (act === 'mode-open' || act === 'mode-ptt') { s && s.tap && s.tap(); this.setOpen(act === 'mode-open'); }
+    else if (act === 'mute-me') this.setMuted(!this.muted);
     else if (act === 'mic') { s && s.tap && s.tap(); this.retryMic(); }
     else if (act === 'mute' && pid) { this.toggleMute(pid); s && s.tap && s.tap(); }
   }

@@ -1,6 +1,6 @@
 // Network-first service worker with a short timeout; cached copy for offline solo play.
-const CACHE = 'cc-v17.0.3';
-const CORE = ['./', 'index.html', 'privacy.html', 'css/style.css', 'manifest.webmanifest', 'js/main.js', 'js/canvasguard.js', 'js/wakelock.js', 'media/keepawake.mp4', 'js/data.js', 'js/engine.js', 'js/locations.js', 'js/render.js', 'js/backdrop.js', 'js/backdrops/citadel.js', 'js/backdrops/forge.js', 'js/backdrops/temple.js', 'js/backdrops/gardens.js', 'js/camdir.js', 'js/world.js', 'js/fx.js', 'js/pieces.js', 'js/audio.js', 'js/music.js', 'js/net.js', 'js/tutorial.js', 'js/codex.js', 'js/progression.js', 'js/store.js', 'js/storeui.js', 'css/store10.css', 'js/menus.js', 'css/menus10.css', 'js/front15.js', 'css/menus15.css', 'js/announcer.js', 'css/ui10.css', 'js/input.js', 'js/hazards10.js', 'js/chat.js', 'js/voice.js', 'js/party.js', 'js/cloud.js', 'js/statehash.js', 'js/cloudsave.js', 'js/replay.js', 'js/leaderboard.js', 'js/daily.js', 'css/lb17.css', 'js/vendor/qr.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png', 'css/game10.css', 'js/wheel.js', 'js/backdrops/bog.js', 'js/backdrops/e2kit.js', 'js/backdrops/rift.js', 'js/backdrops/ruins.js', 'js/backdrops/works.js', 'js/backdrops/spire.js'];
+const CACHE = 'cc-v17.1';
+const CORE = ['./', 'index.html', 'privacy.html', 'css/style.css', 'manifest.webmanifest', 'js/main.js', 'js/canvasguard.js', 'js/wakelock.js', 'media/keepawake.mp4', 'js/data.js', 'js/engine.js', 'js/locations.js', 'js/render.js', 'js/backdrop.js', 'js/backdrops/citadel.js', 'js/backdrops/forge.js', 'js/backdrops/temple.js', 'js/backdrops/gardens.js', 'js/camdir.js', 'js/world.js', 'js/fx.js', 'js/pieces.js', 'js/audio.js', 'js/music.js', 'js/net.js', 'js/tutorial.js', 'js/codex.js', 'js/progression.js', 'js/store.js', 'js/storeui.js', 'css/store10.css', 'js/menus.js', 'css/menus10.css', 'js/front15.js', 'css/menus15.css', 'js/announcer.js', 'css/ui10.css', 'js/input.js', 'js/hazards10.js', 'js/chat.js', 'js/voice.js', 'js/party.js', 'js/cloud.js', 'js/statehash.js', 'js/cloudsave.js', 'js/replay.js', 'js/leaderboard.js', 'js/daily.js', 'css/lb17.css', 'js/matchmaking.js', 'css/mm17.css', 'js/vendor/qr.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png', 'css/game10.css', 'js/wheel.js', 'js/backdrops/bog.js', 'js/backdrops/e2kit.js', 'js/backdrops/rift.js', 'js/backdrops/ruins.js', 'js/backdrops/works.js', 'js/backdrops/spire.js'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms));
@@ -9,7 +9,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
-  if (/^\/(health|room|ws|player|lb|replay|turn|cfg|stats|admin)(\/|$)/.test(url.pathname)) return; // 17.0 (N2): same-origin Worker API, never cached
+  if (/^\/(health|room|ws|player|lb|replay|turn|cfg|stats|admin|mm)(\/|$)/.test(url.pathname)) return; // 17.0 (N2): same-origin Worker API, never cached (17.1 MM: /mm)
   e.respondWith((async () => {
     try {
       const res = await Promise.race([fetch(req), timeout(4000)]);

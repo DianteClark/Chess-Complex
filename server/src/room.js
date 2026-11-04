@@ -39,7 +39,21 @@ export class Room extends DurableObject {
       sockets() { const out = []; for (const ws of self.ctx.getWebSockets()) { const a = att(ws); if (a && a.pid && !a.gone) out.push({ ws, pid: a.pid }); } return out; },
       send(ws, str) { try { ws.send(str); } catch {} },
       close(ws, code, why) { const a = att(ws) || {}; a.gone = true; try { ws.serializeAttachment(a); } catch {} try { ws.close(code, why); } catch {} },
-      bind(ws, pid) { try { ws.serializeAttachment({ pid }); } catch {} },
+      bind(ws, pid) { try { const a = att(ws) || {}; ws.serializeAttachment({ ...a, pid }); } catch {} }, // 17.1 (MM): keeps ip/loc
+      meta(ws) { const a = att(ws) || {}; return { ip: a.ip || null, loc: a.loc || null }; }, // 17.1 (MM): hashed IP + region (worker headers)
+      // 17.1 (MM): public listing report to the Matchmaker ({op:'reg', ...} | {op:'unreg', code}); background, 3 s cap,
+      // never throws: a lobby or match never waits on it. Resolves to the Matchmaker's answer or null.
+      mm(body) {
+        if (!self.env || !self.env.MM) return Promise.resolve(null);
+        const job = (async () => {
+          const stub = self.env.MM.get(self.env.MM.idFromName('global'));
+          const r = await stub.fetch(new Request('https://mm/' + (body.op === 'unreg' ? 'unreg' : 'reg'), { method: 'POST', body: JSON.stringify(body) }));
+          return r.ok ? await r.json() : null;
+        })().catch(() => null);
+        let to; const p = Promise.race([job, new Promise((r) => { to = setTimeout(() => r(null), 3000); })]).finally(() => clearTimeout(to));
+        self.bg.push(p);
+        return p;
+      },
       async save(R) { if (R) await self.ctx.storage.put('R', R); },
       async wipe() { await self.ctx.storage.deleteAll(); },
       async arm(at) {
@@ -88,7 +102,9 @@ export class Room extends DurableObject {
     }
     if (url.pathname === '/mod/stats' && this.test) { const b = (await this.ctx.storage.get('budget')) || null; return new Response(JSON.stringify({ budget: b }), { headers: { 'Content-Type': 'application/json' } }); }
     if (url.pathname === '/init' && req.method === 'POST') {
-      const ok = await this.core.init(code);
+      const q = url.searchParams, o = q.get('qp') === '1' ? { qp: true, mode: q.get('mode') || 'royale', loc: q.get('loc') || null, ip: q.get('ip') || null } : null; // 17.1 (MM): a Quick Play room from the Matchmaker
+      const ok = await this.core.init(code, o);
+      if (this.bg.length) await this.drain();
       return new Response(ok ? 'ok' : 'taken', { status: ok ? 200 : 409 });
     }
     if (req.headers.get('Upgrade') === 'websocket') {
@@ -99,7 +115,7 @@ export class Room extends DurableObject {
         return new Response(null, { status: 101, webSocket: pair[0] });
       }
       this.ctx.acceptWebSocket(pair[1]);
-      pair[1].serializeAttachment({ pid: null });
+      pair[1].serializeAttachment({ pid: null, ip: (req.headers.get('X-CC-IP') || '').slice(0, 32) || null, loc: (req.headers.get('X-CC-Loc') || '').slice(0, 8) || null }); // 17.1 (MM)
       await this.core.onOpen();
       return new Response(null, { status: 101, webSocket: pair[0] });
     }

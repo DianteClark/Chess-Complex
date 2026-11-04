@@ -1,0 +1,98 @@
+/* 17.1 (MM): Quick Play, Open Matches (Browse), Public party switch. Owned by MM. */
+
+/* ---- Play screen: Quick Play + Browse row above Host / Play vs Bots ---- */
+#mm-row { display: flex; gap: 8px; max-width: 608px; margin: 0 auto 8px; }
+#mm-row .btn { margin: 0; min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; font-size: 14px; letter-spacing: .08em; white-space: nowrap; }
+#mm-row .bi { width: 18px; height: 18px; flex: none; fill: currentColor; }
+#mm-row .mm-quick { flex: 1 1 auto; color: #d9f6ff; background: linear-gradient(180deg, rgba(34, 74, 96, .95), rgba(14, 36, 52, .95)); box-shadow: inset 0 0 0 1px rgba(120, 214, 255, .45), 0 0 18px rgba(80, 190, 255, .12); }
+#mm-row .mm-quick em { font-style: normal; font-size: 11px; letter-spacing: .06em; text-transform: none; color: rgba(190, 236, 255, .75); font-weight: 500; }
+#mm-row .mm-browse { flex: 0 0 auto; }
+#mm-row.solo .mm-browse { flex: 1 1 auto; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .play-foot:has(#mm-row) { display: flex; gap: 8px; justify-content: center; align-items: stretch; }
+  .play-foot #mm-row { margin: 0; flex: 0 1 auto; }
+  .play-foot:has(#mm-row) .play-btns { flex: 0 1 520px; margin: 0; }
+  #mm-row .btn { min-height: 48px; }
+  #mm-row .mm-quick em { display: none; }
+}
+
+/* ---- Host screen: Public / Private switch (cloud leader only) ---- */
+.mm-pub-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .08); display: flex; align-items: center; gap: 12px; }
+.mm-pub-row p { margin: 0; text-align: left; font-size: 12px; line-height: 1.35; color: var(--mute, #a59fb8); flex: 1; }
+.mm-switch { flex: none; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 4px; background: none; border: 0; color: #f2ecdc; font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.mm-switch i { position: relative; width: 40px; height: 22px; border-radius: 11px; background: rgba(255, 255, 255, .12); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); transition: background .2s; }
+.mm-switch i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #d8d2c4; transition: transform .2s, background .2s; }
+.mm-switch.on i { background: rgba(80, 200, 140, .5); box-shadow: inset 0 0 0 1px rgba(120, 240, 170, .6); }
+.mm-switch.on i::after { transform: translateX(18px); background: #eafff2; }
+.mm-switch:disabled { opacity: .5; cursor: default; }
+.mm-switch:focus-visible { outline: 2px solid var(--gold, #f0c25e); outline-offset: 2px; border-radius: 6px; }
+
+/* ---- Join screen in Quick Play mode: the card replaces the code entry; no ready step ---- */
+#s-join.mm-qp .code-panel, #s-join.mm-qp .join-help, #s-join.mm-qp #btn-ready, #s-join.mm-qp #join-lobby-panel .hint { display: none !important; }
+.mm-card { display: flex; flex-direction: column; gap: 12px; }
+.mm-card.hidden { display: none; }
+.mm-head { display: flex; align-items: center; gap: 12px; }
+.mm-head b { display: block; font-family: Cinzel, serif; font-size: 20px; color: var(--gold-hi, #fff3cf); }
+.mm-head em { font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: #8fdcff; }
+.mm-glyph { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: linear-gradient(180deg, rgba(60, 130, 170, .55), rgba(20, 50, 72, .8)); box-shadow: inset 0 0 0 1px rgba(140, 220, 255, .35); }
+.mm-glyph svg { width: 20px; height: 20px; fill: #d9f6ff; }
+.mm-state { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: rgba(0, 0, 0, .22); }
+.mm-state b { display: block; font-size: 15px; color: #f2ecdc; }
+.mm-state p { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--mute, #a59fb8); }
+.mm-state p:empty { display: none; }
+.mm-state.err b { color: #ffb4a8; }
+.mm-spin { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 3px solid rgba(143, 220, 255, .22); border-top-color: #8fdcff; animation: mmspin .9s linear infinite; }
+@keyframes mmspin { to { transform: rotate(360deg); } }
+body.reduced .mm-spin { animation: none; border-top-color: rgba(143, 220, 255, .22); border-right-color: #8fdcff; }
+.mm-seats { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; color: #f2ecdc; }
+.mm-dots { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.mm-dots i { width: 12px; height: 12px; border-radius: 50%; background: rgba(255, 255, 255, .1); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .2); }
+.mm-dots i.on { background: #8fdcff; box-shadow: 0 0 8px rgba(143, 220, 255, .6); }
+.mm-cd { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 12px; background: linear-gradient(90deg, rgba(240, 194, 94, .16), rgba(240, 194, 94, .04)); box-shadow: inset 0 0 0 1px rgba(240, 194, 94, .35); }
+.mm-cd > b { flex: none; min-width: 52px; text-align: center; font-family: Cinzel, serif; font-size: 34px; line-height: 1; color: var(--gold, #f0c25e); text-shadow: 0 0 14px rgba(240, 194, 94, .45); font-variant-numeric: tabular-nums; }
+.mm-cd div b { display: block; font-size: 15px; color: #f2ecdc; }
+.mm-cd div p { margin: 2px 0 0; font-size: 12px; color: var(--mute, #a59fb8); }
+.mm-card .row2 { margin: 0; }
+.mm-card .btn { margin: 0; min-height: 40px; }
+.mm-join-browse { margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; }
+.mm-join-browse .bi { width: 16px; height: 16px; fill: currentColor; }
+
+/* ---- Open Matches (Browse) ---- */
+#s-browse .bar .mm-refresh { min-width: 40px; height: 40px; padding: 0 12px; border-radius: 12px; border: 0; background: rgba(255, 255, 255, .06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); color: #f2ecdc; font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; justify-self: end; }
+.mm-filters { display: flex; gap: 6px; overflow-x: auto; padding: 4px 16px 10px; scrollbar-width: none; }
+.mm-filters::-webkit-scrollbar { display: none; }
+.mm-filters button { flex: none; min-height: 36px; padding: 0 14px; border-radius: 18px; border: 0; background: rgba(255, 255, 255, .06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); color: #d8d2c4; font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.mm-filters button.on { color: #2b1a03; background: var(--gold-face, #f0c25e); box-shadow: none; }
+.mm-list { display: flex; flex-direction: column; gap: 8px; max-width: 640px; margin: 0 auto; }
+.mm-room { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--glass, rgba(30, 26, 46, .85)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+.mm-room.hot { box-shadow: inset 0 0 0 1px rgba(240, 194, 94, .45); }
+.mm-room .mm-info { flex: 1; min-width: 0; }
+.mm-room .mm-info b { display: block; font-size: 15px; color: #f2ecdc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mm-room .mm-info em { display: flex; flex-wrap: wrap; white-space: nowrap; gap: 6px; align-items: center; font-style: normal; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #8fdcff; }
+.mm-room.hot .mm-info em { color: var(--gold, #f0c25e); }
+.mm-near { padding: 1px 6px; border-radius: 6px; background: rgba(80, 200, 140, .18); color: #9ff0c4; letter-spacing: .04em; }
+.mm-room .mm-n { flex: none; text-align: center; min-width: 46px; }
+.mm-room .mm-n b { display: block; font-size: 16px; color: #f2ecdc; font-variant-numeric: tabular-nums; }
+.mm-room .mm-n span { font-size: 11px; color: var(--mute, #a59fb8); }
+.mm-room .btn { flex: none; margin: 0; min-height: 40px; min-width: 72px; }
+.mm-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 32px 20px; color: var(--mute, #a59fb8); }
+.mm-empty svg { width: 36px; height: 36px; fill: rgba(143, 220, 255, .7); }
+.mm-empty b { color: #f2ecdc; font-size: 15px; }
+.mm-empty p { margin: 0; font-size: 13px; line-height: 1.45; max-width: 320px; }
+.mm-empty.err svg { fill: #ffb4a8; }
+.mm-empty .btn { margin-top: 6px; min-height: 40px; }
+.mm-foot .btn { max-width: 608px; margin: 0 auto; display: block; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .mm-filters { padding-bottom: 6px; }
+  .mm-list { max-width: 760px; display: grid; grid-template-columns: 1fr 1fr; }
+  .mm-list .mm-empty { grid-column: 1 / -1; padding: 16px; }
+  .mm-foot .btn { max-width: 420px; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .mm-card:not(.hidden) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); grid-template-areas: "head state" "seats state"; gap: 8px 16px; align-items: center; padding-top: 12px; padding-bottom: 12px; }
+  .mm-card > .mm-head { grid-area: head; }
+  .mm-card > .mm-seats { grid-area: seats; }
+  .mm-card > .mm-state, .mm-card > .mm-cd { grid-area: state; }
+  .mm-card > .btn, .mm-card > .row2 { grid-column: 1 / -1; }
+  .mm-card .mm-dots i { width: 10px; height: 10px; }
+}

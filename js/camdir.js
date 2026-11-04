@@ -22,7 +22,7 @@ export class CamDirector {
     this.reset();
   }
   reset() {
-    this.g = null; this.user = false; this.userAt = -9; this.finger = false; this.pend = null; this.relAt = -9; this.watch = null;
+    this.g = null; this.user = false; this.userAt = -9; this.userMine = false; this.holdAt = -9; this.finger = false; this.pend = null; this.relAt = -9; this.watch = null;
     this.actor = null; this.box = null; this.fade = null; this.fadeA = 0; this.shotBack = null; this.myTurnAt = -1; this.speed = 1;
   }
   // ------------------------------------------------------------------ policy
@@ -82,6 +82,7 @@ export class CamDirector {
     z = clampN(z ?? T.z, r.minZ || 1, r.maxZ || 999);
     [x, y] = this.clampXY(x ?? T.x, y ?? T.y, z);
     if (this.finger && !o.force) { this.pend = { x, y, z, o }; this.stats.held++; return 0; }
+    this.pend = null; // IX 17.1: a newer beat supersedes one held back by a finger (a stale pend used to fire 0.35 s later and pull the camera off the actor)
     if (this.g && Math.hypot(x - this.g.x1, y - this.g.y1) < 0.08 && Math.abs(Math.log(z / this.g.z1)) < 0.02) return Math.max(0, this.g.t0 + this.g.dur - this.clock) / this.speed;
     let dur = this.durFor(x, y, z);
     if (!dur) { if (!this.g) { c.tx = x; c.ty = y; c.tz = z; } return 0; }
@@ -103,15 +104,22 @@ export class CamDirector {
   turn(id) {
     const r = this.r, d = r.disp.get(id); this.actor = id; this.box = null; this.shotBack = null;
     if (id === r.myId) { this.user = false; this.myTurnAt = -1; this.pend = null; }
-    else if (this.user && this.spectating() && r.real - this.userAt > 6) this.user = false; // spectators have no 'next turn': a pan holds ~6 s, then the next beat takes over
+    // spectators have no 'next turn': a pan holds ~6 s, then the next beat takes over. IX 17.1: the same for a player in
+    // 'Follow every turn' (a look around during the bots' turns no longer parks the camera until my next turn), and a pan
+    // or pinch made during my own turn (planning my move) ends when the next actor's turn plays
+    else if (this.ends(id)) this.user = false;
     if (!d || !this.worth(id) && id !== this.watch) return 0;
     const p = this.plan({ x0: d.tx, y0: d.ty, x1: d.tx, y1: d.ty }, { m: 2.3 });
     const close = r.defaultZoom(), z = p.z >= close * 0.8 && p.z <= close * 1.25 ? p.z : close;
     return this.glide(p.x, p.y, z, { actor: id, kind: 'turn', beat: true });
   }
+  // IX 17.1: does a manual override end when `id`'s turn starts? (see turn())
+  ends(id) { const r = this.r; return !!this.user && id !== r.myId && (this.userMine || ((this.spectating() || this.mode === 'all') && r.real - this.userAt > 6)); }
   // Estimated lead-in for the next actor (timeline seconds) without moving anything.
   lead(id) {
-    const r = this.r, d = r.disp.get(id); if (!d || !this.allowed(id, 'turn') || (!this.worth(id) && id !== this.watch)) return 0;
+    const r = this.r, d = r.disp.get(id), u0 = this.user; if (this.ends(id)) this.user = false; // IX 17.1: lead-in for a turn that will end the override
+    const ok = d && this.allowed(id, 'turn'); this.user = u0;
+    if (!ok || (!this.worth(id) && id !== this.watch)) return 0;
     const u = r.state && unitById(r.state, id), x = u ? u.x : d.tx, y = u ? u.y : d.ty;
     const p = this.plan({ x0: x, y0: y, x1: x, y1: y }, { m: 2.3 }), T = this.tgt();
     return this.durFor(p.x, p.y, p.z, { x: T.x, y: T.y, z: T.z }) / Math.max(1, this.speed);
@@ -147,9 +155,9 @@ export class CamDirector {
     return t;
   }
   // ------------------------------------------------------------------ input
-  hold() { const c = this.r.cam; this.finger = true; if (this.g) { if (!this.mine()) this.pend = { x: this.g.x1, y: this.g.y1, z: this.g.z1, o: { actor: this.actor, kind: 'act' } }; this.g = null; } this.shotBack = null; this.fade = null; this.fadeA = 0; c.tx = c.x; c.ty = c.y; c.tz = c.z; c.vx = c.vy = c.vz = 0; }
+  hold() { const c = this.r.cam; this.finger = true; this.holdAt = this.r.real; if (this.g) { if (!this.mine()) this.pend = { x: this.g.x1, y: this.g.y1, z: this.g.z1, o: { actor: this.actor, kind: 'act' } }; this.g = null; } this.shotBack = null; this.fade = null; this.fadeA = 0; c.tx = c.x; c.ty = c.y; c.tz = c.z; c.vx = c.vy = c.vz = 0; }
   release() { if (!this.finger) return; this.finger = false; this.relAt = this.r.real; if (this.mine()) this.pend = null; }
-  manual() { this.user = true; this.userAt = this.r.real; this.g = null; this.pend = null; this.shotBack = null; } // pan / pinch / wheel
+  manual() { this.user = true; this.userAt = this.r.real; this.userMine = this.mine(); this.g = null; this.pend = null; this.shotBack = null; } // pan / pinch / wheel
   mine() { const r = this.r; return !!(r.state && r.myId != null && r.state.active === r.myId && !r.state.over); }
   // ------------------------------------------------------------------ per frame
   // Timeline pace from the backlog of queued visuals (timeline seconds). R 15.1: 1x (real speed) until the backlog is
@@ -179,7 +187,8 @@ export class CamDirector {
       if (f.t >= 0.28) { this.fade = null; this.fadeA = 0; }
       return true;
     }
-    if (this.pend && !this.finger && r.real - this.relAt > 0.35) { const p = this.pend; this.pend = null; this.glide(p.x, p.y, p.z, p.o); }
+    if (this.finger && r.real - this.holdAt > 8) this.release(); // IX 17.1: safety: a touch whose up/cancel never arrived must not freeze the director for good
+    if (this.pend && !this.finger && r.real - this.relAt > (this.mine() ? 0.35 : 0.15)) { const p = this.pend; this.pend = null; this.glide(p.x, p.y, p.z, p.o); }
     if (this.shotBack && this.clock >= this.shotBack.at && !this.finger) { const b = this.shotBack; this.shotBack = null; if (!this.user) this.glide(null, null, b.z, { force: true }); }
     const g = this.g; if (!g) return false;
     const D = g.dur, s = Math.min(1, (this.clock - g.t0) / D), s2 = s * s, s3 = s2 * s;

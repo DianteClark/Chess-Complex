@@ -540,4 +540,135 @@ module.exports = function register(S, { L, match: match0, sleep, tap, autoplay }
       run.check(!errorsOn(run), 'page errors');
     } finally { try { await run.ctx.close(); } catch {} try { await run.vb.close(); } catch {} }
   };
+
+  // ---- 17.1 (V2) ----
+  // lobby card of `pid` lit on page p (active screen only); in a match: the voice ring under the piece or the speaking set
+  // lit = .speaking AND the glow really drawn (computed box-shadow of the avatar has the 3px speaking ring): party ready
+  // states (pm-ready ring, pm-wait pulse animation) used to override it after Back to Party
+  const litFn = (p) => { const sc = document.querySelector('.screen.active'); const x = sc && [...sc.querySelectorAll('.pcard[data-pid]')].find((q) => q.dataset.pid === p); const av = x && x.querySelector('.pc-av'); return !!(x && x.classList.contains('speaking') && av && / 3px/.test(getComputedStyle(av).boxShadow) && /rgb\(92, 255, 157\)/.test(getComputedStyle(av).boxShadow)); };
+  const cardLit = (p, pid) => p.evaluate(litFn, pid);
+  const cardInfo = (p, pid) => p.evaluate((p) => { const sc = document.querySelector('.screen.active'); const x = sc && [...sc.querySelectorAll('.pcard[data-pid]')].find((q) => q.dataset.pid === p); const av = x && x.querySelector('.pc-av'); return x && { cls: x.className, shadow: av && getComputedStyle(av).boxShadow }; }, pid);
+  const vdiag = (p) => p.evaluate(async () => { const { voice: v } = await import('/js/voice.js'); const A = await import('/js/audio.js'); const b = A.buses(); return { state: v.state, open: v.open, muted: !!v.muted, ptt: v.ptt, ac: v.ac && v.ac.state, acSame: v.ac === b.ac, myAn: !!v.myAn, lv: +v.level(v.myAn).toFixed(4), calls: [...v.calls.values()].map((e) => ({ an: !!e.an, lv: +v.level(e.an).toFixed(4) })), speaking: [...v.speaking], track: !!(v.mic && v.mic.getAudioTracks()[0].enabled), screen: (document.querySelector('.screen.active') || {}).id }; });
+  const vjoinBoth = async (run, host, c) => {
+    await tap(c, '#vc-join [data-vc="join"]');
+    await tap(host, '#vc-host [data-vc="join"]');
+    const ok = await waitV(c, async () => (await import('/js/voice.js')).voice.stats.streams >= 1, null, 12000) && await waitV(host, async () => (await import('/js/voice.js')).voice.stats.streams >= 1, null, 6000);
+    run.check(ok, 'voice: media streams never arrived on both sides');
+  };
+  const setMode = (p, open) => p.evaluate(async (open) => { const { voice } = await import('/js/voice.js'); voice.setOpen(open); }, open);
+
+  // V4: Open Mic <-> Push to Talk round trip. In Open Mic the HUD mic button mutes/unmutes (never changes the mode);
+  // the mode is switched from the lobby voice panel and from the in-match voice panel (quick chat Players tab), both ways.
+  S['V4-voice-mode-toggle'] = async (run) => {
+    await voiceCtx(run);
+    try {
+      const { host, code } = await L.hostLobby(run, { mode: 'royale' });
+      const c = await L.clientJoin(run, 'c1', code);
+      await vjoinBoth(run, host, c);
+      const mode = (p) => p.evaluate(async () => { const { voice: v } = await import('/js/voice.js'); const b = document.querySelector('#vc-ptt'); return { open: v.open, muted: !!v.muted, track: !!(v.mic && v.mic.getAudioTracks()[0].enabled), btn: b && { open: b.classList.contains('open'), muted: b.classList.contains('muted'), label: b.getAttribute('aria-label') } }; });
+      // lobby panel: segmented mode control, both ways
+      run.check(await L.visible(c, '#vc-join [data-vc="mode-open"]') && await L.visible(c, '#vc-join [data-vc="mode-ptt"]'), 'lobby: no Open Mic / Push to Talk mode control');
+      await tap(c, '#vc-join [data-vc="mode-open"]'); await sleep(250);
+      let m = await mode(c); run.check(m.open && m.track, `lobby: Open Mic did not turn on ${JSON.stringify(m)}`);
+      await tap(c, '#vc-join [data-vc="mode-ptt"]'); await sleep(250);
+      m = await mode(c); run.check(!m.open && !m.track, `lobby: Push to Talk did not come back ${JSON.stringify(m)}`);
+      await tap(c, '#vc-join [data-vc="mode-open"]'); await sleep(250);
+      // into the match in Open Mic
+      await L.startMatch(run, host, { bots: 2, clients: [c] });
+      await autoplay(host); await autoplay(c);
+      m = await mode(c); run.check(m.open && m.track && m.btn.open, `match: Open Mic not kept into the match ${JSON.stringify(m)}`);
+      // HUD mic tap in Open Mic = mute, again = unmute; the mode stays Open Mic
+      await tap(c, '#vc-ptt'); await sleep(250);
+      m = await mode(c); run.check(m.open && m.muted && !m.track && m.btn.muted && /unmute/i.test(m.btn.label), `match: HUD tap in Open Mic should mute ${JSON.stringify(m)}`);
+      await run.shot('c1', 'open-mic-muted');
+      await tap(c, '#vc-ptt'); await sleep(250);
+      m = await mode(c); run.check(m.open && !m.muted && m.track && !m.btn.muted, `match: second HUD tap should unmute ${JSON.stringify(m)}`);
+      // in-match voice panel (quick chat > Players): switch to Push to Talk and back
+      await skipSetup(c);
+      await tap(c, '#s-game [data-act="emotes"]');
+      await c.evaluate(() => { const t = document.querySelector('#emote-menu [data-tab="players"]'); t && t.click(); }); await sleep(250);
+      run.check(await L.visible(c, '#emote-menu [data-vc="mode-ptt"]'), 'match: no mode control in the in-match voice panel');
+      await run.shot('c1', 'match-voice-panel');
+      await c.evaluate(() => document.querySelector('#emote-menu [data-vc="mode-ptt"]').click()); await sleep(250);
+      m = await mode(c); run.check(!m.open && !m.muted && !m.track && !m.btn.open, `match: panel Push to Talk ${JSON.stringify(m)}`);
+      // PTT unchanged: hold = live, release = off; a tap does not switch modes
+      const box = await c.locator('#vc-ptt').boundingBox().catch(() => null);
+      await c.evaluate(() => { const t = document.querySelector('#emote-menu'); t && t.classList.add('hidden'); });
+      if (box) {
+        await c.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await c.mouse.down(); await sleep(200);
+        const held = await mode(c); await c.mouse.up(); await sleep(200);
+        const rel = await mode(c);
+        run.check(held.track && !held.open && !rel.track && !rel.open, `match: PTT hold/release ${JSON.stringify({ held, rel })}`);
+      } else run.check(false, 'match: no HUD mic button in PTT');
+      await tap(c, '#s-game [data-act="emotes"]');
+      await c.evaluate(() => { const t = document.querySelector('#emote-menu [data-tab="players"]'); t && t.click(); }); await sleep(250);
+      await c.evaluate(() => document.querySelector('#emote-menu [data-vc="mode-open"]').click()); await sleep(250);
+      m = await mode(c); run.check(m.open && m.track && m.btn.open, `match: panel back to Open Mic ${JSON.stringify(m)}`);
+      // a mute is per Open Mic session: switching to PTT and back starts unmuted
+      run.check(!errorsOn(run), 'page errors');
+    } finally { try { await run.ctx.close(); } catch {} try { await run.vb.close(); } catch {} }
+  };
+
+  // V5: speaking indicators survive lobby -> match -> results -> Back to Party -> lobby -> match, for the local mic and
+  // for the remote peer, in Open Mic (analyser path) and push to talk (talk flags).
+  S['V5-voice-indicator-cycle'] = async (run) => {
+    await voiceCtx(run);
+    try {
+      const { host, code } = await L.hostLobby(run, { mode: 'royale' });
+      const c = await L.clientJoin(run, 'c1', code);
+      const cpid = await L.clientPid(c);
+      const hpid = await c.evaluate(() => { const l = window.__cc.session.lobby || []; const h = l.find((p) => p.pid === 'me' || p.st === 'leader'); return h ? h.pid : 'me'; });
+      await vjoinBoth(run, host, c);
+      const lobbyRound = async (tag, ready) => {
+        if (ready) { await tap(c, '#btn-ready'); await sleep(500); run.note(`${tag}: c1 card on host ${JSON.stringify(await cardInfo(host, cpid))}`); }
+        // c1 open mic (fake device tone): c1's card on the host, and c1's own card on c1
+        await setMode(c, true);
+        const a = await waitV(host, litFn, cpid, 6000);
+        const b = await waitV(c, litFn, cpid, 4000);
+        if (!a || !b) run.note(`${tag} diag host ${JSON.stringify(await vdiag(host))} ${JSON.stringify(await cardInfo(host, cpid))} c1 ${JSON.stringify(await vdiag(c))} ${JSON.stringify(await cardInfo(c, cpid))}`);
+        run.check(a, `${tag}: host lobby card of c1 not lit with c1 on open mic`);
+        run.check(b, `${tag}: c1's own lobby card not lit on open mic`);
+        await setMode(c, false);
+        const quiet = await waitV(host, async (p) => !(await import('/js/voice.js')).voice.speaking.has(p), cpid, 4000) && !(await cardLit(host, cpid));
+        if (!quiet) run.note(`${tag} still-lit diag host ${JSON.stringify(await vdiag(host))} flag ${await host.evaluate(async (p) => (await import('/js/voice.js')).voice.flag.has(p), cpid)} c1 ${JSON.stringify(await vdiag(c))}`);
+        run.check(quiet, `${tag}: c1 card still lit after open mic off`);
+        // host push to talk: the host's card on c1
+        await host.evaluate(async () => { const { voice } = await import('/js/voice.js'); voice.setPtt(true); });
+        const d = await waitV(c, litFn, hpid, 4000);
+        await host.evaluate(async () => { const { voice } = await import('/js/voice.js'); voice.setPtt(false); });
+        run.check(d, `${tag}: c1 lobby card of the host not lit while the host holds Talk`);
+        await run.shot('host', tag);
+      };
+      const matchRound = async (tag) => {
+        await setMode(host, true);
+        const r = await waitV(c, async (p) => { const { voice } = await import('/js/voice.js'); return voice.speaking.has(p) && !!(voice.ringBox && voice.ringBox.childElementCount); }, hpid, 6000);
+        if (!r) run.note(`${tag} diag c1 ${JSON.stringify(await vdiag(c))} host ${JSON.stringify(await vdiag(host))}`);
+        run.check(r, `${tag}: c1 never showed the host speaking (ring) on open mic`);
+        await setMode(host, false); await sleep(300);
+      };
+      await lobbyRound('lobby1');
+      // a member's link drops in the lobby (phone screen off) and comes back: it is back on the voice roster by itself
+      if (!process.env.CC_CLOUD) {
+        for (const p of [host, c]) await p.evaluate(async () => Object.assign((await import('/js/net.js')).NET, { dead: 4000, retry: 1000, hb: 1000 }));
+        await c.evaluate(async () => (await import('/js/net.js')).NET.drop(1500));
+        const gone = await waitV(host, async (p) => !(await import('/js/voice.js')).voice.roster.has(p), cpid, 9000);
+        run.note(`lobby drop: host dropped c1 from the voice roster: ${gone}`);
+        const back = await waitV(host, async ([p, n]) => { const { voice } = await import('/js/voice.js'); return voice.roster.has(p) && voice.calls.size === 1 && voice.stats.streams >= n; }, [cpid, gone ? 2 : 1], 20000).then(async (ok) => ok && waitV(c, async () => { const { voice } = await import('/js/voice.js'); return voice.inRoster() && voice.calls.size === 1; }, null, 5000)); // a quick reconnect replaces the link before the host notices: voice simply stays up
+        if (!back) run.note(`rejoin diag host ${JSON.stringify(await vstate(host))} c1 ${JSON.stringify(await vstate(c))}`);
+        run.check(back, 'c1: not back in voice after its link dropped and reconnected');
+        await sleep(1200);
+      }
+      for (const k of [1, 2]) {
+        await L.startMatch(run, host, { bots: 2, clients: [c] });
+        await autoplay(host); await autoplay(c);
+        await matchRound(`match${k}`);
+        await L.killAllExcept(host, ['me']);
+        run.check(await L.waitResults(host) && await L.waitResults(c), `match${k}: no results`);
+        await sleep(800);
+        await tap(host, '#btn-rematch'); await tap(c, '#btn-rematch'); await sleep(800);
+        await lobbyRound(`lobby${k + 1}`, k === 2);
+      }
+      run.check(!errorsOn(run), 'page errors');
+    } finally { try { await run.ctx.close(); } catch {} try { await run.vb.close(); } catch {} }
+  };
 };

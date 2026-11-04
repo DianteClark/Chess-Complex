@@ -53,6 +53,14 @@ export function pick(g, wx, wy, z, prefer) {
   const owner = (t) => { if (g.mode === 'move') return null; const hit = cands.filter((c) => c.opt && c.opt.tiles.some((p) => same(p, t))); return hit.length === 1 ? hit[0] : null; };
   const u = unitAt(r, s, wx, wy);
   const ut = u ? { x: u.x, y: u.y } : null;
+  // IX 17.1: a head poking up into a legal target's square never steals the tap. The tile under the finger wins over a
+  // body standing on another tile unless that body is itself a legal target (an enemy you can hit, touched on its
+  // head); my own piece (and any piece that is not a target) wins only taps on its own tile. The boss King's head
+  // covers ~70% of the tile above, a Queen's ~15%: before this, "move one up" there opened the inspect card instead.
+  if (ut && !same(ut, raw) && !find(ut)) {
+    if (find(raw)) return { tile: raw, cand: find(raw), how: 'tile' };
+    const ar = owner(raw); if (ar && !same(ar, ut)) return { tile: raw, cand: ar, how: 'area' };
+  }
   // 1. a piece's body selects the piece's tile: what you see is what you tap (sprites stand taller than their tile).
   //    A legal target there (attack the enemy you touched, even on its head) or else inspect; never snaps away.
   if (ut) return find(ut) ? { tile: ut, cand: find(ut), how: 'body' } : { tile: ut, cand: owner(ut), how: 'unit' };
