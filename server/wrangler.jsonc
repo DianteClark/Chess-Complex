@@ -31,5 +31,8 @@
   "triggers": { "crons": ["5 0 * * *", "10 0 * * 1"] },
   // keep_vars: dashboard variables (TURNSTILE_SITE_KEY) survive every GitHub-triggered deploy; secrets always do
   "keep_vars": true,
+  "workers_dev": true,
+  // Preview URLs are not generated for Workers with Durable Objects anyway
+  "preview_urls": false,
   "observability": { "enabled": true }
 }

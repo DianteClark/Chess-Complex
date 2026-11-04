@@ -406,7 +406,7 @@ export function closePanel() { if (modal) { modal.classList.add('hidden'); shown
 // On the old site, once the cloud copy is current, a one-time card opens the new home with the transfer code in the
 // URL fragment (never sent to any server). The new home applies it at start: silently when it has no progress yet,
 // with the usual confirm otherwise. ?home=<url> (kept for the tab) makes any origin act as the old site, for tests.
-export const CLOUD_HOME = 'https://chess-complex.<subdomain>.workers.dev/'; // lead fills in the deployed URL
+export const CLOUD_HOME = 'https://chess-complex.chesscomplex.workers.dev/'; // 17.0.3: the live Worker
 const OLD_HOSTS = ['dianteclark.github.io'];
 const MOVE_KEY = 'cc_move_v1';
 function moveHome() {

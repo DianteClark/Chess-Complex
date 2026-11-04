@@ -15,7 +15,7 @@ import { NET } from './net.js';
 import { stateHash, protoVer } from './statehash.js';
 
 // The lead fills this in once the Worker is deployed (placeholder = cloud off by default).
-export const CLOUD_DEFAULT = 'https://chess-complex.<subdomain>.workers.dev';
+export const CLOUD_DEFAULT = 'https://chess-complex.chesscomplex.workers.dev';
 
 const HC = { ok: null, at: 0, p: null }; // health cache (also filled by the same-origin probe)
 const qs = () => { try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(''); } };
