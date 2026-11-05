@@ -50,7 +50,7 @@ export function stateHash(s) {
 // Protocol + engine fingerprint. A short scripted match (fixed players, seed, moves, ends) runs through createMatch
 // and applyAction; any engine/data change that alters outcomes changes the fingerprint, so a stale client is told
 // to update ({t:'bye', why:'update'}) instead of desyncing. Bump PROTO when the wire format changes.
-export const PROTO = 2; // 2 = 17.0 (C2): Bishop Sidestep, Sudden Death events, King/preset retune (the scripted fingerprint below does not reach them)
+export const PROTO = 3; // 3 = 18.0 (NE): Nemesis (opts.nemesis -> s.nemesis, Vendetta / Thorn rules). 2 = 17.0 (C2): Bishop Sidestep, Sudden Death events, King/preset retune (the scripted fingerprint below does not reach them)
 let _ver = null;
 export function protoVer() {
   if (_ver) return _ver;

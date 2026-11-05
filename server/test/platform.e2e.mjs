@@ -98,7 +98,10 @@ await check('/turn without secrets = the public PEER_OPTS list', async () => {
   assert(r.status === 200 && j.src === 'public' && JSON.stringify(j.iceServers) === JSON.stringify(PEER_OPTS.config.iceServers), JSON.stringify(j));
 });
 await check('/turn with (fake) secrets = Cloudflare credentials, reused across requests', async () => {
-  const a = (await getJ(FAKED + '/turn')).j, b = (await getJ(FAKED + '/turn')).j;
+  // 18.0 (LV): credentials only with a seat token from the Room's welcome; without one = the public list, no API call
+  const n = (await getJ(FAKED + '/turn')).j; assert(n.src === 'public' && n.err === 'token' && fake.turn === 0, 'no token ' + JSON.stringify(n));
+  const { cs } = await roomAt(FAKED, ['Tok']); const tok = encodeURIComponent(cs[0].last('welcome').turn || ''); cs[0].close();
+  const a = (await getJ(FAKED + '/turn?t=' + tok)).j, b = (await getJ(FAKED + '/turn?t=' + tok)).j;
   assert(a.src === 'cf' && a.iceServers[0].username === 'user1' && b.iceServers[0].username === 'user1' && fake.turn === 1, JSON.stringify(a) + ' calls ' + fake.turn);
   assert(a.iceServers.some((s) => JSON.stringify(s.urls).includes('stun:stun.l.google.com')), 'public STUN kept');
   return `ttl ${a.ttl} s`;

@@ -862,6 +862,8 @@ export function actionLine(g, ev, s, myId) {
       case 'promote': if (e.id === seg.actor && PIECES_NAME(e)) { seg.extra.push(`<span class="x">${e.type === 'evolve' ? 'evolved:' : 'honed'}</span><b>${esc(PIECES_NAME(e))}</b>`); dirty = true; } break;
       case 'revive': { const v = s.units.find((q) => q.id === e.id); if (v) { seg.extra.push(`<span class="x">revived</span>${nameHTML(v)}`); dirty = true; } break; }
       case 'crowned': if (e.id === seg.actor) { seg.extra.push('<b style="color:#ffd24d">took the Crown</b>'); dirty = true; } break;
+      case 'vendetta': seg.extra.push('<b style="color:#ff4d5e">VENDETTA</b>'); dirty = true; break; // 18.0 (NE): Nemesis taken down
+      case 'nemesis': seg.extra.push(`<b style="color:#ff4d5e">NEMESIS x${e.n | 0}</b>`); dirty = true; break; // 18.0 (NE)
       default: break;
     }
   }

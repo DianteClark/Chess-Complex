@@ -21,6 +21,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { protoVer } from '../../js/statehash.js';
 import { verifyPlayer } from './player.js';
+import { rkPub, rewardFor, SEASON_REWARDS } from '../../js/rivals.js'; // 18.0 (NE): rank tiers on rows, weekly season rewards
 import { dayNum, utcDayKey, DAY_RE } from '../../js/daily.js';
 import { RATING, rateMatch, ratedMode, seasonId, seasonEnds, seasonPoints, verifiedSeats, cleanName, cleanTitle, cleanTok, verifyStart, verifyStep, checkActions, VERIFY } from './lbcore.js';
 
@@ -65,6 +66,7 @@ export async function scheduled(event, env, ctx) {
   if (!env || !env.BOARD) return;
   const t = (event && event.scheduledTime) || Date.now();
   try { await main(env).rollover(t); } catch (e) { console.log('[board] rollover failed', String(e && e.message || e)); }
+  try { await main(env).deliver(); } catch (e) { console.log('[board] rewards failed', String(e && e.message || e)); } // 18.0 (NE): season rewards -> Player inboxes (retries what is left)
   if (!event || event.cron !== '10 0 * * 1') { try { await main(env).prune(t); await vq(env).kick(); } catch {} }
 }
 
@@ -101,7 +103,8 @@ export async function routes(req, env, url, ctx) {
     if (!testOn(env)) return json({ error: 'not found' }, 404);
     const b = m === 'POST' ? await req.json().catch(() => ({})) : {};
     if (p === '/lb/test/rate') return json({ r: await rate(env, b.rec) });
-    if (p === '/lb/test/rollover') return json(await main(env).rollover(+b.now || Date.now()));
+    if (p === '/lb/test/rollover') { const r = await main(env).rollover(+b.now || Date.now()); if (b.deliver) r.rewards = await main(env).deliver(); return json(r); } // 18.0 (NE): deliver = run the reward queue like the cron
+    if (p === '/lb/test/rewards') return json(await main(env).rewardQ()); // 18.0 (NE)
     if (p === '/lb/test/reset') { await main(env).reset(); await vq(env).reset(); return json({ ok: true }); }
     if (p === '/lb/test/cpu') return json(await vq(env).cpu(q.get('reset') === '1'));
     if (p === '/lb/test/verify') return json(await vq(env).verifyNow(b, b.budget || null));
@@ -219,6 +222,7 @@ export class Board extends DurableObject {
       this.sql.exec('DELETE FROM season WHERE sid < ?', cur);
       archived = { sid: last, kept: top.length };
       this.setMeta('last', last);
+      this.queueRewards(last, top); // 18.0 (NE)
     } else if (known && known < cur && !this.getMeta('last', null)) this.setMeta('last', known);
     this.setMeta('season', cur);
     return { sid: cur, rolled: true, archived };
@@ -246,7 +250,42 @@ export class Board extends DurableObject {
     const o = { rank, name: r.name || 'Player', avatar: r.avatar || '', title: r.title || '', v: Math.round(r.v), games: r.games ?? undefined, wins: r.wins ?? undefined };
     if (r.place != null) { o.place = r.place; o.kills = r.kills; }
     if (cid && r.cid === cid) o.me = true;
+    const k = r.r != null && r.games != null && r.cid && !('pts' in r) && !('score' in r) ? r : r.cid ? this.one('SELECT r, games FROM rating WHERE cid = ?', r.cid) : null; // 18.0 (NE): Crown Rating tier on every row
+    if (k) o.rk = rkPub(k.r, k.games);
     return o;
+  }
+  // ----- 18.0 (NE): ranks for the Room (lobby badges) + weekly season rewards -----
+  async ranks(cids) {
+    const out = {};
+    for (const c of (Array.isArray(cids) ? cids : []).slice(0, 16)) { if (!CID_RE.test(String(c))) continue; const r = this.one('SELECT r, games FROM rating WHERE cid = ?', c); out[c] = r ? rkPub(r.r, r.games) : rkPub(RATING.start, 0); }
+    return out;
+  }
+  // The ended season's top finishers (rows of the archive) wait in meta 'rwq' until each Player DO has the item.
+  queueRewards(sid, top) {
+    const cap = SEASON_REWARDS[SEASON_REWARDS.length - 1].max;
+    const list = top.slice(0, cap).map((r, i) => ({ cid: r.cid, rank: i + 1, tries: 0 })).filter((x) => CID_RE.test(String(x.cid || '')) && rewardFor(x.rank));
+    this.setMeta('rwq', { sid, list });
+    this.deliver().catch(() => {}); // best effort now; the crons retry what is left
+  }
+  async rewardQ() { return this.getMeta('rwq', null); }
+  async deliver() {
+    const q = this.getMeta('rwq', null);
+    if (!q || !q.list || !q.list.length) return { sent: 0, dropped: 0, left: 0 };
+    if (this.delivering || !this.env || !this.env.PLAYER) return { sent: 0, dropped: 0, left: q.list.length, busy: !!this.delivering };
+    this.delivering = true;
+    let sent = 0, dropped = 0; const left = [];
+    try {
+      for (const x of q.list) {
+        const rw = rewardFor(x.rank);
+        const item = { id: 'season:' + q.sid, k: 'season', sid: q.sid, rank: x.rank, reward: rw.id, title: rw.title, banner: rw.banner };
+        let ok = null, to;
+        try { ok = await Promise.race([this.env.PLAYER.get(this.env.PLAYER.idFromName(x.cid)).deliver(item), new Promise((r) => { to = setTimeout(() => r(null), 3000); })]); } catch { ok = null; } finally { clearTimeout(to); }
+        if (ok === true) sent++; else if (ok === false || x.tries >= 4) dropped++; else left.push({ ...x, tries: x.tries + 1 });
+      }
+      const cur = this.getMeta('rwq', null);
+      if (cur && cur.sid === q.sid) this.setMeta('rwq', { sid: q.sid, list: left });
+    } finally { this.delivering = false; }
+    return { sid: q.sid, sent, dropped, left: left.length };
   }
   // abandoned ranked runs: started more than LB.dnfAfter ago (or on an earlier day) and never submitted
   dnfRows(o, limit) {

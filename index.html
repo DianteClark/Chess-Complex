@@ -25,6 +25,8 @@
   <link rel="stylesheet" href="css/store10.css">
   <link rel="stylesheet" href="css/lb17.css">
   <link rel="stylesheet" href="css/mm17.css">
+  <link rel="stylesheet" href="css/social18.css"><!-- 18.0 (SO) -->
+  <link rel="stylesheet" href="css/rivals18.css"><!-- 18.0 (NE) -->
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" defer></script>
 </head>
 <body>
@@ -117,8 +119,8 @@
       </div>
       <div class="marks"><i class="mark-ico"></i><b id="marks-title">0</b></div>
     </div>
-    <div class="corner-tr"><button class="icon-btn lb-open" data-go="ranks" aria-label="Leaderboards"><svg><use href="#m-crown"/></svg></button><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
-    <div class="version">v17.3</div>
+    <div class="corner-tr"><button class="icon-btn so-open" data-so="open" aria-label="Friends"><svg><use href="#m-users"/></svg><i class="badge so-badge"></i></button><!-- 18.0 (SO) --><button class="icon-btn lb-open" data-go="ranks" aria-label="Leaderboards"><svg><use href="#m-crown"/></svg></button><button class="icon-btn" data-act="settings" aria-label="Settings"><svg><use href="#i-gear"/></svg></button></div>
+    <div class="version">v18.0</div>
   </section>
 
   <!-- LOADOUT -->
@@ -196,7 +198,7 @@
       </div>
     </div>
     <div class="play-foot">
-      <div class="mm-row" id="mm-row"><button class="btn mm-quick" data-mm="quick" id="btn-quick"><svg class="bi"><use href="#m-bolt"/></svg><span>Quick Play</span><em id="mm-quick-sub">Online</em></button><button class="btn mm-browse" data-go="browse" id="btn-browse"><svg class="bi"><use href="#m-globe"/></svg><span>Browse</span></button></div><!-- 17.1 (MM) -->
+      <div class="mm-row" id="mm-row"><button class="btn mm-quick" data-mm="quick" id="btn-quick"><svg class="bi"><use href="#m-bolt"/></svg><span>Quick Play</span><em id="mm-quick-sub">Online</em></button><button class="btn so-play" data-so="open" id="btn-friends" aria-label="Friends"><svg class="bi"><use href="#m-users"/></svg><span>Friends</span><i class="badge so-badge"></i></button><!-- 18.0 (SO) --><button class="btn mm-browse" data-go="browse" id="btn-browse"><svg class="bi"><use href="#m-globe"/></svg><span>Browse</span></button></div><!-- 17.1 (MM) -->
       <div class="row2 play-btns">
         <button class="btn big" data-go="host" id="btn-host">Host Online</button>
         <button class="btn big gold shine" data-act="start-solo" id="btn-solo">Play vs Bots</button>
@@ -213,6 +215,7 @@
         <div class="code" id="host-code">-----</div>
         <div class="status" id="host-status">Opening room...</div>
         <div class="row2"><button class="btn small" data-act="copy-code">Copy Code</button><button class="btn small" data-act="copy-link">Copy Invite Link</button></div>
+        <button class="btn small wide so-host-inv" data-so="open" id="so-host-inv"><svg class="bi"><use href="#m-users"/></svg><span>Invite Friends</span><i class="badge so-badge"></i></button><!-- 18.0 (SO) -->
         <div class="mm-pub-row hidden" id="mm-pub-row"><button class="mm-switch" data-mm="pub" id="mm-pub" role="switch" aria-checked="false"><i aria-hidden="true"></i><span>Public match</span></button><p id="mm-pub-note">Private: only players with the code can join.</p></div><!-- 17.1 (MM) -->
       </div>
       <div class="panel">
@@ -259,6 +262,13 @@
       <div class="mm-list" id="mm-list"></div>
     </div>
     <div class="play-foot mm-foot"><button class="btn big gold wide shine" data-mm="quick" id="mm-browse-quick">Quick Play</button></div>
+  </section>
+
+  <!-- 18.0 (SO): FRIENDS (js/social.js) -->
+  <section class="screen" id="s-friends">
+    <header class="bar"><button class="back" data-so="back">Back</button><h2>Friends</h2><button class="hdr-btn" data-so="refresh" aria-label="Refresh the friends list">Refresh</button></header>
+    <div class="so-tabs seg" id="so-tabs" role="tablist" aria-label="Friends"></div>
+    <div class="scroll" id="so-body"></div>
   </section>
 
   <!-- TUTORIAL -->
@@ -608,6 +618,8 @@
 </div>
 <div class="splash" id="splash"><img src="icons/icon-192.png" alt=""><div class="sp-name">CHESS COMPLEX</div><div class="sp-bar"><i></i></div></div>
 <div class="toast" id="toast"></div>
+<div class="so-pop hidden" id="so-pop" role="status" aria-live="polite"></div><!-- 18.0 (SO): party invite pop-up -->
+
 <div class="flash" id="ui-flash"></div>
 <div class="ui-wipe" id="ui-wipe" aria-hidden="true"></div>
 <script type="module" src="js/main.js"></script>

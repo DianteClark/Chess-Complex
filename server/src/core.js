@@ -7,6 +7,7 @@ import { LOCATIONS } from '../../js/locations.js';
 import { hostCheck, BOT_LINES } from '../../js/chat.js';
 import { modesIn, groupOf, cleanRules, defaultRules, RULES } from '../../js/party.js';
 import { stateHash, protoVer } from '../../js/statehash.js';
+import { nidOf, cleanNem, nemMap, cleanRk } from '../../js/rivals.js'; // 18.0 (NE)
 import { introHold } from './intro.js';
 
 export const T = {
@@ -24,7 +25,10 @@ export const T = {
   qpFull: 3000,         // 17.1 (MM): ... and when every seat is a human
   leadGrace: 8000,      // 17.1.1 (MM): a dropped leader keeps leading this long (brief app switch) before it passes on
   spamCap: 20, spamRate: 4, // 17.3 (QS): lobby-changing messages per seat: 20 burst, then 4/s
+  specCap: 8, specPerIp: 3, // 18.0 (LV): read-only spectators per room (and per hashed IP)
+  mmRefresh: 240000,    // 18.0 (LV): a listed room re-reports to the Matchmaker on its next activity once this old (MM ttl 10 min)
 };
+const SPEC_T = new Set(['a', 'h', 'snap', 'dl', 'seat', 'over', 'replay']); // 18.0 (LV): the lockstep stream spectators get
 const SPAMMY = new Set(['ready', 'back', 'leave', 'part', 'lead', 'vc']); // 17.3 (QS): see RoomCore.spam
 const VER = protoVer();
 const PIECE_ORDER = ['pawn', 'knight', 'bishop', 'rook', 'queen'];
@@ -121,7 +125,10 @@ export class RoomCore {
   online(pid) { return this.conn(pid).length > 0; }
   sendTo(pid, o) { const s = JSON.stringify(o); for (const x of this.conn(pid)) this.io.send(x.ws, s); }
   sendWs(ws, o) { this.io.send(ws, JSON.stringify(o)); }
-  bcast(o, filter) { const s = JSON.stringify(o); for (const x of this.socks()) if (!filter || filter(x.pid)) this.io.send(x.ws, s); }
+  bcast(o, filter) { const s = JSON.stringify(o); for (const x of this.socks()) if (!filter || filter(x.pid)) this.io.send(x.ws, s); if (!filter && SPEC_T.has(o.t)) this.specCast(s); }
+  // 18.0 (LV): spectators (read-only sockets without a seat)
+  specs(all) { return this.io.specs ? this.io.specs(all) : []; }
+  specCast(s) { for (const x of this.specs()) this.io.send(x.ws, s); }
   player(pid) { return this.R.players.find((p) => p.pid === pid) || null; }
   humans() { return this.R.players.filter((p) => !p.isBot); }
   live() { const m = this.R.m; return !!(m && !m.s.over); }
@@ -157,10 +164,28 @@ export class RoomCore {
   }
   lobbyMsg() {
     const R = this.R;
-    const players = R.players.map((p) => { const o = { pid: p.pid, name: p.name, skin: p.skin, isBot: !!p.isBot, title: p.title || '', st: this.memberState(p) }; if (p.avatar) o.avatar = p.avatar; return o; });
+    const players = R.players.map((p) => { const o = { pid: p.pid, name: p.name, skin: p.skin, isBot: !!p.isBot, title: p.title || '', st: this.memberState(p) }; if (p.avatar) o.avatar = p.avatar; if (p.verified && p.tag) o.tag = p.tag; /* 18.0 (SO): public player tag (Recent Players, add friend) */ if (p.verified && p.nid) o.nid = p.nid; if (p.verified && p.rk) o.rk = p.rk; /* 18.0 (NE): Nemesis id + rank */ return o; });
     return { t: 'lobby', players, code: R.code, mode: R.gameMode, maxP: R.maxP, leader: R.leader, party: this.partyPub(), pub: !!R.pub, qp: !!R.qp, fromQp: !!R.fromQp && !R.qp, cd: R.t.qp && !this.live() ? Math.max(0, R.t.qp - this.now) : 0 }; // 17.1 (MM): pub/qp/cd (ms to the Quick Play start)
   }
-  lobby() { this.qpCheck(); this.bcast(this.lobbyMsg()); this.dirty = true; this.lobbyChanged = true; this.mmSync(); }
+  lobby() { this.qpCheck(); this.bcast(this.lobbyMsg()); this.dirty = true; this.lobbyChanged = true; this.mmSync(); this.soSync(); } // 18.0 (SO): + friends presence
+  // 18.0 (SO): friends presence. Every verified human seat's Player DO hears which room it is in and whether its match is
+  // live, only when that changed (R.so), riding the lobby() calls the room already makes (join, leave, kick, start, over,
+  // away expiry). A seat that left the party is reported once as gone. Background only (io.social), never awaited.
+  soSync() {
+    const R = this.R; if (!R || !this.io.social) return;
+    const so = R.so || (R.so = {}), live = this.live(), seen = {};
+    for (const p of R.players) {
+      if (p.isBot || !p.verified || !p.cid) continue;
+      const st = live && R.m.seats.includes(p.pid) && !p.left ? 'match' : 'lobby', pub = !!R.pub && !live;
+      const k = st + (pub ? '+' : '') + R.gameMode; seen[p.pid] = 1;
+      const was = so[p.pid];
+      if (was && was.cid === p.cid && was.k === k) continue;
+      if (was && was.cid !== p.cid) this.io.social(was.cid, { room: R.code, st: '' });
+      so[p.pid] = { cid: p.cid, k }; this.dirty = true;
+      this.io.social(p.cid, { room: R.code, st, mode: R.gameMode, pub });
+    }
+    for (const pid of Object.keys(so)) if (!seen[pid]) { this.io.social(so[pid].cid, { room: R.code, st: '' }); delete so[pid]; this.dirty = true; }
+  }
 
   // ---------- 17.1 (MM): public matchmaking ----------
   // Quick Play countdown: 2+ humans online -> qpWait (45 s), every seat a human -> qpFull (3 s); fewer than 2 cancels.
@@ -189,11 +214,15 @@ export class RoomCore {
   // are never sent; a room going live, private or away is unlisted.
   mmSync() {
     const R = this.R; if (!R || !this.io.mm) return;
-    const listed = !!R.pub && !this.live();
-    const info = listed ? { code: R.code, mode: R.gameMode, n: R.players.length, h: this.humans().filter((p) => this.online(p.pid)).length, cap: R.maxP, st: R.t.qp ? 'starting' : 'lobby', qp: !!R.qp, loc: R.loc || null, created: R.created, ip: R.pubIp || null } : null;
+    // 18.0 (LV): a public room stays listed while its match is live (st 'live', w spectators of wcap) so Browse can
+    // offer Watch; Quick Play never hands out a live room (mmcore pick). Before 18.0 a live room was unlisted.
+    const listed = !!R.pub, live = this.live();
+    const info = listed ? { code: R.code, mode: R.gameMode, n: R.players.length, h: this.humans().filter((p) => this.online(p.pid)).length, cap: R.maxP, st: live ? 'live' : R.t.qp ? 'starting' : 'lobby', qp: !!R.qp, loc: R.loc || null, created: R.created, ip: R.pubIp || null, ...(live ? { w: this.specs().length, wcap: this.T.specCap } : {}) } : null;
     const key = info ? JSON.stringify(info) : '';
-    if (key === (R.mmKey || '')) return;
-    const was = R.mmKey; R.mmKey = key; this.dirty = true;
+    // 18.0 (LV): unchanged listings re-report once R.mmAt is older than T.mmRefresh (called on room activity, see
+    // mmFresh), so a quiet lobby or a long match is not pruned by the Matchmaker's 10 min ttl while the Room thinks it is listed
+    if (key === (R.mmKey || '') && !(key && this.now - (R.mmAt || 0) > this.T.mmRefresh)) return;
+    const was = R.mmKey; R.mmKey = key; R.mmAt = this.now; this.dirty = true;
     if (!info) { if (was) this.io.mm({ op: 'unreg', code: R.code }); return; }
     const code = R.code;
     this.io.mm({ op: 'reg', ...info }).then((r) => {
@@ -202,6 +231,56 @@ export class RoomCore {
       this.sendTo(this.R.leader, { t: 'err', op: 'public', why: 'You already have open public matches. Close one to list this party.' });
       this.lobby(); return this.flush(true);
     });
+  }
+
+  // 18.0 (LV): piggyback refresh: every message / alarm the room handles anyway checks whether its listing is due a
+  // re-report (cheap: one comparison; a report at most every T.mmRefresh). No alarm of its own.
+  mmFresh() { const R = this.R; if (R && R.mmKey && this.now - (R.mmAt || 0) > this.T.mmRefresh) this.mmSync(); }
+
+  // ---------- 18.0 (LV): spectators ----------
+  // A spectator socket (room.js /ws/room/CODE?watch=1) has no seat: it never appears in socks(), so it never keeps a
+  // room alive, unpauses a match, counts as online, reports a backlog (bots' pacing ignores it) or holds a party seat.
+  // It gets the lockstep stream (start + snap, then a/h/dl/seat/over/replay) and public chat/emotes; it can send only
+  // watch and sync. Any room whose code you know can be watched while its match is live (public rooms are listed in
+  // Browse; friends pass the code through presence), capped at T.specCap per room and T.specPerIp per hashed IP.
+  canWatch(ip) {
+    if (!this.R) return 'noroom';
+    if (!this.live()) return 'nolive';
+    const all = this.specs(true);
+    if (all.length >= this.T.specCap || (ip && all.filter((x) => x.ip === ip).length >= this.T.specPerIp)) return 'watchfull';
+    return null;
+  }
+  async onSpec(ws, a, m) {
+    if (!this.R) { this.sendWs(ws, { t: 'bye', why: 'closed', reason: 'closed' }); this.io.close(ws, 4004, 'closed'); return; }
+    if (m.t === 'watch' && !a.ok) {
+      const bye = (why, code, extra) => { this.sendWs(ws, { t: 'bye', why, reason: why, ...(extra || {}) }); this.io.close(ws, code, why); };
+      if (m.ver !== VER) return bye('update', 4001, { ver: VER });
+      if (!this.live()) return bye('nolive', 4007);
+      if (this.specs().length >= this.T.specCap) return bye('watchfull', 4007);
+      this.io.admit(ws);
+      const mm = this.R.m, n = this.specs().length;
+      this.sendWs(ws, { t: 'welcome', pid: null, spec: true, room: this.R.code, ver: VER, w: n });
+      const st = this.startMsg(null, true); if (mm.s.v === 0) delete st.resume; // still in the intro: play it (remaining time)
+      this.sendWs(ws, st);
+      if (mm.s.v > 0) this.sendWs(ws, { t: 'snap', v: mm.s.v, mid: mm.mid, state: mm.s, dl: this.dlLeft() });
+      this.specNote(); this.mmSync();
+      await this.flush();
+      return;
+    }
+    if (m.t === 'sync' && a.ok && this.R.m) {
+      const sy = (this.specSync ||= new Map()), last = sy.get(a.spec) || 0; if (this.now - last < 1500) return;
+      sy.set(a.spec, this.now); if (sy.size > 32) sy.delete(sy.keys().next().value);
+      const mm = this.R.m; this.sendWs(ws, { t: 'snap', v: mm.s.v, mid: mm.mid, state: mm.s, dl: this.dlLeft() });
+    }
+    // everything else (act, chat, emote, vc, bl, lead, hello, test ...) is ignored: read-only
+  }
+  async specGone() { if (!this.R) return; this.specNote(); this.mmSync(); await this.flush(); }
+  specNote() { this.specCast(JSON.stringify({ t: 'spec', n: this.specs().length })); }
+  // fresh /turn tokens to every seated socket (background: HMAC is async)
+  turnOut() {
+    if (!this.io.turnTok) return;
+    const job = Promise.all(this.humans().filter((p) => this.online(p.pid)).map(async (p) => { const tok = await this.io.turnTok(p.pid); if (tok && this.R) this.sendTo(p.pid, { t: 'turn', tok }); }));
+    if (this.io.bg) this.io.bg(job);
   }
 
   // ---------- timers (one DO alarm = the earliest of these) ----------
@@ -231,6 +310,7 @@ export class RoomCore {
     } catch (e) { this.oops('msg ' + String(m.t).slice(0, 8), e); } // 17.3 (QS): a throw must not skip the flush below (lost writes / no alarm)
     finally { this.cpu.msg.push(performance.now() - t0); if (this.cpu.msg.length > 4000) this.cpu.msg.splice(0, 2000); }
     if (m.t === 'test' && this.test) await this.testOp(ws, m);
+    this.mmFresh(); // 18.0 (LV)
     await this.flush();
   }
   // 17.3 (QS): per-seat flood guard for the messages that rewrite the lobby (each one = a broadcast to every socket, a
@@ -270,7 +350,7 @@ export class RoomCore {
     const R = this.R, t = R.t, now = this.now;
     if (t.clean && t.clean <= now) {
       t.clean = 0;
-      if (!this.socks().length) { if (R.mmKey && this.io.mm) this.io.mm({ op: 'unreg', code: R.code }); this.R = null; await this.io.arm(0); await this.io.wipe(); return; } // 17.1 (MM): unlisted with it
+      if (!this.socks().length) { for (const x of this.specs(true)) { this.sendWs(x.ws, { t: 'bye', why: 'closed', reason: 'closed' }); this.io.close(x.ws, 4004, 'closed'); } /* 18.0 (LV) */ if (R.mmKey && this.io.mm) this.io.mm({ op: 'unreg', code: R.code }); this.R = null; await this.io.arm(0); await this.io.wipe(); return; } // 17.1 (MM): unlisted with it
     }
     // 17.3 (QS): each timer runs guarded. Before, one throw (engine, bot planner) escaped the alarm: the runtime retried
     // it with the timer already cleared, nothing re-armed, and the match froze for good. Now a failing bot step ends that
@@ -283,6 +363,7 @@ export class RoomCore {
     if (t.away && t.away <= now) { t.away = 0; run('away', () => this.awayExpire()); }
     if (t.lead && t.lead <= now) { t.lead = 0; run('lead', () => { const was = R.leader; this.fixLeader(); if (this.R && R.leader !== was) this.lobby(); }); } // 17.1.1 (MM): leader grace over
     if (t.say && t.say.length) { const due = t.say.filter((x) => x.at <= now); t.say = t.say.filter((x) => x.at > now); for (const x of due) run('say', () => this.chat(x.pid, { k: x.k })); }
+    if (this.R) this.mmFresh(); // 18.0 (LV)
     this.cpu.alarm.push(performance.now() - t0); if (this.cpu.alarm.length > 4000) this.cpu.alarm.splice(0, 2000);
     await this.flush();
   }
@@ -313,8 +394,11 @@ export class RoomCore {
     }
     this.io.bind(ws, pid);
     R.t.clean = 0;
+    { const pr = m.profile && typeof m.profile === 'object' ? m.profile : m; p.nem = cleanNem(pr.nem); } // 18.0 (NE): who this player calls their Nemesis
     this.identify(pid, m);
-    this.sendWs(ws, { t: 'welcome', pid, room: R.code, leader: R.leader, ver: VER });
+    const turn = this.io.turnTok ? await this.io.turnTok(pid) : null; // 18.0 (LV): short-lived /turn token for this seat
+    if (!this.R) return;
+    this.sendWs(ws, { t: 'welcome', pid, room: R.code, leader: R.leader, ver: VER, ...(turn ? { turn } : {}) });
     this.fixLeader();
     this.lobby();
     if (R.vc && Object.keys(R.vc).length) this.sendWs(ws, this.rosterMsg());
@@ -334,19 +418,37 @@ export class RoomCore {
     const p = this.player(pid); if (!p) return;
     const cid = typeof m.cid === 'string' ? m.cid.toUpperCase() : '', proof = typeof m.cproof === 'string' ? m.cproof : '';
     if (!cid || !proof || !/^[0-9A-Z]{10}$/.test(cid) || proof.length > 64 || !this.io.verify) {
-      if (!cid) { p.cid = null; p.verified = false; }
+      if (!cid) { p.cid = null; p.verified = false; p.nid = null; p.rk = null; } // 18.0 (NE): nid/rk
       return;
     }
     if (p.verified && p.cid === cid) return; // same seat, same id, already proven (reconnect)
     const seq = (p.vseq = (p.vseq || 0) + 1);
-    const job = Promise.resolve().then(() => this.io.verify(cid, proof)).catch(() => null).then((r) => {
+    const job = Promise.resolve().then(() => this.io.verify(cid, proof)).catch(() => null).then(async (r) => {
+      const ok = !!(r && r.ok), nid = ok ? await nidOf(cid) : null, rk = ok ? await this.rankOf([cid]) : null; // 18.0 (NE): public Nemesis id + Crown Rating tier
       const q = this.R && this.player(pid); if (!q || q.vseq !== seq) return;
       q.verified = !!(r && r.ok); q.cid = q.verified ? cid : null;
-      if (q.verified) { q.pub = { name: r.name || null, title: r.title || null, avatar: r.avatar || null }; }
+      q.nid = nid; q.rk = (rk && rk[cid]) || null; // 18.0 (NE)
+      if (q.verified) { q.pub = { name: r.name || null, title: r.title || null, avatar: r.avatar || null }; q.tag = typeof r.tag === 'string' ? r.tag : null; } // 18.0 (SO): tag
       const h = this.R.m && this.R.m.hum && this.R.m.hum[pid]; if (h && q.verified) { h.cid = cid; h.verified = true; }
       this.dirty = true; this.lobbyChanged = true;
       this.sendTo(pid, { t: 'ident', cid: q.cid, verified: q.verified });
+      if (q.verified) this.lobby(); // 18.0 (SO): the seat's tag reaches every lobby + its presence is reported
       return this.flush();
+    });
+    if (this.io.bg) this.io.bg(job);
+  }
+  // 18.0 (NE) Ranks: Crown Rating of verified seats from the Board ({cid: {r, p?}}); io.rank is room.js's one Board RPC.
+  // Asked once per verified join and once per match start (in the background; the lobby re-broadcasts when it changed).
+  async rankOf(cids) {
+    if (!this.io.rank || !cids.length) return null;
+    try { const r = await this.io.rank(cids); const out = {}; for (const c of cids) { const k = r && cleanRk(r[c]); if (k) out[c] = k; } return out; } catch { return null; }
+  }
+  rankRefresh() {
+    const ps = this.R.players.filter((p) => p.verified && p.cid); if (!ps.length || !this.io.rank) return;
+    const job = this.rankOf(ps.map((p) => p.cid)).then((rk) => {
+      if (!rk || !this.R) return; let ch = false;
+      for (const p of this.R.players) if (p.verified && p.cid && rk[p.cid] && JSON.stringify(rk[p.cid]) !== JSON.stringify(p.rk)) { p.rk = rk[p.cid]; ch = true; }
+      if (ch) { this.lobby(); return this.flush(); }
     });
     if (this.io.bg) this.io.bg(job);
   }
@@ -397,6 +499,7 @@ export class RoomCore {
       case 'bl': { const ms = +m.ms; if (Number.isFinite(ms)) R.bl[pid] = { ms: Math.max(0, Math.min(10000, ms)), at: this.now }; return; }
       case 'ready': if (this.live()) return; p.ready = !!m.on; p.back = true; this.lobby(); return;
       case 'back': p.back = true; this.lobby(); return;
+      case 'nem': p.nem = cleanNem(m.nem); this.dirty = true; return; // 18.0 (NE): the player's Nemesis changed at results (rematches in the same room use it)
       case 'leave': { // forfeit: a bot takes the seat, the player stays in the party
         if (!this.live() || !R.m.seats.includes(pid) || p.left) return;
         p.left = true; this.setBot(pid, true, 'leave'); this.lobby(); return;
@@ -486,6 +589,7 @@ export class RoomCore {
     const players = R.players.map((p) => { const o = { pid: p.pid, name: p.name, title: p.title || '', skin: p.skin, finisher: p.finisher, trail: p.trail, build: p.build }; if (p.isBot) { o.isBot = true; o.botLevel = p.botLevel || 'normal'; } return o; });
     const seed = (crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff) | 0;
     const opts = this.matchOpts();
+    { const nm = nemMap(R.players.map((p) => ({ pid: p.pid, isBot: !!p.isBot, name: p.name, nid: p.verified ? p.nid : null, nem: p.isBot ? null : p.nem }))); if (nm) opts.nemesis = nm; this.rankRefresh(); } // 18.0 (NE)
     const t0 = performance.now();
     const s = createMatch(players, seed, opts);
     this.cpu.create = performance.now() - t0;
@@ -499,6 +603,8 @@ export class RoomCore {
     for (const p of R.players) if (!p.isBot) R.m.hum[p.pid] = { name: p.name, cid: p.verified ? p.cid : null, verified: !!p.verified, title: p.title || '', avatar: p.avatar || null, drops: 0, left: false };
     R.replay = null;
     for (const x of this.socks()) this.sendWs(x.ws, this.startMsg(x.pid, false));
+    for (const x of this.specs()) this.sendWs(x.ws, this.startMsg(null, false)); // 18.0 (LV): spectators who stayed on after the last match
+    this.turnOut(); // 18.0 (LV): fresh /turn tokens for every seat (voice usually starts with the match)
     for (const p of R.players) if (!p.isBot && !this.online(p.pid)) { p.awayUntil = this.now + this.T.resume; this.setBot(p.pid, true, 'drop'); } // N2 17.0: seat kept for a resume
     this.awayTimer();
     this.lobby();
@@ -658,6 +764,7 @@ export class RoomCore {
   deliver(out, team) {
     const teamOf = (p) => { const u = this.unitOf(p); return u ? u.team : undefined; };
     this.bcast(out, (p) => team == null || teamOf(p) === team);
+    if (team == null) this.specCast(JSON.stringify(out)); // 18.0 (LV): spectators read public chat + emotes (never team lines; they can't send)
   }
   // 17.0 (S2): custom phrases (already cleaned + word-filtered by chat.js) are checked by Workers AI (Llama Guard) via
   // io.moderate -> {ok, src}. Unsafe = shadowed (only the sender sees their line, so nobody learns to dodge the check).

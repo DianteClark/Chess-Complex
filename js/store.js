@@ -37,7 +37,7 @@ export function ensureStore(p) {
 export const bannerOwned = (p, id) => typeof id === 'string' && Object.prototype.hasOwnProperty.call(BANNERS, id) && (BANNERS[id].price === 0 || (p.ownedBanners || []).includes(id));
 export const avatarOk = (p, piece, skin) => typeof piece === 'string' && Object.prototype.hasOwnProperty.call(PIECES, piece) && (skin == null || (typeof skin === 'string' && SKINS[skin] && (p.owned || []).includes(skin)));
 export function bannerList(p) {
-  return Object.entries(BANNERS).map(([id, b]) => ({ id, name: b.name, colors: b.colors, accent: b.accent || null, pattern: b.pattern || null, royal: !!b.royal, owned: bannerOwned(p, id), how: b.price === 0 ? 'Free' : b.royal ? `Royal Pass, Season ${b.season}` : b.season ? `Crown Path, Season ${b.season}` : 'Earned' }));
+  return Object.entries(BANNERS).map(([id, b]) => ({ id, name: b.name, colors: b.colors, accent: b.accent || null, pattern: b.pattern || null, royal: !!b.royal, owned: bannerOwned(p, id), how: b.price === 0 ? 'Free' : b.weekly ? b.weekly /* 18.0 (NE) */ : b.royal ? `Royal Pass, Season ${b.season}` : b.season ? `Crown Path, Season ${b.season}` : 'Earned' }));
 }
 // A CSS background for a banner id (patterns are layered gradients, so no images to load).
 export function bannerCss(id) {

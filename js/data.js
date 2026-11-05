@@ -673,6 +673,11 @@ export const BANNERS = {
   volcanic:    { name: 'Volcanic',        colors: ['#3a0a04', '#0a0200'], accent: '#ff5a1f', pattern: 'cracks', price: null, season: 4, royal: true },
   starchart:   { name: 'Star Chart',      colors: ['#1a2a5a', '#04050e'], accent: '#ffe8a8', pattern: 'stars', price: null, season: 4, royal: true },
   royalgold:   { name: 'Royal Gold',      colors: ['#ffe08a', '#6a4008'], accent: '#ffffff', pattern: 'damask', price: null, season: 4, royal: true },
+  // 18.0 (NE): weekly Season rewards (js/rivals.js SEASON_REWARDS), delivered by the Monday rollover to the cloud save
+  season_champion:  { name: 'Season Champion',  colors: ['#ffd166', '#5a3208'], accent: '#fff4c8', pattern: 'stars', price: null, weekly: 'Weekly Season: finish 1st' },
+  season_podium:    { name: 'Season Finalist',  colors: ['#e4ebf7', '#3a4660'], accent: '#ffffff', pattern: 'damask', price: null, weekly: 'Weekly Season: finish top 3' },
+  season_elite:     { name: 'Season Elite',     colors: ['#c49bff', '#2a1458'], accent: '#ffd98a', pattern: 'stripes', price: null, weekly: 'Weekly Season: finish top 10' },
+  season_contender: { name: 'Season Contender', colors: ['#7fb7ff', '#10264a'], accent: '#cfe4ff', pattern: 'stripes', price: null, weekly: 'Weekly Season: finish top 50' },
 };
 export const DEFAULT_BANNERS = ['gold', 'crimson', 'azure', 'emerald', 'violet', 'ember', 'frost', 'slate'];
 // World Tour collections: one per location. Items whose art is not in this build yet are skipped until they ship.

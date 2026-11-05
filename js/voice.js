@@ -13,7 +13,7 @@
 import { music } from './music.js';
 import { buses, settings, getCtx, setVoiceMode, onCtxSwap, holdContext } from './audio.js';
 import { PEER_OPTS } from './net.js';
-import { endpoint as cloudEndpoint } from './cloud.js';
+import { endpoint as cloudEndpoint, turnToken as cloudTurnToken } from './cloud.js';
 // 17.0 (S2): ICE servers from the cloud (GET /turn: Cloudflare TURN when the server has keys, else the same public
 // list); no cloud, an error or a 2 s timeout keeps PEER_OPTS. Good answers are reused for 30 min.
 let iceCache = null;
@@ -25,9 +25,10 @@ function peerOpts() {
     if (!base) return { o: PEER_OPTS, ok: false };
     const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 2000);
     try {
-      const j = await (await fetch(base + '/turn', { signal: ac.signal })).json();
+      const tok = cloudTurnToken && cloudTurnToken(); // 18.0 (LV): relay credentials need the Room's seat token
+      const j = await (await fetch(base + '/turn' + (tok ? '?t=' + encodeURIComponent(tok) : ''), { signal: ac.signal })).json();
       if (!j || !Array.isArray(j.iceServers) || !j.iceServers.length) return { o: PEER_OPTS, ok: false };
-      return { o: { ...PEER_OPTS, config: { ...PEER_OPTS.config, iceServers: j.iceServers } }, ok: true };
+      return { o: { ...PEER_OPTS, config: { ...PEER_OPTS.config, iceServers: j.iceServers } }, ok: !j.err }; // no token yet: ask again in 1 min
     } finally { clearTimeout(to); }
   })().catch(() => ({ o: PEER_OPTS, ok: false })).then((r) => { iceCache.until = Date.now() + (r.ok ? 1800000 : 60000); return r.o; });
   iceCache = { p, until: Infinity };

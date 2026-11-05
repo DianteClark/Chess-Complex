@@ -184,6 +184,14 @@ export class Replay {
       if (!(await S.getAlarm())) await S.setAlarm(now + HOUR);
       return new Response('ok');
     }
+    if (url.pathname === '/prune' && req.method === 'POST') { // 18.0 (LV): daily upkeep ('_limits' only): upload counters past their hour
+      const now = (this.env && this.env.ROOM_TEST && +url.searchParams.get('now')) || Date.now();
+      if (await S.get('meta')) return new Response('{"deleted":0}'); // a replay instance: its own alarm handles it
+      const all = await S.list({ prefix: 'ip:', limit: 5000 }), old = [];
+      for (const [k, e] of all) if (!e || now - e.t0 > HOUR) old.push(k);
+      let deleted = 0; for (let i = 0; i < old.length; i += 128) deleted += await S.delete(old.slice(i, i + 128));
+      return new Response(JSON.stringify({ scanned: all.size, deleted }), { headers: { 'Content-Type': 'application/json' } });
+    }
     return new Response('?', { status: 404 });
   }
   async alarm() {

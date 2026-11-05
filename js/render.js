@@ -1782,6 +1782,7 @@ export class Renderer {
       // above the tag: crown (Kings), turn arrow (active piece)
       let ty = (mode === 0 ? y : barY) - 2;
       if (player && u.piece === 'king') { const cs = Math.max(13, Math.min(20, z * 0.36)) * (this.isKingBoss(u) ? 1.25 : 1); ctx.save(); ctx.translate(L.sx, ty - cs * 0.42 + Math.sin(T * 2) * 1.2); ctx.scale(cs * 1.6, cs * 1.6); this.crownShape(ctx); ctx.restore(); ty -= cs * 0.9; }
+      if (player && this.tagHook) { try { ty = this.tagHook(ctx, L, u, ty, T, mode === 0 && name ? { x: L.sx - name.w / 2, y: y + name.h / 2, h: name.h } : null); } catch {} } // 18.0 (NE): rank gem + Nemesis crown of thorns (js/nemesis.js)
       if (L.active) {
         const aw = Math.max(9, Math.min(13, z * 0.22)), ay = ty - 3 - Math.abs(Math.sin(T * 4)) * 4;
         ctx.lineJoin = 'round'; ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(8,6,14,0.85)'; ctx.fillStyle = L.mine ? '#ffe3a1' : u.color || '#ffffff';

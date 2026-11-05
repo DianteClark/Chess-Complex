@@ -212,6 +212,7 @@ export function createMatch(players, seed = (Math.random() * 2 ** 31) | 0, opts 
     u.hp = stats(u).maxHp; u.shards = M.startShards || 0;
     s.units.push(u);
   });
+  nemSetup(s, opts.nemesis); // 18.0 (NE): Nemesis map from the start args (deterministic, part of the lockstep inputs)
 
   // Hollows guard shard caches
   // a starter shard two tiles from every spawn
@@ -905,6 +906,7 @@ function kill(s, v, killer, ev, cause = null) {
         if (wasKing) de.regicide = true;
       }
     }
+    if (s.nemesis) nemKill(s, v, killer, ev); // 18.0 (NE)
     if (s.siege) {
       v.place = 0;
       if (alivePlayers(s).length) { dropNear(s, v.x, v.y, { k: 'soul', n: 1, id: v.id, team: v.team, exp: s.round + 3 }); ev.push({ e: 'soul', id: v.id, x: v.x, y: v.y }); }
@@ -931,6 +933,51 @@ function kill(s, v, killer, ev, cause = null) {
   } else if (v.wave && s.siege && !s.units.some((w) => w.alive && w.wave)) {
     siegeCleared(s, ev);
   }
+}
+
+// ---------- 18.0 (NE): Nemesis ----------
+// opts.nemesis = {hunterPid: {pid: targetPid, n: streak}}: the hunter was last eliminated by the target (n times in a
+// row). Only player units, never yourself or an ally; nothing is stored when no entry survives, so matches without
+// rivals hash exactly as before apart from PROTO. s.nemesis[hunter] gains paid (Vendetta claimed), again (the Nemesis
+// eliminated the hunter once more) and thorn (the target outlived the hunter).
+export const NEMESIS = { vendetta: 1 };
+function nemSetup(s, map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return;
+  const out = {};
+  for (const u of s.units) {
+    if (u.kind !== 'player' || typeof u.pid !== 'string' || !wOwn(map, u.pid)) continue;
+    const e = map[u.pid];
+    if (!e || typeof e !== 'object' || typeof e.pid !== 'string' || e.pid === u.pid) continue;
+    const t = s.units.find((w) => w.kind === 'player' && w.pid === e.pid);
+    if (!t || (u.team != null && t.team === u.team)) continue;
+    out[u.pid] = { pid: t.pid, n: Math.max(1, Math.min(99, Math.floor(+e.n) || 1)) };
+  }
+  if (Object.keys(out).length) s.nemesis = out;
+}
+const pUnit = (s, pid) => s.units.find((w) => w.kind === 'player' && w.pid === pid) || null;
+// the live enemy u hunts (u's Nemesis), or null
+export function nemesisOf(s, u) {
+  const e = s && s.nemesis && u && u.pid != null && wOwn(s.nemesis, u.pid) ? s.nemesis[u.pid] : null;
+  const t = e ? pUnit(s, e.pid) : null;
+  return t && t.alive ? t : null;
+}
+// the units that have u as their Nemesis
+export function huntersOf(s, u) {
+  if (!s || !s.nemesis || !u) return [];
+  return s.units.filter((w) => w.kind === 'player' && w.pid != null && wOwn(s.nemesis, w.pid) && s.nemesis[w.pid].pid === u.pid);
+}
+function nemKill(s, v, killer, ev) {
+  if (v.kind !== 'player') return;
+  const k = killer && killer !== v && killer.kind === 'player' ? killer : null;
+  const ke = k && wOwn(s.nemesis, k.pid) ? s.nemesis[k.pid] : null;
+  if (ke && ke.pid === v.pid && !ke.paid) { // Vendetta: you took down your Nemesis
+    ke.paid = 1;
+    if (k.alive) gainShards(s, k, NEMESIS.vendetta, ev);
+    ev.push({ e: 'vendetta', id: k.id, of: v.id, n: ke.n });
+  }
+  const ve = wOwn(s.nemesis, v.pid) ? s.nemesis[v.pid] : null;
+  if (ve && k && ve.pid === k.pid && !ve.again) { ve.again = 1; ev.push({ e: 'nemesis', id: k.id, of: v.id, n: ve.n + 1 }); }
+  if (ve && !ve.thorn) { const t = pUnit(s, ve.pid); if (t && t.alive) { ve.thorn = 1; ev.push({ e: 'thorn', id: t.id, of: v.id }); } }
 }
 
 // ---------- 5.0: Siege ----------
@@ -1133,6 +1180,7 @@ function moveUnit(s, u, x, y, ev, how = 'step') {
     let n = 0;
     while (n < 3 && (dx || dy) && tileAt(s, u.x, u.y) && tileAt(s, u.x, u.y).t === 'ice' && canStand(s, u.x + dx, u.y + dy)) {
       land(s, u, ev); if (!u.alive) return;
+      if (!canStand(s, u.x + dx, u.y + dy)) break; // 18.0 (BT): land() can fill the next tile (a Squads soul revive), look again
       const a = pt(u.x, u.y); u.x += dx; u.y += dy; n++;
       ev.push({ e: 'move', id: u.id, from: a, to: pt(u.x, u.y), how: 'ice' });
     }
@@ -1993,6 +2041,14 @@ export function previewDamage(src, tgt, mult, s = null) {
 
 // ---------- AI ----------
 function estDmg(src, tgt, mult) { return Math.min(guardCap(tgt), Math.max(1, stats(src).atk * mult * 30 / (30 + stats(tgt).def * defMul(tgt)))); }
+// 18.0 (BT) smarter bots. Tiers (u.botLevel): easy = the old scoring, extra noise, no Hold/banking/tactics, skips the
+// equip lookahead and sometimes takes its second-best plan; normal = + Overkill spill, Guard waste, Speed Edge and
+// Blood Moon/Braced in the damage estimate (not passives: pricing Assassin's First Strike cost it 3 pts of wins), Second Wind, turn-order-aware threat (Speed Edge/Hold/tempo/Reversal), Bishop
+// Sidestep colour, cogs, Sudden Death, Interest banking (Nemesis pull = NE's lines, every tier); hard = + strike-then-move (hit and run), full Second
+// Wind weight, Hold when the threat acts later, focus fire, no noise. All dice via aiRand (deterministic replays).
+// Sim tunables: BOT_T.key=v.
+export const BOT_T = { bank: 4, guardWaste: 0.25, swN: 0.3, swH: 0.6, spill: 1, side: 2.5, firstW: 0.45, easyAlt: 0.25, holdH: 0.6, focus: 6, mods: 1, reach: 7, close: 3, topK: 8, many: 16, hollow: 1, kingSmart: 0, kingFocus: 8 };
+const BOT_MOVERS = { leap: 1, charge: 1, dash: 1, teleport: 1, swap: 1, extraMove: 1 }; // options that move the caster
 
 // Breadth-first step toward a target, so hunters walk around walls instead of getting stuck.
 function pathStep(s, u, target) {
@@ -2029,8 +2085,13 @@ export function planHollow(s, u) {
       u.x = ox; u.y = oy;
       if (mv && (cheb(mv, target) < d0 || u.hunt)) { acts.push({ type: 'move', x: mv.x, y: mv.y }); pos = mv; } else break;
     }
-    const v = adj(pos.x, pos.y);
-    if (v) acts.push(u.boss ? { type: 'ability', slot: 'atk', x: pos.x, y: pos.y } : { type: 'ability', slot: 'atk', x: v.x, y: v.y });
+    // 18.0 (BT): with several players in reach, claw the one it hurts most (Guard caps the big ones), a kill first
+    let v = null, vs = -1;
+    for (const p of players) if (Math.max(Math.abs(p.x - pos.x), Math.abs(p.y - pos.y)) === 1) {
+      const d = estDmg(u, p, 1), sc = BOT_T.hollow ? Math.min(d, p.hp) + (d >= p.hp ? 40 : 0) : 0;
+      if (sc > vs) { vs = sc; v = p; }
+    }
+    if (v) acts.push(u.boss ?{ type: 'ability', slot: 'atk', x: pos.x, y: pos.y } : { type: 'ability', slot: 'atk', x: v.x, y: v.y });
   } else if (cheb(u, { x: u.hx, y: u.hy }) > 1 || isVoid(s, u.x, u.y)) {
     const goal = isVoid(s, u.x, u.y) ? pt(7, 7) : pt(u.hx, u.hy);
     const mv = legalMoves(s, u).sort((a, b) => cheb(a, goal) - cheb(b, goal))[0];
@@ -2072,8 +2133,13 @@ function planRanged(s, u, players) {
 function aiRand(s) { s.aiSeed = ((s.aiSeed ?? (s.seed ^ 0x9e3779b9)) * 1664525 + 1013904223) >>> 0; return s.aiSeed / 4294967296; }
 // 15.0 (C): a bot's promotion pick for its road. queen: climb to the Queen and hone it. rook: stop at the Rook and
 // make it a Fortress. ascend: stay a Knight or Bishop (u.pref) and Ascend it. pawn: Veteran, Champion, then hone.
-function botPromo(u) {
-  const opts = promoteOptions(u).filter((o) => o.cost <= u.shards); if (!opts.length) return null;
+// 18.0 (BT): bank = queen road, healthy, no Sudden Death: skip an intermediate rung while already earning Shard Interest
+// and the Queen is at most BOT_T.bank shards away (interest pays toward it).
+function botPromo(u, bank = false) {
+  const all = promoteOptions(u), opts = all.filter((o) => o.cost <= u.shards); if (!opts.length) return null;
+  if (bank && u.plan === 'queen' && u.piece !== 'queen' && u.shards >= INTEREST.per && !opts.some((o) => o.to === 'queen')) {
+    const q = all.find((o) => o.to === 'queen'); if (q && q.cost - u.shards <= BOT_T.bank) return null;
+  }
   const evo = opts.filter((o) => o.type === 'evolve'), hone = opts.find((o) => o.type === 'hone') || null;
   const line = (pc) => !!PIECES[pc].line;
   const climb = (maxTier) => {
@@ -2089,9 +2155,11 @@ function botPromo(u) {
 }
 export function planBot(s, u) {
   const acts = [];
+  const lv = u.botLevel === 'easy' ? 0 : u.botLevel === 'hard' ? 2 : 1; // 18.0 (BT): difficulty tier
+  const bank = lv > 0 && u.plan === 'queen' && u.hp >= stats(u).maxHp * 0.5 && !suddenDeath(s); // 18.0 (BT): Interest banking
   // promotion first
   for (let k = 0; k < 4; k++) {
-    const pick = botPromo(u); // 15.0 (C): each bot follows its road (u.plan)
+    const pick = botPromo(u, bank && k === 0); // 15.0 (C): each bot follows its road (u.plan)
     if (!pick) break;
     acts.push({ type: 'promote', to: pick.to });
     // simulate locally on a shallow copy so movement planning uses new piece
@@ -2109,15 +2177,31 @@ export function planBot(s, u) {
   for (let i = 0; i < s.tiles.length; i++) { const t = s.tiles[i]; if (t.t === 'geyser' && t.ph === 2) { const gx = i % SIZE, gy = (i / SIZE) | 0; for (const [dx, dy] of [[0, 0], ...ORTH]) if (inB(gx + dx, gy + dy)) hot.add((gy + dy) * SIZE + gx + dx); } }
   if (s.locWarn && Array.isArray(s.locWarn.tiles)) for (const t of s.locWarn.tiles) hot.add(t.y * SIZE + t.x); // 15.0 (W): telegraphed location events
   const bountyT = s.bounty ? unitById(s, s.bounty.id) : null;
+  const nemT = s.nemesis ? nemesisOf(s, real || u) : null; // 18.0 (NE): a bot with a Nemesis leans toward it (BT may retune)
   const sick = harmed(real), kingE = s.kingBoss && s.kingBoss.id !== real.id ? unitById(s, s.kingBoss.id) : null; // 15.0 (C)
 
   // 17.0 (A0): posScore depends only on the tile (not on where the planner has the bot standing), so memoize it per plan;
   // leap/charge options re-scored the same tiles hundreds of times (Champion's Valor: 48 anchors x every move).
+  // 18.0 (BT): per-plan target cache (stats, Guard cap, DEF factor, damage mods incl. Speed Edge + passives + Blood Moon)
+  const tc = new Map();
+  const tInfo = (v) => { let q = tc.get(v.id); if (!q) { const sv = stats(v); q = { sv, cap: guardCap(v), k: 30 / (30 + sv.def * defMul(v)), mods: lv && BOT_T.mods && v.kind === 'player' ? speedEdge(u, v) * (v.braced ? 0.8 : 1) * (ascended(v) && v.piece === 'rook' ? 0.85 : 1) * (s.bloodMoon ? 1.3 : 1) : 1 }; tc.set(v.id, q); } return q; };
+  // does e get a hit in before our next turn? (acts later this round, or ahead of us next round: Speed, tempo, Hold, Reversal)
+  const strikesFirst = new Map();
+  if (lv) for (const e of enemies) strikesFirst.set(e.id, e.rt !== s.round || outranks(s, e, real, s.round + 1));
+  const sdOn = lv > 0 && suddenDeath(s), sdCheap = sdOn && suddenDeathPct(s) >= 0.2; // Sudden Death: the void costs 20% a turn
+  const colN = (x, y) => { let n = 0; for (const e of enemies) if ((e.kind === 'player' || s.siege) && ((e.x + e.y) & 1) === ((x + y) & 1) && Math.max(Math.abs(e.x - x), Math.abs(e.y - y)) <= 6) n++; return n; };
   const psMemo = new Map();
   const posScore = (x, y) => { const k = y * SIZE + x; let v = psMemo.get(k); if (v === undefined) { v = posScoreRaw(x, y); psMemo.set(k, v); } return v; };
-  const posScoreRaw = (x, y) => {
+  const posScoreRaw = (x, y, noCog) => {
+    const tc0 = lv && !noCog ? tileAt(s, x, y) : null;
+    if (tc0 && tc0.t === 'cog') { // 18.0 (BT): a cog carries its rider one gear tooth at round end; weigh where it lands
+      const [dx, dy] = [[-1, -1], [0, -1], [0, 0], [-1, 0]][((tc0.i | 0) + 1) & 3], nx = tc0.hx + dx, ny = tc0.hy + dy;
+      const here = posScoreRaw(x, y, true);
+      const w = unitAt(s, nx, ny);
+      return (!w || w === real) && inB(nx, ny) && tileAt(s, nx, ny).t === 'cog' ? here * 0.65 + posScoreRaw(nx, ny, true) * 0.35 : here;
+    }
     let sc = 0;
-    if (isVoid(s, x, y)) sc -= 60 + (s.storm.ring - ringOf(x, y)) * 14; else if (ringOf(x, y) < safeRing) sc -= 25; // deeper void scores worse, so bots climb out
+    if (isVoid(s, x, y)) sc -= sdCheap ? 8 : 60 + (s.storm.ring - ringOf(x, y)) * 14; else if (ringOf(x, y) < safeRing) sc -= 25; // deeper void scores worse, so bots climb out
     if (ringOf(x, y) < safeRing + 1 && s.round >= s.rules.first - 1) sc -= 4;
     for (const it of shardItems) {
       const d = Math.max(Math.abs(it.x - x), Math.abs(it.y - y));
@@ -2137,12 +2221,14 @@ export function planBot(s, u) {
     if (hot.size && (hot.has(y * SIZE + x))) sc -= 18;
     if (s.hill) { const lead = Math.max(0, ...Object.values(s.hill.score)); sc += onThrone(s, x, y) ? 26 + (lead >= s.hill.goal - 2 ? 12 : 0) : -Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)) * 1.3; }
     if (bountyT && bountyT !== real) { const d = Math.max(Math.abs(bountyT.x - x), Math.abs(bountyT.y - y)); if (hpR > 0.4) sc -= d * 0.6; }
-    for (const m of mates) if (Math.max(Math.abs(m.x - x), Math.abs(m.y - y)) <= 2) sc += 4;
+    if (nemT && hpR > 0.5) sc -= Math.max(Math.abs(nemT.x - x), Math.abs(nemT.y - y)) * 0.35; // 18.0 (NE)
+    for (const m of mates) if (m !== real && Math.max(Math.abs(m.x - x), Math.abs(m.y - y)) <= 2) sc += 4;
     let near = 99;
     for (const e of enemies) if (e.kind === 'player' || s.siege) near = Math.min(near, Math.max(Math.abs(e.x - x), Math.abs(e.y - y)));
-    if (near < 99) sc += hpR > 0.4 ? -near * 1.4 : near * 1.2;
-    // threat: enemies adjacent
-    const adj = enemies.filter((e) => Math.max(Math.abs(e.x - x), Math.abs(e.y - y)) <= 1).length;
+    if (near < 99) sc += hpR > 0.4 || sdOn ? -near * 1.4 : near * 1.2; // 18.0 (BT): in Sudden Death hiding does not help
+    // threat: enemies adjacent (18.0 (BT): one that only acts after our next turn is half the worry)
+    let adj = 0;
+    for (const e of enemies) if (Math.max(Math.abs(e.x - x), Math.abs(e.y - y)) <= 1) adj += !lv || strikesFirst.get(e.id) ? 1 : BOT_T.firstW;
     sc -= adj * (hpR < 0.35 ? 8 : 1.5);
     return sc;
   };
@@ -2166,58 +2252,114 @@ export function planBot(s, u) {
     if (ascended(u)) { if (u.piece === 'bishop' && id === 'ray') L.push('poison'); else if (u.piece === 'rook' && id === 'slam') L.push('slow'); else if (slot === 'ult') L.push({ knight: 'stun', bishop: 'burn', queen: 'freeze' }[u.piece] || 'slow'); }
     return L.map((k) => [k, k === 'poison' && (id === 'dart' || id === 'hex' || id === 'plague') ? 2 : 1]);
   };
+  // 18.0 (BT): the crowned King brawls (no Overkill/Guard/Second Wind finesse): with it the boss won ~50% of all-Bruiser Royales
+  const tac = lv > 0 && u.kind === 'player' && (BOT_T.kingSmart || u.piece !== 'king');
   const actScore = (opts, slot) => {
-    let best = null, bs = 0;
+    let best = null, bs = 0, bestU = null, bu = 0;
     const procs = procsFor(slot);
     const sid = slotAbility(u, slot), tp = sid && ABILITIES[sid] ? ABILITIES[sid].tempo : null, sendsLast = tp === 'last' || tp === 'both'; // 16.0 (C)
     for (const o of opts) {
       let sc = o.util || 0;
       for (const hid of o.hits) {
         const v = unitById(s, hid); if (!v) continue;
-        const d = estDmg(u, v, o.mult), sh = stN(v, 'shield') + (v.shield || 0), dh = Math.max(0, d - sh); // shields soak first
+        const q = tInfo(v), raw = Math.max(1, st.atk * o.mult * q.mods * q.k), d = Math.min(q.cap, raw); // 18.0 (BT): = estDmg (+ mods from normal up)
+        const sh = stN(v, 'shield') + (v.shield || 0), dh = Math.max(0, d - sh); // shields soak first
         const prime = v.kind === 'player' || (s.siege && v.wave); // in Siege the Hollows are the enemy
         sc += Math.min(dh, v.hp) * (prime ? 1.2 : 0.8) + Math.min(d, sh) * 0.4;
-        if (dh >= v.hp) sc += prime ? 45 + (v.boss ? 60 : 0) : 18 + v.shards * 6;
-        else { for (const [k, n] of procs) sc += stVal(k, v, n); if (sendsLast && !(v.tempo && v.tempo.k === 'last' && v.tempo.r === s.round + 1)) sc += TEMPO_T.lastUtil * (prime ? 1 : 0.4); }
-        if (v.piece === 'king') sc += KING_T.focus + stN(v, 'exposed') * 4; // gang up on an Exposed King
+        if (dh >= v.hp) {
+          sc += prime ? 45 + (v.boss ? 60 : 0) : 18 + v.shards * 6;
+          if (tac && dh - v.hp >= 1) { // 18.0 (BT): Overkill spills half the excess into the enemy next to the victim nearest us
+            const ax = BOT_MOVERS[o.kind] ? o.anchor.x : real.x, ay = BOT_MOVERS[o.kind] ? o.anchor.y : real.y;
+            let w = null, wd = 99, wm = 99;
+            for (const e of enemies) if (e !== v && e.alive && Math.max(Math.abs(e.x - v.x), Math.abs(e.y - v.y)) <= 1) {
+              const cd = Math.max(Math.abs(e.x - ax), Math.abs(e.y - ay)), md = Math.abs(e.x - ax) + Math.abs(e.y - ay);
+              if (cd < wd || (cd === wd && (md < wm || (md === wm && e.id < w.id)))) { w = e; wd = cd; wm = md; }
+            }
+            if (w && !o.hits.includes(w.id)) {
+              const wq = tInfo(w), n = Math.max(0, Math.min(wq.cap, Math.max(1, Math.round((dh - v.hp) * OVERKILL.spill))) - stN(w, 'shield') - (w.shield || 0));
+              const wp = w.kind === 'player' || (s.siege && w.wave);
+              sc += BOT_T.spill * (Math.min(n, w.hp) * (wp ? 1.2 : 0.8) + (n >= w.hp ? (wp ? 35 : 12) : 0));
+            }
+          }
+        } else {
+          for (const [k, n] of procs) sc += stVal(k, v, n); if (sendsLast && !(v.tempo && v.tempo.k === 'last' && v.tempo.r === s.round + 1)) sc += TEMPO_T.lastUtil * (prime ? 1 : 0.4);
+          if (tac) {
+            if (raw > q.cap) sc -= (raw - q.cap) * BOT_T.guardWaste; // 18.0 (BT): Guard eats a big hit on a high-DEF target
+            if (v.kind === 'player' && !v.sw && v.piece !== 'king' && v.hp - dh < q.sv.maxHp * SECOND_WIND.below) // it would trigger Second Wind
+              sc -= (q.sv.maxHp * SECOND_WIND.heal + SECOND_WIND.perPt * ((v.pts && v.pts.hp) || 0)) * (lv > 1 ? BOT_T.swH : BOT_T.swN);
+            else if (lv > 1 && prime && v.hp - dh <= d) sc += BOT_T.focus; // hard: leave it in kill range for the next hit
+          }
+        }
+        if (v.piece === 'king') sc += KING_T.focus + stN(v, 'exposed') * 4 + (tac ? BOT_T.kingFocus : 0); // gang up on an Exposed King (18.0 (BT): a bit more from normal up)
         if (bountyT && v === bountyT) sc += d >= v.hp ? 30 : 8;
+        if (nemT && v === nemT) sc += d >= v.hp ? 10 : 4; // 18.0 (NE)
       }
       if (o.kind === 'charge' || o.kind === 'dash' || o.kind === 'leap') sc += posScore(o.anchor.x, o.anchor.y) * 0.3;
       // break crates in reach
       for (const t of o.tiles) { const tl = tileAt(s, t.x, t.y); if (tl && tl.t === 'crate' && o.mult > 0) sc += 6; }
       if (sc > bs) { bs = sc; best = o; }
+      if (!o.hits.length && !(o.mult > 0) && !o.data && !BOT_MOVERS[o.kind] && sc > bu) { bu = sc; bestU = o; } // 18.0 (BT): self-only (buff/heal) option
     }
-    return { best, bs };
+    return { best, bs, bestU, bu };
   };
 
   const ox = real.x, oy = real.y;
   const moves = [{ x: ox, y: oy, stay: true }, ...(canMove(s, real) ? legalMovesFor(s, u) : [])];
-  let plan = null, top = -1e9;
+  let plan = null, top = -1e9, alt = null, altT = -1e9, stay = null, selfAct = null, selfAs = 0;
+  const col0 = lv && moves.some((m) => m.side) ? colN(ox, oy) : 0;
+  const easySkip = lv === 0 && aiRand(s) < 0.5; // 18.0 (BT): easy forgets its equip half the time (less lookahead)
+  const fullEval = new Set(), maybe = [];
+  for (const m of moves) {
+    if (m.stay) continue;
+    let nd = 99; for (const e of enemies) { const d = Math.max(Math.abs(e.x - m.x), Math.abs(e.y - m.y)); if (d < nd) nd = d; }
+    if (!BOT_T.reach || moves.length <= BOT_T.many || nd <= BOT_T.close) fullEval.add(m); else if (nd <= BOT_T.reach) maybe.push(m);
+  }
+  if (maybe.length > BOT_T.topK) { maybe.sort((a, b) => posScore(b.x, b.y) - posScore(a.x, a.y) || a.y - b.y || a.x - b.x); maybe.length = BOT_T.topK; }
+  for (const m of maybe) fullEval.add(m);
   for (const m of moves) {
     real.x = m.x; real.y = m.y; // temporary
-    const ps = posScore(m.x, m.y);
+    let ps = posScore(m.x, m.y);
+    if (m.side && lv) ps += Math.max(-2, Math.min(2, colN(m.x, m.y) - col0)) * BOT_T.side; // 18.0 (BT): Sidestep onto the colour the enemies stand on
     let bestAct = null, as = 0;
-    if (canAct(s, real) && !(m.side && BISHOP_T.sideActs)) { // 17.0 (C2): a Sidestep spends the action
+    // 18.0 (BT): CPU budget: tiles with nothing within BOT_T.reach (no ability can hit from there), and tiles outside
+    // BOT_T.close of every enemy that are not among the BOT_T.topK best by position, reuse the self-only pick found at the
+    // start tile (moves[0] = stay) instead of building every option there again
+    const far = !m.stay && !fullEval.has(m);
+    if (far) { if (selfAct && !(m.side && BISHOP_T.sideActs)) { bestAct = selfAct; as = selfAs; } }
+    else if (canAct(s, real) && !(m.side && BISHOP_T.sideActs)) { // 17.0 (C2): a Sidestep spends the action
       for (const slot of ['atk', 'sig', 'eq', 'ult']) {
         if (slot === 'ult' ? (real.ult || 0) < 100 : slot !== 'atk' && u.cd[slot] > 0) continue;
+        if (slot === 'eq' && easySkip) continue;
         const sid = slotAbility(u, slot); if (sid && ABILITIES[sid].free) continue;
-        const { best, bs } = actScore(abilityOptionsFor(s, u, real, slot), slot);
+        const { best, bs, bestU, bu } = actScore(abilityOptionsFor(s, u, real, slot), slot);
         if (best && bs > as) { as = bs; bestAct = { slot, o: best }; }
+        if (m.stay && bestU && bu > selfAs) { selfAs = bu; selfAct = { slot, o: bestU }; }
       }
     }
     const noise = u.botLevel === 'easy' ? aiRand(s) * 30 : u.botLevel === 'hard' ? 0 : aiRand(s) * 4;
     const total = ps + as * (u.botLevel === 'easy' ? 0.6 : u.botLevel === 'hard' ? 1.25 : 1) + (m.stay ? (real.passive === 'bastion' ? 2.5 : 0.5) : 0) + noise;
-    if (total > top) { top = total; plan = { m, bestAct, as }; }
+    if (m.stay) stay = { m, bestAct, as, ps, total };
+    if (total > top) { if (plan) { alt = plan; altT = top; } top = total; plan = { m, bestAct, as }; } else if (total > altT) { altT = total; alt = { m, bestAct, as }; }
   }
   real.x = ox; real.y = oy;
+  // 18.0 (BT): easy sometimes takes its second-best plan
+  if (lv === 0 && alt && aiRand(s) < BOT_T.easyAlt) plan = alt;
+  // 18.0 (BT): hard hits and runs: act from here, then move to the best tile (only abilities that leave the caster in place)
+  if (lv > 1 && stay && stay.bestAct && !stay.bestAct.o.data && !BOT_MOVERS[stay.bestAct.o.kind] && moves.length > 1) {
+    let bm = null, bp = -1e9;
+    for (const m of moves) if (!m.stay) { const p = posScore(m.x, m.y); if (p > bp) { bp = p; bm = m; } }
+    if (bm && bp > stay.ps + 1 && stay.total - stay.ps + bp > top) { plan = { m: stay.m, bestAct: stay.bestAct, as: stay.as, after: bm }; top = stay.total - stay.ps + bp; }
+  }
   // 16.0 (C): Hold, rarely: nothing worthwhile in reach, and an enemy that could threaten us still acts after us this round
-  if (!acts.length && plan && plan.as < BOT_HOLD.minAct && u.botLevel !== 'easy' && canHold(s, real)) {
-    const threat = enemies.some((e) => (e.kind === 'player' || (s.siege && e.wave)) && e.rt !== s.round && cheb(e, real) <= BOT_HOLD.range);
-    if (threat && aiRand(s) < BOT_HOLD.chance) return [{ type: 'hold' }];
+  // 18.0 (BT): hard holds more often, but only while that enemy is not already on top of us and our tile is safe
+  if (!acts.length && plan && plan.as < BOT_HOLD.minAct && lv > 0 && canHold(s, real)) {
+    const threat = enemies.some((e) => (e.kind === 'player' || (s.siege && e.wave)) && e.rt !== s.round && cheb(e, real) <= BOT_HOLD.range && (lv < 2 || cheb(e, real) > 1));
+    if (threat && (lv < 2 || (stay && stay.ps > top - 6)) && aiRand(s) < (lv > 1 ? BOT_T.holdH : BOT_HOLD.chance)) return [{ type: 'hold' }];
   }
   if (plan) {
     if (!plan.m.stay) acts.push({ type: 'move', x: plan.m.x, y: plan.m.y });
     if (plan.bestAct) acts.push({ type: 'ability', slot: plan.bestAct.slot, x: plan.bestAct.o.anchor.x, y: plan.bestAct.o.anchor.y });
+    if (plan.after) acts.push({ type: 'move', x: plan.after.x, y: plan.after.y });
   }
   acts.push({ type: 'end' });
   return acts;

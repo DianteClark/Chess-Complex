@@ -191,8 +191,9 @@ function localClient(code, h) {
 // ---------- authoritative match runner (used by solo and by online hosts) ----------
 export class GameHost {
   // 15.0 (N): party options reach the engine: location (a LOCATIONS id; omitted = seeded pick) and custom rules
-  constructor(players, emit, { seed, state, noTimer, mode, location, custom } = {}) {
+  constructor(players, emit, { seed, state, noTimer, mode, location, custom, nemesis } = {}) {
     const o = { mode }; if (location) o.location = location; if (custom) o.custom = custom;
+    if (nemesis && typeof nemesis === 'object') o.nemesis = nemesis; // 18.0 (NE): Nemesis map (engine sanitises it; part of the replay record)
     const P0 = state ? null : JSON.parse(JSON.stringify(players)), O0 = JSON.parse(JSON.stringify(o)); // 17.0 (RP): replay record
     const sd = Number.isInteger(seed) ? seed : (Math.random() * 2 ** 31) | 0; // engine default, but known (s.seed is the live RNG state)
     this.s = state || createMatch(players, sd, o);

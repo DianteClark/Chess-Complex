@@ -9,6 +9,7 @@
 import * as CL from './cloud.js';
 import { MODES } from './data.js';
 import { modesIn } from './party.js';
+import * as SV from './spectate.js'; // 18.0 (LV): Watch live public matches
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -31,6 +32,7 @@ export function mount(deps) {
     else if (a === 'pub') { const s = D.session(); if (s && s.cloud && s.lead && s.lobbyMsg && !b.disabled) { s.client.send({ t: 'lead', op: 'public', on: !s.lobbyMsg.pub }); D.sfx.tap(); } }
     else if (a === 'refresh') { D.sfx.tap(); loadList(true); }
     else if (a === 'filter') { B.mode = b.dataset.v || ''; D.sfx.tap(); renderFilters(); loadList(true); }
+    else if (a === 'watch') { D.sfx.select(); stop(); clearInterval(B.timer); B.timer = null; SV.watch(b.dataset.code, { back: 'browse' }).then((ok) => { if (!ok && D.screen() === 'browse') { openBrowse(); } }); } // 18.0 (LV): live public match, read-only
     else if (a === 'join') { D.sfx.select(); const code = b.dataset.code, mode = b.dataset.mode; if (b.dataset.qp === '1') quick(mode, code); else { stop(); D.join(code, null); } }
   });
   setInterval(() => { if (Q.cdAt && Q.active) paintCd(); }, 250);
@@ -181,6 +183,7 @@ function paintList(err) {
   const rooms = B.rooms || [];
   if (!rooms.length) { el.innerHTML = `<div class="mm-empty"><svg><use href="#m-users"/></svg><b>No open ${B.mode ? esc(mName(B.mode)) + ' ' : ''}matches right now</b><p>Tap Quick Play to open one. Players who search for the same mode land in it.</p></div>`; return; }
   el.innerHTML = rooms.map((r) => {
+    if (r.st === 'live') return `<div class="mm-room live"><span class="mm-glyph"><svg><use href="#m-globe"/></svg></span><div class="mm-info"><b>${esc(mName(r.mode))}</b><em><span class="sv-live">Live</span>${r.w ? `${r.w} watching` : 'In progress'}${r.near === 2 ? '<span class="mm-near">Near you</span>' : ''}</em></div><div class="mm-n"><b>${r.h}</b><span>${r.h === 1 ? 'player' : 'players'}</span></div><button class="btn small" data-mm="watch" data-code="${esc(r.code)}" aria-label="Watch ${esc(mName(r.mode))} live">Watch</button></div>`; // 18.0 (LV)
     const tag = r.qp ? (r.st === 'starting' ? 'Starting soon' : 'Quick Play') : 'Hosted party', near = r.near === 2 ? '<span class="mm-near">Near you</span>' : '';
     return `<div class="mm-room ${r.st === 'starting' ? 'hot' : ''}"><span class="mm-glyph"><svg><use href="#${r.qp ? 'm-bolt' : 'm-users'}"/></svg></span><div class="mm-info"><b>${esc(mName(r.mode))}</b><em>${esc(tag)}${near}</em></div><div class="mm-n"><b>${r.n}/${r.cap}</b><span>players</span></div><button class="btn small gold" data-mm="join" data-code="${esc(r.code)}" data-mode="${esc(r.mode)}" data-qp="${r.qp ? 1 : 0}" aria-label="Join ${esc(mName(r.mode))}, ${r.n} of ${r.cap} players">Join</button></div>`;
   }).join('');

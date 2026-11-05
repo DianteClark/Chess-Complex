@@ -1,5 +1,13 @@
 # Changelog
 
+## 18.0 "Rivals" (November 2026)
+- **Nemesis** (NE): deterministic per-match nemesis map from createMatch inputs (solo bots by name, phone-hosted via join, cloud from verified seats); Vendetta (+1 shard, +40 Marks), streaks, Thorn bonus; lobby card, HUD crown of thorns, callouts, results, profile Rivals panel. PROTO 3.
+- **Ranks** (NE): Pawn-King tiers from Crown Rating (1100/1250/1400/1550/1750), badges on online names; weekly top-50 season titles + banners delivered through a Player DO inbox.
+- **Friends** (SO): player tags (hash of cloud id), mutual friends, Recent Players, push-on-change presence (one request per refresh), party invites with live push and 10 min expiry, block, Appear Offline, abuse caps.
+- **Watch live** (LV): read-only spectator sockets (8/room, 3/IP) on the lockstep stream, Watch from Browse and Friends, ?watch=CODE; Matchmaker listings refresh on activity; /turn needs a room token; daily pruning of moderation/rate rows.
+- **Smarter bots** (BT): Overkill/Guard/Speed Edge/Second Wind/turn-order/Sidestep/cogs/Sudden Death/Interest-aware planning, Easy/Normal/Hard (Hard 58% vs Normal, Normal 69% vs Easy), Hollow focus fire; ice-slide stacking fix. Balance: King 37.8-38.3%, roads 11.4-14.4%, presets 22.6-27.8%.
+- Tests: q18 engine (34), rivals18, social (+e2e 26), lv (+e2e 15), mm e2e 37; online cloud subset and smoke green.
+
 ## 17.3 (November 2026) - scrub
 - **Server (QS)**: gzip-bomb-safe replay uploads (streamed, capped at 200 KB), per-player flood limit on lobby-changing messages, alarm/handler error guards so a throw can never freeze a match (failing bot step ends its turn, 3 retries), bounded Daily verify retries, worker origin in CORS, 500s no longer echo internals.
 - **Client (QC)**: duplicate range-slider listeners, unused intro method with listener leak, unhandled Daily promise, unguarded rating read, Reduce Motion selector in lb17.css; ~120 lines of dead exports/imports/locals/CSS removed; sw.js CORE verified.

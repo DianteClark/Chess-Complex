@@ -166,7 +166,8 @@ export function openRoom(code, h) {
     if (!m || typeof m !== 'object') return;
     switch (m.t) {
       case 'hb': sawHb = true; return;
-      case 'welcome': M.pid = m.pid; emit(m); return;
+      case 'welcome': M.pid = m.pid; noteTurn(m.turn); emit(m); return;
+      case 'turn': noteTurn(m.tok); return; // 18.0 (LV): fresh /turn token at each match start
       case 'start': startMatch(m); return;
       case 'a': {
         if (!M.s) return;
@@ -221,7 +222,7 @@ export function openRoom(code, h) {
   };
   const sendHello = () => {
     if (!hello) return;
-    const pr = { title: hello.title, skin: hello.skin, finisher: hello.finisher, trail: hello.trail, build: hello.build, botLevel: hello.botLevel, mode: hello.mode, avatar: hello.avatar };
+    const pr = { title: hello.title, skin: hello.skin, finisher: hello.finisher, trail: hello.trail, build: hello.build, botLevel: hello.botLevel, mode: hello.mode, avatar: hello.avatar, nem: hello.nem || null }; // 18.0 (NE): nem = who this player calls their Nemesis
     const o = { t: 'hello', pid: hello.token, name: hello.name, profile: pr, ver: VER() };
     const id = cloudId(); if (id) { o.cid = id.id; o.cproof = id.secret; } // 17.0: verified seat (leaderboards)
     if (M.mid && M.s && !M.s.over) o.resume = { mid: M.mid };
@@ -232,13 +233,14 @@ export function openRoom(code, h) {
     if (Date.now() < offlineUntil) { retryT = setTimeout(attempt, Math.max(50, offlineUntil - Date.now())); return; } // NET.drop: this page is offline
     const g = ++gen;
     let w;
-    try { w = new WebSocket(wsBase() + '/ws/room/' + encodeURIComponent(code)); } catch (e) { fail(g, 'network'); return; }
+    try { w = new WebSocket(wsBase() + '/ws/room/' + encodeURIComponent(code) + (h.watch ? '?watch=1' : '')); } catch (e) { fail(g, 'network'); return; }
     ws = w;
     openT = setTimeout(() => { if (g === gen) fail(g, 'timeout'); }, CLOUD.openTimeout);
     w.onopen = () => {
       if (g !== gen) return;
       clearTimeout(openT); live = true; rx = tick = Date.now();
       const again = opened; opened = true; dropAt = 0; tries = 0; clog(`open${again ? ' (reconnected)' : ''}`);
+      if (h.watch) raw({ t: 'watch', ver: VER() }); // 18.0 (LV): a read-only spectator link (js/spectate.js): no seat, no hello
       hbT = setInterval(() => {
         if (g !== gen) return;
         const now = Date.now();
@@ -248,7 +250,7 @@ export function openRoom(code, h) {
         raw('{"t":"hb"}');
       }, CLOUD.hb);
       blT = setInterval(() => {
-        if (g !== gen || !M.s || M.s.over) return;
+        if (g !== gen || !M.s || M.s.over || h.watch) return; // 18.0 (LV): spectators never report a backlog (bots don't wait for them)
         let ms = 0; try { ms = NET.backlog ? Math.round(NET.backlog()) : 0; } catch {}
         if (ms > 0 || lastBl > 0) raw({ t: 'bl', ms: Math.max(0, ms) });
         lastBl = ms;
@@ -269,6 +271,7 @@ export function openRoom(code, h) {
   // outgoing: main.js speaks today's client protocol; translate the few messages that differ
   const send = (o) => {
     if (!o || typeof o !== 'object') return;
+    if (h.watch && o.t !== 'sync') return; // 18.0 (LV): read-only
     if (o.t === 'join') {
       hello = o; sendHello(); return; // main.js sends its join from onOpen, on every (re)connect
     }
@@ -285,6 +288,12 @@ export function openRoom(code, h) {
     dbg: (op, args = {}) => raw({ t: 'dbg', op, ...args }),
   };
 }
+
+// 18.0 (LV): the Room hands each seat a short-lived token for GET /turn (relay credentials only for players in a room);
+// voice.js passes turnToken() as ?t=. Null when none / expired (then /turn answers the public list).
+let turnTok = null;
+function noteTurn(tok) { if (typeof tok === 'string' && tok.length <= 80) turnTok = { tok, until: Date.now() + 55 * 60000 }; }
+export const turnToken = () => (turnTok && Date.now() < turnTok.until ? turnTok.tok : null);
 
 // 17.0: the cloud player id + secret js/cloudsave.js keeps (localStorage cc_cloud_v1 {id, secret}); read here instead of
 // importing cloudsave.js (it imports this module). Sent once per connection, over TLS, so the Room can verify the seat.

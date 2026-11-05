@@ -46,6 +46,7 @@ async function api(method, path, { secret, body, keepalive } = {}) {
   try {
     const r = await fetch(ep + path, { method, headers, body: b, cache: 'no-store', keepalive: !!keepalive && (!b || b.length < 60000), signal: ac && ac.signal });
     let j = null; try { j = await r.json(); } catch {}
+    if (j && Array.isArray(j.inbox) && j.inbox.length && H && H.inbox) { try { H.inbox(j.inbox); } catch (e) { console.warn(e); } } // 18.0 (NE): Player DO inbox (season rewards) -> main.js hook
     return { s: r.status, j };
   } catch { markDown(); return { s: 0, j: null }; } finally { clearTimeout(t); }
 }
@@ -218,7 +219,8 @@ async function push({ keepalive = false, direct = false } = {}) {
       if (!(await ready(direct))) return;
       if (!st.dirty && num(st.rev) > 0) { setStatus('saved'); return; }
       const p = H.profile(); const sent = num(p.cs && p.cs.spend);
-      const body = JSON.stringify({ rev: num(st.rev) + 1, blob: blobOf(p) });
+      const ack = H.acks ? H.acks() : null; // 18.0 (NE): inbox items this blob already holds -> the server drops them
+      const body = JSON.stringify({ rev: num(st.rev) + 1, blob: blobOf(p), ...(ack && ack.length ? { ack } : {}) });
       if (body.length > 500000) { setStatus('error', 'too large'); return; }
       st.dirty = false; again = false; setStatus('saving');
       const r = await api('PUT', `/player/${st.id}`, { secret: st.secret, body, keepalive });

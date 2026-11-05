@@ -1,0 +1,56 @@
+/* NE 18.0 "Rivals": Nemesis + Ranks (js/nemesis.js, js/ranks.js). */
+
+/* ---------- rank badges ---------- */
+.rk18 { display: inline-flex; vertical-align: -3px; margin-right: 5px; flex: none; line-height: 0; }
+.rk18-svg { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.55)); }
+.rk18.prov { opacity: .85; }
+.rk18-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 4px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid color-mix(in srgb, var(--rk, #fff) 45%, transparent); vertical-align: middle; white-space: nowrap; }
+.rk18-chip b { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--rk, #fff); }
+.rk18-chip em { font-style: normal; font-size: 11px; color: rgba(255,255,255,.7); }
+.rk18-chip.prov b { color: rgba(255,255,255,.8); }
+.lb-hi .rk18-chip { margin-bottom: 6px; }
+.lb-pc span .rk18-chip { padding: 1px 7px 1px 3px; margin-right: 3px; }
+.lb-pc span .rk18-chip b { font-size: 11px; }
+.rk18-rw { font-size: 12px; color: rgba(255,232,170,.85); margin: 2px 0 6px; }
+.rk18-ladder { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-top: 6px; }
+.rk18-step { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid transparent; min-width: 0; }
+.rk18-step b { font-size: 11px; font-weight: 800; color: var(--rk); letter-spacing: .03em; }
+.rk18-step small { font-size: 11px; color: rgba(255,255,255,.6); }
+.rk18-step.on { border-color: var(--rk); background: color-mix(in srgb, var(--rk) 16%, transparent); }
+
+/* ---------- Nemesis: lobby ---------- */
+.nem18-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 5px; padding: 1px 4px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #ffd0d6; background: rgba(255,59,79,.22); border: 1px solid rgba(255,59,79,.6); vertical-align: 2px; }
+.nem18-tag svg { width: 14px; height: 14px; fill: #ff3b4f; }
+.nem18-card { display: flex; gap: 10px; align-items: center; grid-column: 1 / -1; padding: 10px 12px; margin-bottom: 4px; border-radius: 12px; background: linear-gradient(110deg, rgba(255,59,79,.24), rgba(40,6,14,.6)); border: 1px solid rgba(255,59,79,.55); box-shadow: 0 0 18px rgba(255,59,79,.18) inset; list-style: none; animation: nem18in .45s ease-out both; }
+.nem18-card > svg { width: 34px; height: 34px; flex: none; fill: #ff3b4f; filter: drop-shadow(0 0 6px rgba(255,59,79,.6)); }
+.nem18-card b { display: block; font-size: 14px; color: #fff; letter-spacing: .02em; }
+.nem18-card span { display: block; font-size: 12px; color: rgba(255,225,230,.85); line-height: 1.35; margin-top: 2px; }
+@keyframes nem18in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Nemesis: in match / results ---------- */
+.nem18-x { display: inline-block; padding: 0 6px; margin-left: 4px; border-radius: 6px; background: rgba(255,59,79,.3); color: #ffd0d6; font-weight: 800; }
+.nem18-ln { display: inline-flex; align-items: center; gap: 4px; }
+.nem18-ln svg { width: 14px; height: 14px; fill: #ff3b4f; flex: none; }
+.nem18-ln em { font-style: normal; color: #ffd98a; font-weight: 700; margin-left: 4px; }
+.nem18-res { border-left: 3px solid #ff3b4f; }
+.nem18-res b.nem18-r { color: #ff8a98; }
+#r-board .rk18 { margin-right: 4px; }
+
+/* ---------- profile: Rivals panel ---------- */
+.nem18-who { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.04); margin: 6px 0 8px; }
+.nem18-who > svg { width: 30px; height: 30px; flex: none; fill: rgba(255,255,255,.25); }
+.nem18-who.on { background: linear-gradient(110deg, rgba(255,59,79,.2), rgba(255,255,255,.03)); border: 1px solid rgba(255,59,79,.45); }
+.nem18-who.on > svg { fill: #ff3b4f; }
+.nem18-who small { display: block; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.6); }
+.nem18-who b { display: block; font-size: 16px; color: #fff; }
+.nem18-who span { display: block; font-size: 12px; color: rgba(255,255,255,.72); }
+.nem18-rw { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.nem18-rwi { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 10px; background: linear-gradient(115deg, #7fb7ff, #10264a); }
+.nem18-rwi.bn-season_champion { background: linear-gradient(115deg, #ffd166, #5a3208); }
+.nem18-rwi.bn-season_podium { background: linear-gradient(115deg, #e4ebf7, #3a4660); }
+.nem18-rwi.bn-season_elite { background: linear-gradient(115deg, #c49bff, #2a1458); }
+.nem18-rwi b { font-size: 12px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.nem18-rwi small { font-size: 11px; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.nem18-sub { margin-top: 12px; }
+@media (prefers-reduced-motion: reduce) { .nem18-card { animation: none; } }
+.nem18-prof .lb-pcs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 4px; }

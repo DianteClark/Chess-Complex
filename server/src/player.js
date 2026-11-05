@@ -16,6 +16,7 @@
 // Errors: 400 bad request, 401 bad or missing secret, 404 unknown id, 413 too large, 429 {retry: seconds}.
 import { DurableObject } from 'cloudflare:workers';
 import * as platform from './platform.js'; // S2: verifyTurnstile(env, token, ip) when it exists
+import * as social from './social.js'; // 18.0 (SO): friends / tags / presence / invites, mixed into Player below
 
 export const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford base32 (no I L O U)
 export const ID_LEN = 10, SECRET_LEN = 16;
@@ -94,7 +95,8 @@ export async function handlePlayer(request, env, ip = 'local') {
     if (err) return fail(err, err === 413 ? 'too large' : 'bad body');
     const rev = Math.floor(+(body && body.rev));
     if (!body || typeof body !== 'object' || !Number.isFinite(rev) || rev < 1 || rev > 2 ** 31 || !body.blob || typeof body.blob !== 'object') return fail(400, 'need {rev, blob}');
-    return answer(await stub.write(hash, rev, JSON.stringify(body.blob)));
+    const ack = Array.isArray(body.ack) ? body.ack.filter((x) => typeof x === 'string' && x.length <= 40).slice(0, 20) : null; // 18.0 (NE): inbox items the blob now holds
+    return answer(await stub.write(hash, rev, JSON.stringify(body.blob), ack));
   }
   if (parts.length === 3 && parts[2] === 'rotate' && m === 'POST') {
     const next = randomCode(SECRET_LEN);
@@ -148,16 +150,33 @@ export class Player extends DurableObject {
   }
   async read(hash) {
     const { r, status } = this.auth(hash); if (!r) return { status };
-    return { status: 200, data: { rev: r.rev, updatedAt: r.updatedAt, blob: r.blob ? JSON.parse(r.blob) : null } };
+    return { status: 200, data: this.withInbox({ rev: r.rev, updatedAt: r.updatedAt, blob: r.blob ? JSON.parse(r.blob) : null }) };
   }
-  async write(hash, rev, text) {
+  async write(hash, rev, text, ack = null) {
     const { r, status } = this.auth(hash); if (!r) return { status };
     const now = Date.now();
     if (now - r.lastPut < PUT_GAP) return { status: 429, retry: Math.max(1, Math.ceil((PUT_GAP - (now - r.lastPut)) / 1000)) };
-    if (rev <= r.rev) return { status: 409, data: { rev: r.rev, updatedAt: r.updatedAt, blob: r.blob ? JSON.parse(r.blob) : null } };
+    if (rev <= r.rev) return { status: 409, data: this.withInbox({ rev: r.rev, updatedAt: r.updatedAt, blob: r.blob ? JSON.parse(r.blob) : null }) };
     this.sql.exec('UPDATE p SET blob = ?, rev = ?, updatedAt = ?, lastPut = ? WHERE k = 1', text, rev, now, now);
-    return { status: 200, data: { rev, updatedAt: now } };
+    if (ack && ack.length && this.has('inbox')) for (const id of ack) this.sql.exec('DELETE FROM inbox WHERE id = ?', id); // 18.0 (NE)
+    return { status: 200, data: this.withInbox({ rev, updatedAt: now }) };
   }
+  // 18.0 (NE) inbox: items the server hands to this player's cloud save on the next sync (weekly season rewards).
+  // deliver() is an internal RPC (board.js rollover); false when the id has no player (nothing is stored then).
+  // GET / PUT / 409 answers carry inbox: [{id, k, ...}] until a PUT acks the ids (the blob then holds what they gave).
+  async deliver(item) {
+    if (!this.row() || !item || typeof item.id !== 'string' || item.id.length > 40) return false;
+    this.sql.exec('CREATE TABLE IF NOT EXISTS inbox (id TEXT PRIMARY KEY, k TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL)');
+    const body = JSON.stringify(item); if (body.length > 2000) return false;
+    this.sql.exec('INSERT OR IGNORE INTO inbox (id, k, body, at) VALUES (?, ?, ?, ?)', item.id, String(item.k || 'msg').slice(0, 20), body, Date.now());
+    this.sql.exec('DELETE FROM inbox WHERE id NOT IN (SELECT id FROM inbox ORDER BY at DESC LIMIT 20)');
+    return true;
+  }
+  inboxList() {
+    if (!this.has('inbox')) return [];
+    return this.sql.exec('SELECT body FROM inbox ORDER BY at ASC').toArray().map((x) => { try { return JSON.parse(x.body); } catch { return null; } }).filter(Boolean);
+  }
+  withInbox(d) { const ib = this.inboxList(); if (ib.length) d.inbox = ib; return d; }
   async verify(hash) {
     const { r, status } = this.auth(hash); if (!r) return { ok: false, why: status === 404 ? 'unknown' : 'bad' };
     let p = null; try { p = r.blob ? JSON.parse(r.blob).p : null; } catch {}
@@ -169,6 +188,7 @@ export class Player extends DurableObject {
     const now = Date.now();
     if (now - r.lastRot < ROTATE_GAP) return { status: 429, retry: Math.ceil((ROTATE_GAP - (now - r.lastRot)) / 1000) };
     this.sql.exec('UPDATE p SET hash = ?, lastRot = ? WHERE k = 1', next, now);
+    try { if (this.soKick) this.soKick(); } catch {} // 18.0 (SO): the old secret's friends links close
     return { ok: true };
   }
   // Fixed-window limiter (only used on the '_limits' instance). Returns 0 when allowed, else seconds to wait.
@@ -182,4 +202,12 @@ export class Player extends DurableObject {
     return 0;
   }
   sweep(now, windowMs) { this.sql.exec('DELETE FROM lim WHERE t0 < ?', now - windowMs); }
+  // 18.0 (LV): daily upkeep (lv.maint, '_limits' only): limiter rows whose hour is over. A test server may pass a later now.
+  async pruneLim(now) {
+    if (!this.has('lim')) return { deleted: 0, left: 0 };
+    const t = this.env && this.env.ROOM_TEST && +now > 0 ? +now : Date.now();
+    const deleted = this.sql.exec('DELETE FROM lim WHERE t0 < ?', t - 3600_000).rowsWritten;
+    return { deleted, left: this.sql.exec('SELECT COUNT(*) AS n FROM lim').toArray()[0].n };
+  }
 }
+social.install(Player); // 18.0 (SO): adds the so* RPCs + fetch/webSocket* handlers (server/src/social.js); never overrides a method defined above

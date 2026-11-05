@@ -17,6 +17,8 @@ import { Replay } from './replay.js';
 import { Stats } from './stats.js';
 import * as match from './match.js';       // 17.1 (MM): /mm/* Quick Play + Browse open matches (Matchmaker DO)
 import { Matchmaker } from './match.js';
+import * as lv from './lv.js';             // 18.0 (LV): daily upkeep (prune), /turn tokens, spectator helpers
+import * as social from './social.js';     // 18.0 (SO): /social/* friends, tags, presence, invites (Player DO)
 
 export { Room, Player, Board, Replay, Stats, Matchmaker };
 
@@ -44,7 +46,7 @@ function cors(req, res) {
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 
 export default {
-  async scheduled(event, env, ctx) { await board.scheduled(event, env, ctx); }, // 17.0: daily challenge + weekly season rollover
+  async scheduled(event, env, ctx) { await board.scheduled(event, env, ctx); if (!event || event.cron !== '10 0 * * 1') { try { await lv.maint(env); } catch {} } }, // 17.0: daily challenge + weekly season rollover; 18.0 (LV): daily prune (mod cache, rate rows)
   async fetch(req, env, ctx) {
     const url = new URL(req.url), path = url.pathname;
     if (req.method === 'OPTIONS') return cors(req, new Response(null, { status: 204 }));
@@ -78,7 +80,8 @@ export default {
         const ip = req.headers.get('CF-Connecting-IP') || 'local';
         return cors(req, await handlePlayer(req, env, ip));
       }
-      for (const mod of [platform, board, replay, stats, match]) { const r = await mod.routes(req, env, url, ctx); if (r) return cors(req, r); }
+      if (path.startsWith('/social/')) { const o = req.headers.get('Origin'); if (o && !allowOrigin(o) && o !== url.origin) return json({ error: 'origin' }, 403); const r = await social.routes(req, env, url); if (r) return r.webSocket ? r : cors(req, r); } // 18.0 (SO): friends (a 101 is returned as is)
+      for (const mod of [platform, board, replay, stats, match, lv]) { const r = await mod.routes(req, env, url, ctx); if (r) return cors(req, r); } // 18.0 (LV): + lv (ROOM_TEST-only /lv/test)
       return cors(req, json({ error: 'not found' }, 404));
     } catch (e) {
       // 17.3 (A0): log the detail (sampled Workers Logs), never echo internals to the client

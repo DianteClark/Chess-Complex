@@ -2,7 +2,7 @@
 // (match.js) wraps it. One global instance tracks every PUBLIC room: Quick Play rooms (created here, auto-start) and
 // party rooms a leader switched to Public. Private rooms never reach it, so their codes can't leak.
 //
-// Entry: {code, mode, n (seats taken), h (humans), cap, st 'lobby'|'starting', qp, loc (region hint), created, up,
+// Entry: {code, mode, n (seats taken), h (humans), cap, st 'lobby'|'starting'|'live' (18.0 LV: + w, wcap spectators), qp, loc (region hint), created, up,
 //         ip (hash of the creator / leader IP, never the IP itself), pend [timestamps of joins handed out]}
 export const L = {
   pendMs: 15000,        // a Quick Play join handed out counts as a taken seat for this long (until the Room reports)
@@ -45,7 +45,7 @@ export class MatchCore {
     return n;
   }
   nextAlarm(now) { return this.rooms.size ? now + 60000 : 0; }
-  ipCount(ip, except) { if (!ip) return 0; let n = 0; for (const e of this.rooms.values()) if (e.ip === ip && e.code !== except) n++; return n; }
+  ipCount(ip, except) { if (!ip) return 0; let n = 0; for (const e of this.rooms.values()) if (e.ip === ip && e.code !== except && e.st !== 'live') n++; return n; } // 18.0 (LV): live listings (watch only) never use up the cap
   bucket(ip) { let b = this.ipq.get(ip); if (!b) { b = { q: [], c: [] }; this.ipq.set(ip, b); if (this.ipq.size > 5000) this.ipq.delete(this.ipq.keys().next().value); } return b; }
 
   // A Room reports its public state (or its removal). Returns {ok} or {ok:false, why:'cap'} for a NEW listing over the
@@ -54,12 +54,13 @@ export class MatchCore {
     const code = str(b && b.code, 5); if (!code || !CODE_RE.test(code)) return { ok: false, why: 'bad' };
     const old = this.rooms.get(code);
     const ip = str(b.ip, 32) || (old && old.ip) || null;
-    if (!old && ip && this.ipCount(ip, code) >= this.L.roomsPerIp) return { ok: false, why: 'cap' };
+    if (!old && ip && b.st !== 'live' && this.ipCount(ip, code) >= this.L.roomsPerIp) return { ok: false, why: 'cap' };
     const e = {
       code, mode: str(b.mode, 16) || 'royale', n: int(b.n, 0, 16), h: int(b.h, 0, 16), cap: int(b.cap, 1, 16),
-      st: b.st === 'starting' ? 'starting' : 'lobby', qp: !!b.qp, loc: str(b.loc, 8), created: +b.created || (old && old.created) || now, up: now, ip,
+      st: b.st === 'starting' ? 'starting' : b.st === 'live' ? 'live' : 'lobby', qp: !!b.qp, loc: str(b.loc, 8), created: +b.created || (old && old.created) || now, up: now, ip,
       pend: old ? old.pend || [] : [],
     };
+    if (e.st === 'live') { e.w = int(b.w, 0, 64); e.wcap = int(b.wcap, 0, 64); e.pend = []; } // 18.0 (LV): a live public match (Watch in Browse)
     // seats the Room now reports were (some of) the joins handed out: stop counting those twice
     if (old && e.n > old.n && e.pend.length) e.pend.splice(0, Math.min(e.pend.length, e.n - old.n));
     this.rooms.set(code, e); this.dirty = true;
@@ -76,7 +77,7 @@ export class MatchCore {
   pick(mode, loc, exclude, now) {
     let best = null, bk = null;
     for (const e of this.rooms.values()) {
-      if (!e.qp || e.mode !== mode || (exclude && exclude.includes(e.code)) || !this.live(e, now)) continue;
+      if (!e.qp || e.st === 'live' || e.mode !== mode || (exclude && exclude.includes(e.code)) || !this.live(e, now)) continue; // 18.0 (LV): never a live match
       const t = this.taken(e, now); if (t >= e.cap) continue;
       const k = [this.score(e, loc), t, -(e.created || 0)];
       if (!bk || k[0] > bk[0] || (k[0] === bk[0] && (k[1] > bk[1] || (k[1] === bk[1] && k[2] > bk[2])))) { best = e; bk = k; }
@@ -107,15 +108,17 @@ export class MatchCore {
     this.rooms.set(code, { code, mode: str(b.mode, 16) || 'royale', n: 0, h: 0, cap, st: 'lobby', qp: true, loc: str(b.loc, 8), created: now, up: now, ip, pend: [now] });
     this.dirty = true;
   }
-  // Browse: public lobbies with a free seat (both Quick Play and leader-hosted public parties). No IPs, no names.
+  // Browse: public lobbies with a free seat (both Quick Play and leader-hosted public parties), then (18.0 LV) live public
+  // matches with a free spectator slot (st 'live', w / wcap). No IPs, no names.
   list(mode, loc, now) {
     const out = [];
     for (const e of this.rooms.values()) {
       if ((mode && e.mode !== mode) || !this.live(e, now)) continue;
+      if (e.st === 'live') { if (e.h > 0 && (e.w || 0) < (e.wcap || 8)) out.push({ code: e.code, mode: e.mode, n: e.n, h: e.h, cap: e.cap, st: 'live', qp: e.qp, loc: e.loc || null, age: Math.round((now - (e.created || now)) / 1000), near: this.score(e, loc), w: e.w || 0, wcap: e.wcap || 8 }); continue; } // 18.0 (LV): Watch
       const t = this.taken(e, now); if (t >= e.cap || (e.h <= 0 && !this.pending(e, now))) continue;
       out.push({ code: e.code, mode: e.mode, n: Math.min(e.cap, t), h: e.h, cap: e.cap, st: e.st, qp: e.qp, loc: e.loc || null, age: Math.round((now - (e.created || now)) / 1000), near: this.score(e, loc) });
     }
-    out.sort((a, b) => b.near - a.near || (b.st === 'starting') - (a.st === 'starting') || b.n - a.n || a.age - b.age);
+    out.sort((a, b) => (a.st === 'live') - (b.st === 'live') || b.near - a.near || (b.st === 'starting') - (a.st === 'starting') || b.n - a.n || a.age - b.age);
     return out.slice(0, this.L.listMax);
   }
 }

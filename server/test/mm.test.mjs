@@ -41,7 +41,7 @@ await check('Quick Play: two clients find each other, countdown, bots fill, matc
   assert(st.opts.mode === 'royale' && !st.opts.custom, 'opts ' + JSON.stringify(st.opts));
   await A.wait((c) => c.applied >= 40 && c.hashOk >= 3, 30000, '40 actions');
   assert(A.hashBad === 0 && B.hashBad === 0, 'hash mismatches');
-  l = await list(); assert(!l.some((x) => x.code === q1.code), 'live room still listed');
+  l = await list(); assert(!l.some((x) => x.code === q1.code && x.st !== 'live'), 'live room still listed as joinable'); // 18.0 (LV): listed as st 'live' (Watch) only
   const q3 = await quick('royale'); assert(q3.code !== q1.code && q3.created, 'Quick Play during the match should make a new room: ' + JSON.stringify(q3));
   closeAll([A, B]);
   return `room ${q1.code}, ${A.applied} actions, ${A.hashOk} hashes`;

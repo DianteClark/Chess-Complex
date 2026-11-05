@@ -8,6 +8,7 @@
 // every accepted action in order, bots included); profile -> decorateProfile().
 import * as CL from './cloud.js';
 import { pieceIcon } from './pieces.js';
+import * as RK from './ranks.js'; // 18.0 (NE): Crown Rating tier badges
 import { protoVer } from './statehash.js';
 import { dayKey } from './daily.js';
 
@@ -56,6 +57,7 @@ export async function fetchMe() {
   const r = await call(`/lb/me?cid=${id.id}&day=${encodeURIComponent(today())}`);
   if (r.status !== 200 || !r.body) return null;
   st.me = { at: Date.now(), d: r.body }; writeSt();
+  try { RK.setMine(r.body.rating); } catch {} // 18.0 (NE): my own tier badge
   return r.body;
 }
 
@@ -178,7 +180,7 @@ export function decorateProfile() {
     const R = me && me.rating, Sx = me && me.season, D = me && me.daily;
     const cell = (k, v, sub) => `<div class="lb-pc"><small>${k}</small><b>${v}</b><span>${sub}</span></div>`;
     el.innerHTML = `<div class="lbl">Rankings ${off ? '<span class="pts lb-off-t">Offline</span>' : ''}</div><div class="lb-pcs">${
-      cell('Crown Rating', R ? R.r : '-', R ? (R.prov ? `Provisional, ${R.left} to go` : `#${R.rank} of ${R.of}`) : identity() ? 'Play online' : 'Cloud save off')}${
+      cell('Crown Rating', R ? R.r : '-', R ? `${RK.chip(RK.fromCard(R), { px: 16 })} ${R.prov ? `Provisional, ${R.left} to go` : `#${R.rank} of ${R.of}`}` : identity() ? 'Play online' : 'Cloud save off')}${ /* 18.0 (NE): tier chip */ ''}${
       cell('Season', Sx && Sx.rank ? '#' + Sx.rank : '-', Sx ? `${Sx.pts} pts this week` : 'No games yet')}${
       cell('Daily', D && D.st === 'ok' ? '#' + D.rank : D && D.st === 'dnf' ? 'DNF' : '-', D && D.st === 'ok' ? `${D.score} pts today` : D && D.st === 'queued' ? 'Verifying' : D && D.st === 'dnf' ? 'Did not finish' : 'Not ranked today')}</div><button class="btn wide" data-go="ranks" data-lb-tab="season">View leaderboards</button>`;
   };
@@ -199,20 +201,20 @@ function rowHTML(r, tab) {
   const medal = r.rank <= 3 ? ` m${r.rank}` : '';
   const sub = tab === 'daily' && r.place ? `Placed ${r.place}${r.kills ? `, ${r.kills} KO` : ''}` : r.title ? esc(r.title) : r.games != null ? `${r.games} game${r.games === 1 ? '' : 's'}` : '';
   if (r.dnf) return `<li class="lb-row dnf${r.me ? ' me' : ''}"><span class="lb-rk">DNF</span><span class="lb-av">${avatarImg(r.avatar)}</span><span class="lb-nm"><b>${esc(r.name)}${r.me ? ' <i>You</i>' : ''}</b><em>Did not finish</em></span><span class="lb-v">-</span></li>`;
-  return `<li class="lb-row${r.me ? ' me' : ''}${medal}"><span class="lb-rk">${r.rank}</span><span class="lb-av">${avatarImg(r.avatar)}</span><span class="lb-nm"><b>${esc(r.name)}${r.me ? ' <i>You</i>' : ''}</b><em>${sub}</em></span><span class="lb-v">${r.v}<small>${unit(tab)}</small></span></li>`;
+  return `<li class="lb-row${r.me ? ' me' : ''}${medal}"><span class="lb-rk">${r.rank}</span><span class="lb-av">${avatarImg(r.avatar)}</span><span class="lb-nm"><b>${RK.badge(r.rk, 15)}${esc(r.name)}${r.me ? ' <i>You</i>' : ''}</b><em>${sub}</em></span><span class="lb-v">${r.v}<small>${unit(tab)}</small></span></li>`;
 }
 function heroHTML(tab, d, me) {
   const id = identity();
   if (tab === 'season') {
     const pts = me ? me.v : 0, rank = me ? `#${me.rank}` : '-';
     const when = S.last ? (d && d.sid ? `Week of ${fmtDay(d.sid)} - final standings` : 'No finished season yet') : d && d.ends ? `Week of ${fmtDay(d.sid)} - ends in ${left(d.ends)}` : 'This week';
-    return `<div class="lb-hero"><div class="lb-big"><small>${S.last ? 'Last week' : 'Your season'}</small><b>${rank}</b><span>${pts} pts</span></div><div class="lb-hi"><p>${when}</p><div class="seg small lb-wk"><button class="${S.last ? '' : 'on'}" data-lb-last="0">This week</button><button class="${S.last ? 'on' : ''}" data-lb-last="1">Last week</button></div></div></div>`;
+    return `<div class="lb-hero"><div class="lb-big"><small>${S.last ? 'Last week' : 'Your season'}</small><b>${rank}</b><span>${pts} pts</span></div><div class="lb-hi"><p>${when}</p><p class="rk18-rw">Top 50 at the Monday reset earn a Season title and banner (1st, top 3, top 10, top 50).</p><div class="seg small lb-wk"><button class="${S.last ? '' : 'on'}" data-lb-last="0">This week</button><button class="${S.last ? 'on' : ''}" data-lb-last="1">Last week</button></div></div></div>`;
   }
   if (tab === 'rating') {
     const c = d && d.card;
     const big = c ? c.r : '-', sub = !id ? 'Cloud save off' : !c ? '' : c.prov ? `Provisional: ${c.left} more game${c.left === 1 ? '' : 's'}` : `#${c.rank} of ${c.of} - peak ${c.peak}`;
     const dl = c && c.games && c.last ? `<em class="lb-d ${c.last >= 0 ? 'up' : 'down'}">${c.last >= 0 ? '+' : ''}${Math.round(c.last)} last match</em>` : '';
-    return `<div class="lb-hero"><div class="lb-big crown"><small>Crown Rating</small><b>${big}</b><span>${sub}</span></div><div class="lb-hi"><p>Online Royale, Blitz, Duel and Squads with 2 or more cloud-saved players. You gain for every player you finish above.</p>${dl}</div></div>`;
+    return `<div class="lb-hero"><div class="lb-big crown"><small>Crown Rating</small><b>${big}</b><span>${sub}</span></div><div class="lb-hi">${c ? RK.chip(RK.fromCard(c), { px: 22 }) : '' /* 18.0 (NE) */}<p>Online Royale, Blitz, Duel and Squads with 2 or more cloud-saved players. You gain for every player you finish above.</p>${dl}</div></div>`;
   }
   const c = d && d.card;
   const big = c && c.st === 'ok' ? '#' + c.rank : c && c.st === 'dnf' ? 'DNF' : '-';

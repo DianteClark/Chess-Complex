@@ -154,3 +154,19 @@ body.replaying #spec-bar { flex-wrap: wrap; row-gap: 6px; width: min(460px, 96vw
 /* N2 17.0: small inline spinner in #host-status / #join-status while Host/Join wait for the cloud check (up to ~6 s) */
 .cc-wait { display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px; border-radius: 50%; border: 2px solid rgba(255,231,168,.3); border-top-color: #ffe7a8; animation: nbspin .8s linear infinite; }
 body.reduced .cc-wait { animation: none; }
+/* LV 18.0: live spectating (js/spectate.js): the spectator bar's LIVE tag, watcher count, Replay / Leave; Browse "Watch" rows */
+.sv-ctl { display: none; align-items: center; gap: 6px; flex: 0 0 auto; }
+body.watching .sv-ctl { display: flex; }
+body.watching #spec-bar { flex-wrap: wrap; justify-content: center; row-gap: 6px; }
+.sv-live { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px 3px 7px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #fff; background: rgba(255, 77, 109, .9); box-shadow: 0 0 12px rgba(255, 77, 109, .45); }
+.sv-live::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: svPulse 1.4s ease-in-out infinite; }
+.sv-live.off { background: rgba(154, 147, 173, .5); box-shadow: none; }
+.sv-live.off::before { animation: none; opacity: .6; }
+.sv-n { font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--mute, #9a93ad); white-space: nowrap; }
+@keyframes svPulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+body.reduced .sv-live::before { animation: none; }
+.mm-room.live { box-shadow: inset 0 0 0 1px rgba(255, 77, 109, .35); }
+.mm-room.live .mm-info em { color: #ffb3c1; }
+.mm-room.live .sv-live { padding: 2px 7px 2px 6px; font-size: 10px; box-shadow: none; }
+@media (orientation: landscape) and (max-height: 500px) { body.watching #spec-bar { flex-wrap: nowrap; } }
+@media (orientation: portrait) { body.watching .sv-ctl { flex: 1 0 100%; justify-content: center; gap: 10px; } body.watching .spec-who { flex: 1 1 auto; min-width: 0; } body.watching .spec-who small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }

@@ -10,6 +10,7 @@
 import { PEER_OPTS } from '../../js/net.js';
 import { protoVer } from '../../js/statehash.js';
 import { clean } from '../../js/chat.js';
+import * as lv from './lv.js'; // 18.0 (LV): /turn token check
 
 const json = (o, status = 200, extra) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(extra || {}) } });
 const ip = (req) => req.headers.get('CF-Connecting-IP') || 'local';
@@ -17,7 +18,14 @@ const yes = (v) => !!v && v !== '0' && v !== 'false';
 
 export async function routes(req, env, url, ctx) {
   const p = url.pathname;
-  if (p === '/turn') return req.method === 'GET' || req.method === 'POST' ? json(await iceServers(env, ctx)) : json({ error: 'method' }, 405);
+  if (p === '/turn') {
+    if (req.method !== 'GET' && req.method !== 'POST') return json({ error: 'method' }, 405);
+    // 18.0 (LV): relay credentials only for a seat in a Room (token from welcome.turn / {t:'turn'}: ?t= or X-CC-Turn);
+    // anything else gets the public list, so old clients and phone-hosted parties still connect
+    const tok = url.searchParams.get('t') || req.headers.get('X-CC-Turn') || '';
+    if (!(await lv.turnCheck(env, tok))) return json({ iceServers: PUBLIC_ICE, ttl: 86400, src: 'public', err: 'token' });
+    return json(await iceServers(env, ctx));
+  }
   if (p === '/cfg') return json(cfg(env), 200, { 'Cache-Control': 'public, max-age=300' });
   return null;
 }

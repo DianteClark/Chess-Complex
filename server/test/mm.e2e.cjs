@@ -150,7 +150,7 @@ async function afterMatch(browser) {
     const who = await A.page.evaluate(() => { const s = window.__cc.game.s; return { n: s.units.filter((u) => u.kind === 'player').length, hum: s.units.filter((u) => u.kind === 'player' && !u.isBot && ['Alice', 'Bruno'].includes(u.name)).length }; });
     ok(who.n === 8 && who.hum === 2, `8 seats, 2 humans (${JSON.stringify(who)})`);
     await A.page.waitForTimeout(2500); await A.page.screenshot({ path: `${OUT}/qp-match-390x844.png` });
-    ok(!(await list()).some((r) => r.code === codeA), 'live match no longer listed');
+    { const L = await list(), e = L.find((r) => r.code === codeA); ok(!e || e.st === 'live', 'live match listed only as live (18.0 Watch), never as joinable: ' + JSON.stringify(e)); } // 18.0 (A0)
   } catch (e) {
     ok(false, 'quick play flow: ' + e.message);
     for (const [X, n] of [[A, 'A'], [B, 'B']]) console.log('    ' + n, JSON.stringify(await X.page.evaluate(() => ({ scr: (document.querySelector('.screen.active') || {}).id, card: document.querySelector('#mm-card').textContent.slice(0, 160), st: document.querySelector('#join-status').textContent, modal: [...document.querySelectorAll('.modal:not(.hidden)')].map((m) => m.id) }))).catch(() => null));
