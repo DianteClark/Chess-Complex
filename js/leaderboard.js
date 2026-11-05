@@ -13,7 +13,6 @@ import { dayKey } from './daily.js';
 
 const KEY = 'cc_lb_v1', CLOUD_KEY = 'cc_cloud_v1';
 const TABS = [['season', 'Season'], ['rating', 'Crown Rating'], ['daily', 'Daily']];
-const PROV = 10;
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let H = { profile: () => ({}), toast: () => {}, sfx: null };
@@ -147,7 +146,6 @@ export function onResults(ctx) {
       return flushDaily();
     }).then(async (go) => {
       if (go === null || gen !== S.gen) return;
-      if (gen !== S.gen) return;
       if (st.out.some((o) => o.day === today())) { set('Daily leaderboard', 'Offline: sends when you reconnect', 'mute'); return; }
       const r = st.dres && st.dres.day === today() ? st.dres : null;
       if (r && r.st === 'refused') { set('Daily leaderboard', esc(r.why || 'Not ranked'), 'mute'); return; }
@@ -157,7 +155,7 @@ export function onResults(ctx) {
       else if (s.st === 'ok') set(`Daily rank <em class="lb-score">${s.score} pts</em>`, `#${s.rank} of ${s.of}`, 'good');
       else if (s.st === 'rejected') set('Daily leaderboard', 'Run could not be verified', 'bad');
       else set('Daily leaderboard', 'Verifying...', 'wait');
-    });
+    }).catch(() => { if (gen === S.gen) set('Daily leaderboard', 'Offline', 'mute'); }); // QC: no unhandled rejection on the results screen
     return;
   }
   if (!identity()) return;
@@ -166,7 +164,7 @@ export function onResults(ctx) {
   setTimeout(async () => {
     let me = null; try { me = await fetchMe(); } catch {}
     if (gen !== S.gen) return;
-    if (!me) { row.remove(); return; }
+    if (!me || !me.rating) { row.remove(); return; } // QC: a 200 without a rating block must not throw in this timer
     const R = me.rating, d = before != null && R.games > before ? R.last : null;
     const delta = d != null ? ` <em class="lb-d ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '+' : ''}${Math.round(d)}</em>` : '';
     set(`Crown Rating${delta}`, R.prov ? `${R.r} - provisional (${R.left} left)` : `${R.r} - #${R.rank} of ${R.of}`, 'good');

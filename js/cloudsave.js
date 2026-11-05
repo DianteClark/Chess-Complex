@@ -29,7 +29,6 @@ const subs = new Set();
 function readSt() { try { const o = JSON.parse(localStorage.getItem(KEY) || 'null'); if (o && typeof o === 'object') return o; } catch {} return {}; }
 function writeSt() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch {} }
 function setStatus(s, why = '') { if (s === 'saved' || s === 'saving') offN = 0; status = s; statusWhy = why; for (const f of subs) try { f(s); } catch {} renderRow(); if (s === 'saved') setTimeout(maybeMoveCard, 300); }
-export const getStatus = () => ({ status, why: statusWhy, at: st.at || 0, id: st.id || null, linked: !!(st.id && st.secret) });
 export const onStatus = (f) => { subs.add(f); return () => subs.delete(f); };
 
 // ---------- endpoint + health: N2's js/cloud.js (?cloud=<url> overrides, ?cloud=off or ?net=local = off) ----------

@@ -266,7 +266,6 @@ function themeOf(id) {
   if (!keep) { th.scale = L.scale; th.scaleArr = L.scaleArr; th.prog = L.prog; th.chords = L.chords; }
   return th;
 }
-export const LOCATION_MUSIC = Object.keys(LOC);
 const NOP = { setValueAtTime() {}, setTargetAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} };
 const pick = (tiers, e) => { let r = null; for (const t of tiers) if (e >= t[0]) r = t[1]; return r; };
 
@@ -866,4 +865,3 @@ onSfxEvent((e) => {
   if (e.e === 'location' && e.id) music.location(e.id);
   else if (/^(kingPhase|bossPhase|phase)$/.test(e.e) || (e.e === 'king' && e.phase)) { const n = +(e.phase || e.n || 1) || 1; music.kingPh = Math.max(music.kingPh || 0, n); music.sting('phase'); }
 });
-export const MUSIC_THEMES = Object.keys(THEMES).filter((k) => k !== 'silence');

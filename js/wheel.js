@@ -72,7 +72,6 @@ function miniBoard(g, b, y1, look) { // the store board stand-in: dark checker w
   for (const [x, t] of [[3.5, 'rook'], [7.5, 'king']]) { statue(g, { x, base: b.y0 + 1.85, h: 1.45, type: t, seed: 3, light: 1, ...pc }); }
   statue(g, { x: 11.5, base: b.y0 + 3.85, h: 1.1, type: 'pawn', seed: 5, light: 1, ...pc });
 }
-export function preloadWheel(w = 240, h = 340, ids = LOCATION_IDS) { for (const id of ids) previewOf(id, w, h); }
 function previewOf(id, w, h) {
   const key = `${id}|${w}x${h}`, have = PREV.get(key);
   if (have) return have instanceof Promise ? null : have;

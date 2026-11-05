@@ -1,5 +1,10 @@
 # Changelog
 
+## 17.3 (November 2026) - scrub
+- **Server (QS)**: gzip-bomb-safe replay uploads (streamed, capped at 200 KB), per-player flood limit on lobby-changing messages, alarm/handler error guards so a throw can never freeze a match (failing bot step ends its turn, 3 retries), bounded Daily verify retries, worker origin in CORS, 500s no longer echo internals.
+- **Client (QC)**: duplicate range-slider listeners, unused intro method with listener leak, unhandled Daily promise, unguarded rating read, Reduce Motion selector in lb17.css; ~120 lines of dead exports/imports/locals/CSS removed; sw.js CORE verified.
+- New-player title card 44 px tall; README updated for the Cloudflare home.
+
 ## 17.2 (November 2026)
 - **Combat info hierarchy** (announcer.js, ui10.css, small render/main edits): one action line per turn that replaces the previous one (feed rows gone), merged per-target damage numbers with small tags, center callouts only for the viewer's moments and headline events, minor callouts skipped when a newer turn starts, callouts on the board's playback clock, tips only when the board is quiet, tap-open Match Log by round. Busiest moment clutter 14 -> 7-8 elements; overlap test 0.
 - **Quick Play Back to Party**: app switch no longer ends the cloud session (pagehide), dropped leader keeps leadership 8 s, Rejoin Party when the link is lost, online results never start a solo match, post-QP party is private and unlisted. mm.e2e 37/37.

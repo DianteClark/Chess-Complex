@@ -55,7 +55,6 @@ export const BACKDROP_IDS = ['citadel', 'forge', 'temple', 'gardens', 'ruins', '
 const MODS = new Map(); // id -> module default | null (missing) | 'loading'
 let FORCE = null;
 try { FORCE = new URLSearchParams(location.search).get('bd') || localStorage.getItem('cc_bd') || null; } catch {}
-export function setBackdropOverride(id) { FORCE = id || null; }
 export function backdropId(s) { return FORCE || (s && s.location) || null; }
 
 function mod(id) {
@@ -67,7 +66,6 @@ function mod(id) {
   import(`./backdrops/${id}.js`).then((x) => MODS.set(id, x.default || null)).catch((e) => { MODS.set(id, null); console.warn('backdrop', id, e && e.message); });
   return null;
 }
-export function loadBackdrop(id) { mod(id); }
 
 // ---------- helpers handed to the scenes ----------
 const mkC = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; };
@@ -148,7 +146,6 @@ export function releaseBackdrops() { CACHE.clear(); }
 export function prepareBackdrop(id, v) { const M = mod(id); if (!M || !v) return false; entry(id, M, v, true); return true; }
 
 // ---------- per frame ----------
-const T0 = { t: 0, last: 0 };
 function layerXf(L, v) {
   const p = Math.min(1, L.p), b = v.b, cx = (b.x0 + b.x1 + 1) / 2, cy = (b.y0 + b.y1 + 1) / 2;
   if (p >= 1) return { zL: v.z, ax: v.x, ay: v.y, sx: v.cx + v.ox, sy: v.cy + v.oy };

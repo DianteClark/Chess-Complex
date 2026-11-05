@@ -11,7 +11,7 @@
 //   { t: 'vc', a: 'join', vid }  { t: 'vc', a: 'leave' }  { t: 'vc', a: 'talk', on: 0|1 }
 //   host -> all: { t: 'vc', a: 'roster', list: [{ pid, vid }] }  { t: 'vc', a: 'talk', pid, on }
 import { music } from './music.js';
-import { buses, settings, getCtx, setVoiceMode, onCtxSwap, holdContext, voiceOut } from './audio.js';
+import { buses, settings, getCtx, setVoiceMode, onCtxSwap, holdContext } from './audio.js';
 import { PEER_OPTS } from './net.js';
 import { endpoint as cloudEndpoint } from './cloud.js';
 // 17.0 (S2): ICE servers from the cloud (GET /turn: Cloudflare TURN when the server has keys, else the same public

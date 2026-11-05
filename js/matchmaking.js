@@ -107,7 +107,6 @@ export function retry(code, why) {
   setTimeout(() => { if (Q.active) quick(Q.mode); }, 300);
   return true;
 }
-export const searchingNow = () => Q.active;
 
 // Every cloud lobby message (main.js cloudLobby): the Quick Play card while the room is a Quick Play lobby, the
 // Public switch for the leader of a normal cloud party.

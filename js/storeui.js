@@ -1,6 +1,6 @@
 // 10.0 (A7): Store, item showcase, unlock reveal, collections, Crown Path, Trophies, Profile and daily login screens.
 // main.js calls init(deps) once and the render* functions from go(); frame(dt) runs from the main loop.
-import { SKINS, BOARDS, FINISHERS, TRAILS, EMOTE_PACKS, BANNERS, BUNDLES, RARITY, SEASON, SEASON_REWARDS, ROYAL_PASS, ROYAL_REWARDS, ACHIEVEMENTS, ACH_CATS, ACH_CAT, LOGIN_REWARDS, PIECES, PAST_SEASONS, xpForLevel, titleFor } from './data.js';
+import { SKINS, BOARDS, FINISHERS, TRAILS, EMOTE_PACKS, BUNDLES, RARITY, SEASON, SEASON_REWARDS, ROYAL_PASS, ROYAL_REWARDS, ACHIEVEMENTS, ACH_CATS, ACH_CAT, LOGIN_REWARDS, PIECES, PAST_SEASONS, xpForLevel, titleFor } from './data.js';
 import { KINDS, item, listKind, featured, weeklyCollection, msToMidnight, bundleInfo, grant, equip, isOwned, toggleWish, toggleShowcase, rarityOf, rarityRank, allItems, makePreview, drawPreview, makeStage, resizeStage, drawStage, cyclePiece, stagePieceLabel, playFinisher, makeReveal, drawReveal, skipReveal, bannerCss, locName, STAGE_ROSTER, rosterIcon, setStagePiece } from './store.js';
 import { seasonTier, seasonProgress, seasonDaysLeft, rewardLabel, resolveReward, rewardKind, checkAchievements, achievementValue, achievementGoal, masteryLevel, ownedCounts, claimCollections, loginStatus, claimLogin, settlePending, hasRoyal, royalStatus, buyRoyalPass, unlockList, buyUnlock, unlockPrice, isUnlocked } from './progression.js';
 
@@ -556,4 +556,3 @@ export function frame(dt) {
   if (S.active === 'profile' && S.profStage) drawStage(S.profStage, step);
   if (S.active === 'path' && S.pathHero) drawPreview(S.pathHero, step);
 }
-export function setTab(t) { S.tab = t; }

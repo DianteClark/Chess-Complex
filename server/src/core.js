@@ -23,7 +23,9 @@ export const T = {
   qpWait: 45000,        // 17.1 (MM): Quick Play lobby countdown once 2+ humans are in (empty seats -> bots)
   qpFull: 3000,         // 17.1 (MM): ... and when every seat is a human
   leadGrace: 8000,      // 17.1.1 (MM): a dropped leader keeps leading this long (brief app switch) before it passes on
+  spamCap: 20, spamRate: 4, // 17.3 (QS): lobby-changing messages per seat: 20 burst, then 4/s
 };
+const SPAMMY = new Set(['ready', 'back', 'leave', 'part', 'lead', 'vc']); // 17.3 (QS): see RoomCore.spam
 const VER = protoVer();
 const PIECE_ORDER = ['pawn', 'knight', 'bishop', 'rook', 'queen'];
 const BOT_NAMES = ['Morphy', 'Tal', 'Capablanca', 'Lasker', 'Alekhine', 'Petrosian', 'Botvinnik', 'Steinitz', 'Anderssen', 'Philidor', 'Nimzo', 'Reti', 'Polgar', 'Rubinstein'];
@@ -224,12 +226,28 @@ export class RoomCore {
     const t0 = performance.now();
     try {
       if (m.t === 'hello') { if (!pid) await this.hello(ws, m); }
-      else if (pid && this.player(pid)) await this.handle(ws, pid, m);
+      else if (pid && this.player(pid)) { if (this.spam(ws, pid, m)) return; await this.handle(ws, pid, m); }
       else if (pid && m.t === 'sync') this.sync(ws, pid);
-    } finally { this.cpu.msg.push(performance.now() - t0); if (this.cpu.msg.length > 4000) this.cpu.msg.splice(0, 2000); }
+    } catch (e) { this.oops('msg ' + String(m.t).slice(0, 8), e); } // 17.3 (QS): a throw must not skip the flush below (lost writes / no alarm)
+    finally { this.cpu.msg.push(performance.now() - t0); if (this.cpu.msg.length > 4000) this.cpu.msg.splice(0, 2000); }
     if (m.t === 'test' && this.test) await this.testOp(ws, m);
     await this.flush();
   }
+  // 17.3 (QS): per-seat flood guard for the messages that rewrite the lobby (each one = a broadcast to every socket, a
+  // storage write of the whole room incl. the live match, and for public rooms a Matchmaker report). A token bucket
+  // (T.spamCap burst, T.spamRate per second) in memory: an evicted room just starts every seat with a full bucket.
+  // act / bl / sync / chat / emote / hb are not counted (cheap, or limited on their own).
+  spam(ws, pid, m) {
+    if (!SPAMMY.has(m.t) || (m.t === 'vc' && m.a === 'talk')) return false; // talk has its own limiter (and "stopped talking" must always pass)
+    const now = this.now, b = (this.flood ||= new Map()).get(pid) || { n: this.T.spamCap, at: now };
+    b.n = Math.min(this.T.spamCap, b.n + ((now - b.at) / 1000) * this.T.spamRate); b.at = now;
+    if (b.n < 1) { this.flood.set(pid, b); if (m.t === 'lead' && !b.told) { b.told = 1; this.sendWs(ws, { t: 'err', op: m.op, why: 'Too fast. Try again in a moment.' }); } return true; }
+    b.n -= 1; b.told = 0; this.flood.set(pid, b);
+    if (this.flood.size > 64) this.flood.delete(this.flood.keys().next().value);
+    return false;
+  }
+  // 17.3 (QS): log a caught throw (message only, never message bodies: they can hold chat text or cproof)
+  oops(where, e) { this.errs = (this.errs || 0) + 1; try { console.log('[room] ' + where + ' failed: ' + String((e && e.message) || e).slice(0, 160)); } catch {} }
   async onClose(pid) {
     if (!this.R) return;
     const R = this.R, p = pid && this.player(pid);
@@ -254,13 +272,17 @@ export class RoomCore {
       t.clean = 0;
       if (!this.socks().length) { if (R.mmKey && this.io.mm) this.io.mm({ op: 'unreg', code: R.code }); this.R = null; await this.io.arm(0); await this.io.wipe(); return; } // 17.1 (MM): unlisted with it
     }
-    if (t.qp && t.qp <= now) this.qpGo(false); // 17.1 (MM): Quick Play countdown over
-    if (t.intro && t.intro <= now) { t.intro = 0; this.go(); }
-    if (t.turn && t.turn <= now) { t.turn = 0; this.timeout(); }
-    if (t.bot && t.bot <= now) { t.bot = 0; this.botStep(); }
-    if (t.away && t.away <= now) { t.away = 0; this.awayExpire(); }
-    if (t.lead && t.lead <= now) { t.lead = 0; const was = R.leader; this.fixLeader(); if (this.R && R.leader !== was) this.lobby(); } // 17.1.1 (MM): leader grace over
-    if (t.say && t.say.length) { const due = t.say.filter((x) => x.at <= now); t.say = t.say.filter((x) => x.at > now); for (const x of due) this.chat(x.pid, { k: x.k }); }
+    // 17.3 (QS): each timer runs guarded. Before, one throw (engine, bot planner) escaped the alarm: the runtime retried
+    // it with the timer already cleared, nothing re-armed, and the match froze for good. Now a failing bot step ends that
+    // bot's turn instead, and the flush below always re-arms the room.
+    const run = (k, fn) => { try { fn(); } catch (e) { this.oops('alarm ' + k, e); if (k === 'bot') this.botFail(); } };
+    if (t.qp && t.qp <= now) run('qp', () => this.qpGo(false)); // 17.1 (MM): Quick Play countdown over
+    if (t.intro && t.intro <= now) { t.intro = 0; run('intro', () => this.go()); }
+    if (t.turn && t.turn <= now) { t.turn = 0; run('turn', () => this.timeout()); }
+    if (t.bot && t.bot <= now) { t.bot = 0; run('bot', () => this.botStep()); }
+    if (t.away && t.away <= now) { t.away = 0; run('away', () => this.awayExpire()); }
+    if (t.lead && t.lead <= now) { t.lead = 0; run('lead', () => { const was = R.leader; this.fixLeader(); if (this.R && R.leader !== was) this.lobby(); }); } // 17.1.1 (MM): leader grace over
+    if (t.say && t.say.length) { const due = t.say.filter((x) => x.at <= now); t.say = t.say.filter((x) => x.at > now); for (const x of due) run('say', () => this.chat(x.pid, { k: x.k })); }
     this.cpu.alarm.push(performance.now() - t0); if (this.cpu.alarm.length > 4000) this.cpu.alarm.splice(0, 2000);
     await this.flush();
   }
@@ -536,6 +558,20 @@ export class RoomCore {
     if (b.i >= b.plan.length) { this.act(u.pid, { type: 'end' }); return; }
     const a = b.plan[b.i++];
     if (!this.act(u.pid, a)) this.R.t.bot = this.now + this.stepMs(u);
+  }
+  // 17.3 (QS): a bot step threw: end that bot's turn (an accepted, broadcast action like any timeout, so lockstep holds).
+  // If even that throws, retry a few times, then leave the room to its clean-up timer (never an endless alarm loop).
+  botFail() {
+    try {
+      const m = this.R && this.R.m; if (!m || m.s.over) return;
+      const u = unitById(m.s, m.s.active); if (!u || !(u.kind === 'hollow' || u.bot)) { this.schedule(true); return; }
+      if (this.act(u.pid, { type: 'end' }, true)) { m.botErr = 0; return; }
+      throw new Error('end refused');
+    } catch (e) {
+      const m = this.R && this.R.m; if (!m) return;
+      m.botErr = (m.botErr || 0) + 1;
+      if (m.botErr <= 3) this.R.t.bot = this.now + 2000; else this.oops('bot gave up', e);
+    }
   }
   timeout() {
     const m = this.R.m; if (!m || m.s.over || m.introUntil) return;

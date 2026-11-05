@@ -8,7 +8,7 @@
 // Wire format (client -> host):   { t: 'chat', k: '<phrase id>' , tm?: 1 }   or   { t: 'chat', x: '<text>', tm?: 1 }
 // Host -> peers (after checks):   { t: 'chat', id: <unit id>, pid, k | x, tm? }
 // Host -> sender when throttled:  { t: 'chat', a: 'slow' }
-import { EMOTES, EMOTE_PACKS } from './data.js';
+import { EMOTES } from './data.js';
 
 export const MAX_CUSTOM = 12, CUSTOM_LEN = 40, FAV_SLOTS = 8, FAV_MIN = 6, FAV_MAX = 10, RECENT_MAX = 10, LOG_MAX = 300, STRIP_ROWS = 3;
 export const DEFAULT_FAV = ['g.glhf', 't.storm', 't.help', 't.omw', 'r.nice', 'x.slow', 'k.gg', 'k.wp'];

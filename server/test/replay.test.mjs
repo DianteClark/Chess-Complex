@@ -100,6 +100,17 @@ await check('POST rate limit per IP (12 / hour)', async () => {
   return `${n} accepted, then 429`;
 });
 
+// 17.3 (QS): a small gzip that inflates far past the cap is refused while streaming (before: inflated whole, then measured)
+await check('gzip bomb upload is refused at the cap (413), corrupt gzip is a 400', async () => {
+  const bomb = gzipSync(Buffer.from('{"actions":"' + ' '.repeat(50 * 1024 * 1024) + '"}'), { level: 9 });
+  assert(bomb.length < 200 * 1024, 'bomb ' + bomb.length);
+  const t0 = performance.now(); const r = await post(new Uint8Array(bomb)); const ms = performance.now() - t0;
+  assert(r.status === 413, 'status ' + r.status);
+  const bad = new Uint8Array([0x1f, 0x8b, 8, 0, 1, 2, 3, 4, 5, 6, 7]); const r2 = await post(bad);
+  assert(r2.status === 400, 'corrupt status ' + r2.status);
+  return `${(bomb.length / 1024).toFixed(0)} KB gzip of 50 MB -> 413 in ${ms.toFixed(0)} ms; corrupt -> 400`;
+});
+
 await check('cloud match end: Room hook saves the replay (S2 hooks.js)', async () => {
   const code = await newRoom();
   const A = new Client(code, { name: 'Ana', autoPlay: true }); await A.open(); await A.waitMsg('welcome', 5000);
@@ -116,6 +127,7 @@ await check('cloud match end: Room hook saves the replay (S2 hooks.js)', async (
   const p = replay(j.rec);
   assert(j.verified === true && p.ok && stateHash(p.s) === stateHash(A.s) && j.rec.hash === stateHash(A.s), 'hook replay hash');
   assert(j.rec.humans && Object.values(j.rec.humans).some((h) => h.name === 'Ana') && !JSON.stringify(j.rec).includes('"cid"'), 'humans: public names only');
+  assert(!JSON.stringify(j).includes('"' + code + '"') && !('room' in j.rec), 'the (private) room code must not be in a public replay'); // 17.3 (QS)
   return `${id}, ${j.rec.actions.length} actions, hash ok`;
 });
 

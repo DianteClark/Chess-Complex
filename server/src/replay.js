@@ -112,8 +112,22 @@ async function readBody(req) {
   const buf = new Uint8Array(await req.arrayBuffer());
   if (buf.length > MAX_BYTES + 1024) return null;
   // gzip uploads are welcome (magic bytes), capped again once inflated
-  if (buf[0] === 0x1f && buf[1] === 0x8b) { const t = await gunzip(buf, true); return t.length > MAX_BYTES ? null : t; }
+  // 17.3 (QS): inflate as a stream and stop at the cap. Before, the whole upload was inflated first and measured after,
+  // so a ~200 KB gzip bomb could expand to ~200 MB inside the Worker (128 MB memory: the isolate dies).
+  if (buf[0] === 0x1f && buf[1] === 0x8b) return inflateCapped(buf, MAX_BYTES);
   return new TextDecoder().decode(buf);
+}
+export async function inflateCapped(buf, max) {
+  try {
+    const rd = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip')).getReader();
+    const dec = new TextDecoder(); let n = 0, out = '';
+    for (;;) {
+      const { done, value } = await rd.read(); if (done) break;
+      n += value.length; if (n > max) { try { await rd.cancel(); } catch {} return null; }
+      out += dec.decode(value, { stream: true });
+    }
+    return out + dec.decode();
+  } catch { return ''; } // corrupt gzip: '' fails JSON.parse below (400)
 }
 
 export async function routes(req, env, url, ctx) {

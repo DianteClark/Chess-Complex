@@ -94,7 +94,6 @@ function* genReverb(spec, inGain, outGain, key) {
   }
   rvState[key] = true;
 }
-export const reverbState = () => ({ ...rvState, pending: jobs.length });
 function shaperCurve(k) { const n = 1024, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); } return c; }
 
 // ---- 15.0 voice mode. While voice chat holds the microphone, iOS runs the audio session as 'play-and-record':
@@ -226,7 +225,6 @@ function debugInfo(ps) {
   if (ps) { try { o.underruns = (ps.underrunEvents ?? ps.fallbackFramesEvents ?? '?') + ' / ' + Math.round(((ps.underrunDuration ?? ps.fallbackDuration) || 0) * 1000) + ' ms'; } catch {} }
   return o;
 }
-export const audioDebug = () => ({ ...(ac ? debugInfo(ac.playbackStats || ac.playoutStats) : { state: 'none' }), log: LOG.slice(-40) });
 // Opening the audio device (new AudioContext) costs 50-300 ms on phones. Do it, suspended, in idle time after load,
 // so the first tap only has to resume(). If the player taps first, getCtx() still builds everything on the spot.
 function precreate() { if (!ac && !(settings.sfx === 0 && settings.music === 0)) try { getCtx(true); } catch {} }
@@ -242,7 +240,6 @@ function applyVolumes() {
 }
 export function setVolume(cat, v) { const k = { sfx: 'sfx', music: 'music', ui: 'sfxUi', combat: 'sfxCombat', world: 'sfxWorld', voice: 'sfxVoice' }[cat]; if (!k) return; settings[k] = Math.max(0, Math.min(1, +v || 0)); saveSettings(); }
 export function unlockAudio() { getCtx(); }
-export const isMuted = () => settings.sfx === 0 && settings.music === 0;
 export function setMuted(m) { if (m) { settings._s = settings.sfx || 0.8; settings._m = settings.music || 0.55; settings.sfx = 0; settings.music = 0; } else { settings.sfx = settings._s || 0.8; settings.music = settings._m || 0.55; } saveSettings(); }
 export function haptic(p) { if (settings.haptics && navigator.vibrate) try { navigator.vibrate(p); } catch {} }
 // Duck the music under big moments (announcer, kills, crowns). amt 0..1, len seconds.
@@ -316,7 +313,6 @@ function N(d, o = {}) {
 // pitch-dropping sine thump (kick / body)
 const K = (f0, f1, d, o = {}) => T(f0, d, { a: 0.002, ...o, to: f1, glide: o.drop || Math.min(d, 0.09) });
 const chord = (fs, d, o = {}) => fs.forEach((f, i) => T(f, d, { ...o, at: (o.at || 0) + i * (o.roll || 0) }));
-const at = (o, dt) => ({ ...o, at: (o.at || 0) + dt });
 
 // ---------------------------------------------------------------- recipes
 const lib = {
@@ -941,14 +937,6 @@ export function playNamed(n) {
   if (n.startsWith('multikill:')) return play(n, () => S.multikill(parseInt(n.slice(10), 10) || 2));
   if (n.startsWith('stinger:')) return play(n, () => sting(parseInt(n.slice(8), 10) || 1));
   if (S[n]) return sfx[n]();
-}
-// For the test page / codex: every concrete name this module answers to.
-export function soundNames() {
-  const out = Object.keys(S);
-  for (const id of Object.keys(D.ABILITIES || {})) out.push('ab:' + id);
-  for (const id of Object.keys(D.FINISHERS || {})) out.push('kill:' + id);
-  for (const p of Object.keys(D.PIECES || {})) out.push('promote:' + p);
-  return out;
 }
 
 // hidden page: suspend (saves battery), unless voice chat holds the context (remote voices keep playing)

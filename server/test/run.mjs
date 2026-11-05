@@ -135,6 +135,21 @@ if (on('protocol')) {
     await sleep(400); assert(!C.msgs.some((x) => x.t === 'chat' && x.k === 't.help'), 'enemy saw team chat');
     cs.forEach((c) => c.close());
   });
+  // 17.3 (QS): lobby-changing messages are flood-limited per seat (each one = broadcast + storage write + MM report)
+  await check('flood guard: 200 ready toggles -> about 20 lobby broadcasts, then leader gets one "Too fast"', async () => {
+    const { cs, A, B } = await room(2);
+    await sleep(200); const n0 = A.count('lobby');
+    for (let i = 0; i < 200; i++) B.send({ t: 'ready', on: i % 2 === 0 });
+    for (let i = 0; i < 40; i++) A.lead('location', { loc: 'random' });
+    await sleep(800);
+    const got = A.count('lobby') - n0, errs = A.msgs.filter((m) => m.t === 'err' && /Too fast/.test(m.why)).length;
+    assert(got <= 50, 'lobby broadcasts ' + got);
+    assert(errs === 1, 'too-fast errs ' + errs);
+    await sleep(1600); B.send({ t: 'ready', on: true }); // refilled: a normal message goes through again
+    await A.wait(() => A.lobby.players.some((p) => p.pid === B.myPid && p.st === 'ready'), 3000, 'ready after refill');
+    cs.forEach((c) => c.close());
+    return `${got} lobby broadcasts for 240 messages`;
+  });
 }
 
 // ---------------------------------------------------------------- determinism

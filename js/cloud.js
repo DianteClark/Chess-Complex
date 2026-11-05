@@ -62,7 +62,6 @@ if (sameOpen()) probeSame();
 if (AUTO && typeof window !== 'undefined') window.addEventListener('online', () => { if (HC.ok === false) HC.ok = null; if (sameOpen()) probeSame(); });
 export const endpoint = () => CLOUD_URL || (sameOpen() ? location.origin : null);
 const wsBase = () => CLOUD_URL && CLOUD_URL.replace(/^http/, 'ws');
-export const sameOrigin = () => !!CLOUD_URL && typeof location !== 'undefined' && CLOUD_URL === location.origin;
 
 // ---------- health ----------
 export const HEALTH = { timeout: 6000, okFor: 60000, failFor: 15000 }; // Host/Join wait up to ~6 s (slow phones) before phone hosting
@@ -87,7 +86,6 @@ export function healthy() {
     .then((ok) => { clearTimeout(to); HC.ok = ok; HC.at = Date.now(); HC.p = null; return ok; });
   return HC.p;
 }
-export const cloudHealthy = healthy;
 // Cached answer without waiting: true / false, or null when unknown (no check yet or expired).
 export function healthyNow() {
   if (sameOpen() || HC.p) return null;

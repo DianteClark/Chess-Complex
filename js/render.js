@@ -364,7 +364,6 @@ export class Renderer {
   }
 
   setState(s, events = [], first = false) {
-    const now = this.time;
     for (const u of s.units) {
       let d = this.disp.get(u.id);
       if (!d) { d = { face: u.x > SIZE / 2 ? -1 : 1, x: u.x, y: u.y, sx: u.x, sy: u.y, tx: u.x, ty: u.y, t0: -9, dur: 0.2, how: 'step', piece: u.piece, pop: 0, hp: u.hp, ghost: u.hp, lunge: null, deathAt: null, drop: null }; this.disp.set(u.id, d); }

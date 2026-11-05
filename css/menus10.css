@@ -149,13 +149,7 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: 0; bord
 .logo-line { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; height: auto; margin: 10px auto 2px; background: none; animation: none; }
 .logo-line::before, .logo-line::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold)); transform-origin: right; animation: grow .9s .5s var(--ease-out) both; }
 .logo-line::after { background: linear-gradient(90deg, var(--gold), transparent); transform-origin: left; }
-.logo-ten { position: relative; display: grid; place-items: center; min-width: 66px; height: 38px; padding: 0 14px; animation: tenIn .9s .7s var(--ease-back) both;
-  background: linear-gradient(180deg, #2c2644, #0f0d18); box-shadow: inset 0 0 0 1px rgba(240, 194, 94, .75), inset 0 1px 0 rgba(255, 255, 255, .22), 0 0 22px rgba(240, 194, 94, .35);
-  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%); }
-.logo-ten b { font-family: var(--display); font-weight: 900; font-size: 26px; line-height: 1; letter-spacing: .06em; padding-left: .06em; color: transparent;
-  background: linear-gradient(180deg, #ffffff 0%, #ffe6a6 45%, #e2a63e 75%, #fff1c9 100%); -webkit-background-clip: text; background-clip: text; }
-@keyframes tenIn { 0% { opacity: 0; transform: scale(2.2); filter: brightness(3); } 60% { opacity: 1; transform: scale(.95); } 100% { transform: none; filter: none; } }
-.new-player { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; align-self: center; margin-top: 10px; }
+.new-player { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; align-self: center; margin-top: 10px; }
 .menu > * { animation: riseIn .6s var(--ease-out) both; }
 .menu > *:nth-child(1) { animation-delay: .35s; } .menu > *:nth-child(2) { animation-delay: .42s; } .menu > *:nth-child(3) { animation-delay: .5s; }
 .play-cta { min-height: 64px; font-size: 21px; letter-spacing: .24em; border-radius: 16px; }
@@ -484,7 +478,6 @@ body.reduced #app .screen:not(.active) { transform: none; filter: none; }
   .kicker { margin-bottom: 4px; }
   .logo { transform: none; margin: 0; }
   .logo .logo-a { font-size: 50px; } .logo .logo-b { font-size: 24px; }
-  .logo-ten { height: 32px; font-size: 22px; min-width: 54px; }
   .play-cta { min-height: 54px; }
   .tile { min-height: 58px; }
   .new-player { margin-top: 4px; }

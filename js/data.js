@@ -307,7 +307,6 @@ export const QUESTS = {
   waves:    { text: 'Clear 4 waves in one Siege', goal: 4, reward: 110, best: true },
   bosses:   { text: 'Topple 2 bosses in Siege or the Gauntlet', goal: 2, reward: 120, stat: 'colossi' },
 };
-export const BOT_LEVELS = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
 
 // Example combos shown in the Codex. The strongest ones are left for players to find.
 export const COMBOS = [
@@ -406,8 +405,6 @@ export const ROYAL_REWARDS = (() => {
   });
   return r;
 })();
-// V's location finishers (ids agreed in V10_NOTES; a missing one pays its fallback until it ships).
-export const LOCATION_FINISHERS = { citadel: 'avalanche', forge: 'eruption', temple: 'maelstrom', gardens: 'overgrowth' };
 SKINS.arcane = { name: 'Arcane', price: null, season: 1, body: ['#7ff7e8', '#3a1060'], rim: '#e8fffb', glow: '#ff5af0', line: '#12052a', fx: 'spark' };
 SKINS.sovereign = { name: 'Sovereign', price: null, season: 1, body: ['#3a3a44', '#050507'], rim: '#ffd76a', glow: '#ffcf4a', line: '#ffd76a', fx: 'glint' };
 BOARDS.throne = { weather: 'embers', name: 'Throne Room', price: null, season: 1, light: '#4a1820', dark: '#33101a', vein: 'rgba(255,210,120,0.08)', frame: '#ffd76a', grid: 'rgba(255,210,120,0.14)', wallTop: ['#6a2a30', '#4a1a22'], wallFront: '#2a0c12', bg: ['#3a0c14', '#060203'], mote: '#ffd76a' };

@@ -123,8 +123,6 @@ export const isLocation = (id) => typeof id === 'string' && Object.prototype.has
 export function pickLocation(seed) { return LOCATION_IDS[seedHash(seed, 0x10c) % LOCATION_IDS.length]; }
 // Daily: the location of the day comes from the same date seed the Daily match uses (progression.dailySeed(date)).
 export const locationOfDay = (dailySeedValue) => pickLocation(dailySeedValue);
-// The wheel needs an order to spin through; the engine's pick is LOCATION_IDS[index].
-export const wheelIndex = (id) => Math.max(0, LOCATION_IDS.indexOf(id));
 
 // ---------- Custom lobby rules ----------
 // opts.custom = { location: id|'random', mirror: bool, hazards: bool, events: bool, storm: 'slow'|'normal'|'fast' }

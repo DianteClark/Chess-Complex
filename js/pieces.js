@@ -960,7 +960,7 @@ function pattern(p, x, y, z, ph) {
 
 // Shade a G-buffer for a skin. Returns RGBA for the base and additive overlay layers (one per animation phase).
 function shadeInit(g, skinId) {
-  const m = materialOf(skinId), n = g.W * g.H, anim = m.anim, nph = anim ? NPH[anim] : 0;
+  const m = materialOf(skinId), anim = m.anim, nph = anim ? NPH[anim] : 0;
   // RGBA buffers cover only the rows with coverage (offset `off`), and are pooled to keep GC quiet
   const k0 = g.by1 >= 0 ? g.by0 * g.W : 0, k1 = g.by1 >= 0 ? (g.by1 + 1) * g.W : 0, len = MX(4, (k1 - k0) * 4);
   const layers = []; for (let k = 0; k < nph; k++) layers.push(takeBuf(len));
@@ -1219,7 +1219,7 @@ const tone = (v) => 255 * (v < 0.82 ? v : 0.82 + 0.18 * (1 - Math.exp(-(v - 0.82
 // their real on-screen size x devicePixelRatio and are built lazily, from a lower-resolution guide.
 const BUCKETS = [64, 96, 128, 192, 288, 384, 512];
 const SPR = new Map(); // key piece|skin|res -> sprite record
-let sprPx = 0, sprVer = 0;
+let sprPx = 0;
 // Canvas pixels held by all sprites (~4 bytes each). LRU beyond this, but a sprite drawn in the last few seconds is
 // never evicted (the visible set may exceed the budget rather than thrash). Phones ~24 MB, big screens ~48 MB.
 // B3 10.1: phones get 6e6 px (~24 MB) whatever navigator.deviceMemory says (8 GB phones still kill tabs over canvas memory).
@@ -1243,7 +1243,7 @@ function* finishSteps(piece, skinId, res, g, sh) {
   // skin-independent crop box from the G-buffer (no per-skin pixel scans)
   const box = (pad) => { pad = Math.ceil(pad); const x0 = MX(0, g.bx0 - pad), y0 = MX(0, g.by0 - pad), x1 = MN(W - 1, g.bx1 + pad), y1 = MN(H - 1, g.by1 + pad); return { x: x0, y: y0, w: MX(0, x1 - x0 + 1), h: MX(0, y1 - y0 + 1) }; };
   const B = box(ow + res * 0.08), Bs = box(1);
-  if (B.w <= 0) { const s = { c: { img: null, x: 0, y: 0, w: 0, h: 0 }, sil: { img: null, x: 0, y: 0, w: 0, h: 0 }, layers: [], W, H, res, ox: g.ox, oy: g.oy, anim: null, outl: new Map(), px: 0, used: now() }; sprVer++; SPR.set(key, s); return; }
+  if (B.w <= 0) { const s = { c: { img: null, x: 0, y: 0, w: 0, h: 0 }, sil: { img: null, x: 0, y: 0, w: 0, h: 0 }, layers: [], W, H, res, ox: g.ox, oy: g.oy, anim: null, outl: new Map(), px: 0, used: now() }; SPR.set(key, s); return; }
   // work only inside the crop box. Small sprites finish in one step on shared scratch canvases (fewer canvas
   // allocations); big ones yield between steps and use their own.
   const r0 = sh.off / W, r1 = sh.n / W; // rows held by the shading buffers
@@ -1279,7 +1279,7 @@ function* finishSteps(piece, skinId, res, g, sh) {
     if (big) yield;
     layers.push({ img: imgCanvas(Bs.w, Bs.h, sub(L2, Bs)), x: Bs.x, y: Bs.y, w: Bs.w, h: Bs.h });
   }
-  const s = { c: { img: c, x: B.x, y: B.y, w: B.w, h: B.h }, sil: { img: silB, x: Bs.x, y: Bs.y, w: Bs.w, h: Bs.h }, layers, W, H, res, ox: g.ox, oy: g.oy, anim: sh.anim, outl: new Map(), used: now() }; sprVer++;
+  const s = { c: { img: c, x: B.x, y: B.y, w: B.w, h: B.h }, sil: { img: silB, x: Bs.x, y: Bs.y, w: Bs.w, h: Bs.h }, layers, W, H, res, ox: g.ox, oy: g.oy, anim: sh.anim, outl: new Map(), used: now() };
   giveBufs(sh);
   s.px = B.w * B.h + Bs.w * Bs.h * (1 + layers.length);
   const old = SPR.get(key); if (old) sprPx -= old.px;
@@ -1588,13 +1588,6 @@ function blitSprite(ctx, s, flash, outline, t) {
   }
   if (flash > 0) { ctx.globalAlpha *= Math.min(1, flash); blit(s.sil); }
 }
-// true once the full-quality sprite for this piece/skin exists at some resolution
-export const pieceReady = (piece, skinId) => !!bestOf(piece, skinId, 0);
-// true once a live draw at `px` sprite pixels per tile unit would show the final sprite (not a stand-in or a
-// lower-resolution one). Note: drawPiece WITHOUT opts.t is always final (it builds synchronously).
-export const isPieceReady = (piece, skinId, px = 160) => SPR.has(piece + '|' + (piece === 'colossus' && skinId === 'hollow' ? 'colossus-boss' : skinId) + '|' + pieceRes(px));
-// bumps whenever any sprite finishes (cheap change detection for callers that cache their own renders)
-export const pieceVersion = () => sprVer;
 
 // Icons are memoised URLs. A not-yet-built icon returns an SVG stand-in immediately (no canvas encode on the main
 // thread); any <img> showing it is upgraded in place once the real sprite exists (PNG encoded off-thread via toBlob).
@@ -1650,8 +1643,6 @@ export function pieceIcon(piece, skinId, color = null, px = 64, opts = null) {
   const j = JOBS.get(jk); if (j) (j.iconKeys ||= []).push(key);
   return url;
 }
-// debug / tests: true once pieceIcon(...) returns the final (non stand-in) image
-export const iconReady = (piece, skinId, color = null, px = 64, opts = null) => ICONS.has(pieceVariant(piece, opts) + '|' + skinId + '|' + color + '|' + px);
 // B3 10.1: blob: icon URLs pin their PNG until revoked; free them when the memo is dropped (shown <img>s keep their decoded image)
 function clearIcons() {
   const old = [...ICONS.values()].filter((u) => typeof u === 'string' && u.startsWith('blob:')); ICONS.clear();

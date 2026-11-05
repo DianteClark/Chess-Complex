@@ -362,7 +362,9 @@ export class Board extends DurableObject {
     M.chunks++;
     if (M.V.done) {
       const v = { ok: M.V.ok, why: M.V.why, result: M.V.result };
-      try { await main(this.env).dailyDone(M.job.cid, M.job.day, v); } catch (e) { await this.ctx.storage.setAlarm(Date.now() + 2000); return; } // retry the post
+      // retry the post; 17.3 (QS): at most 30 tries (~1 min), then drop the job (prune() marks the run 'rejected: lost'),
+      // so a failing 'main' can no longer keep this object waking every 2 s forever
+      try { await main(this.env).dailyDone(M.job.cid, M.job.day, v); } catch (e) { M.posts = (M.posts || 0) + 1; if (M.posts < 30) { await this.ctx.storage.setAlarm(Date.now() + 2000); return; } }
       this.sql.exec('DELETE FROM vq WHERE id = ?', M.id); this.sql.exec('DELETE FROM vck WHERE id = ?', M.id);
       this.noteJob(M);
       this.mem = null;

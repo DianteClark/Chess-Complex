@@ -99,7 +99,7 @@
 }
 @media (max-width: 360px) { .lb-tabs button { font-size: 11px; letter-spacing: .02em; } .lb-hero { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .lb-row { animation: none; } }
-body.reduce-motion .lb-row { animation: none; }
+body.reduced .lb-row { animation: none; } /* QC: the reduced-motion body class is .reduced (main.js), not .reduce-motion */
 
 /* Daily: "first run counts" rule line on the Play card, DNF rows */
 .lb-dnote { margin: 10px 0 0; padding: 8px 10px; border-radius: 5px; font-size: 12px; font-weight: 600; line-height: 1.35; background: rgba(240, 194, 94, .1); box-shadow: inset 3px 0 0 var(--gold); color: var(--gold2); }

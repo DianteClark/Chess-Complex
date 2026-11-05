@@ -1924,7 +1924,7 @@ Object.assign(FX.prototype, {
 
   // ----- per-frame: status emitters, telegraph, boss aura, actors -----
   update15(dt) {
-    const T = this.time, q = (this.lowQ ? 0.45 : 1) * (this.calm ? 0.6 : 1);
+    const q = (this.lowQ ? 0.45 : 1) * (this.calm ? 0.6 : 1);
     const emit = (rate) => { const v = rate * q * dt; return Math.floor(v) + (Math.random() < v % 1 ? 1 : 0); };
     for (const [id, m] of this.st) {
       const p = this.posOf(id); if (!p) continue;
@@ -2545,7 +2545,7 @@ Object.assign(FX.prototype, {
     for (let i = 0; i < N; i++) this.spawn({ kind: 'spark', x: x + rnd(-0.4, 0.4), y: b - rnd(0.3, 1.3), vx: 0, vy: rnd(0.15, 0.4), g: 0, drag: 0.4, life: rnd(0.8, 1.2), color: i % 2 ? TEMPO2 : '#e2d6ff', size: rnd(0.03, 0.05) });
   },
   drawGround16(ctx) {
-    const calm = this.calm, lowQ = this.lowQ, T = this.time;
+    const calm = this.calm, lowQ = this.lowQ;
     ctx.save();
     for (const f of this.fx16) {
       if (f.t < 0) continue;

@@ -26,7 +26,7 @@ const makeCode = () => { const b = crypto.getRandomValues(new Uint8Array(5)); re
 
 function allowOrigin(o) {
   if (!o) return null;
-  if (o === 'https://dianteclark.github.io') return o;
+  if (o === 'https://dianteclark.github.io' || o === 'https://chess-complex.chesscomplex.workers.dev') return o; // 17.3 (QS): + the Worker's own origin (explicit, not only via url.origin)
   if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o)) return o;
   return null;
 }
@@ -81,7 +81,9 @@ export default {
       for (const mod of [platform, board, replay, stats, match]) { const r = await mod.routes(req, env, url, ctx); if (r) return cors(req, r); }
       return cors(req, json({ error: 'not found' }, 404));
     } catch (e) {
-      return cors(req, json({ error: 'server', msg: String(e && e.message || e).slice(0, 200) }, 500));
+      // 17.3 (A0): log the detail (sampled Workers Logs), never echo internals to the client
+      try { console.error('[worker] 500', req.method, path, String(e && e.message || e).slice(0, 200)); } catch {}
+      return cors(req, json({ error: 'server' }, 500));
     }
   },
 };

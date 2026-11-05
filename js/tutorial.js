@@ -1,5 +1,5 @@
 // Guided tutorial lessons. Each step can set up the arena, mark tiles, glow UI, and wait for an objective.
-import { spawnDummy, unitAt, canStand, ARENA, stats } from './engine.js';
+import { spawnDummy, canStand, ARENA, stats } from './engine.js';
 
 const KN = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
 const inArena = (x, y) => x >= ARENA.x0 && x <= ARENA.x1 && y >= ARENA.y0 && y <= ARENA.y1;

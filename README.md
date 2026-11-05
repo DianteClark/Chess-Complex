@@ -1,21 +1,28 @@
 # Chess Complex
 
-**Play now: https://dianteclark.github.io/Chess-Complex/**
+**Play now: https://chess-complex.chesscomplex.workers.dev** (the original GitHub Pages copy at https://dianteclark.github.io/Chess-Complex/ still works and offers a one-tap move with your progress)
 
 A turn-based chess battle royale for up to 8 players. Everyone starts as a Pawn on a 16x16 board. Collect Promotion Shards, evolve your piece, outlast the storm, and be the last piece standing.
 
 ## Features
-- **Speed-based turns:** every piece has a speed meter, so faster builds act more often (with diminishing returns past 12 SPD).
+- **Round-based turns:** every piece acts once per round, fastest SPD first. Every stat has an edge: Speed Edge (SPD), Overkill (ATK), Guard (DEF), Second Wind (HP). Hold your turn to act last.
 - **Hybrid builds:** pick a preset or spend 10 points across HP / ATK / DEF / SPD, choose a base ability, and equip one active ability for every piece.
 - **Fixed evolution path:** Pawn, then Knight or Bishop, then Rook, then Queen. Or Hone your current piece (+15% stats and a stronger signature) to stay your favourite piece all game.
 - **Signature + equipped abilities with AOE shapes:** Knight T-Strike, Bishop Transpose, Rook Battering Charge, Queen Royal Decree, and more.
 - **Living board:** walls, breakable rubble and crates, brambles, healing shrines, and Hollows that guard shard caches.
 - **The storm:** the outer ring cracks and collapses every few rounds, then sudden death.
 - **The Crown:** appears on round 7. Whoever takes it becomes King. Topple the King and the Crown shatters into 4 shards.
-- **Online friend codes:** host a room, share a 5-letter code or invite link, fill empty seats with bots.
+- **Online:** Quick Play and Browse for public matches, or friend codes for private parties, all running on a Cloudflare server (phone-hosted play as a fallback). Cloud save with transfer codes, leaderboards (Crown Rating, weekly Seasons, a server-verified Daily) and shareable replays.
 - **Armory:** earn Marks every match and unlock piece sets, board themes (Marble Court, Neon Grid, Ember Forge, Moonlit Garden) and finishers (Inferno, Thunderclap, Void Rift, Midas Touch) that play when you eliminate someone.
 - **Progression:** XP and levels with titles from Recruit to Legend; every level-up pays out Marks.
 - **Juice:** hit-stop, slow-motion eliminations, camera punches, lunging attacks, per-ability VFX, shattering pieces, collapsing storm tiles, damage previews with KO markers, kill streak callouts, emotes, haptics and a generative soundtrack that intensifies as the match closes in.
+
+## What's in 17.x
+- **Cloud:** online matches, parties and Quick Play run on Cloudflare (Workers + Durable Objects) with lockstep sync; cloud saves without sign-up, transfer codes, leaderboards, replays, voice relay and an /admin stats page. Setup: docs/SETUP_CLOUDFLARE.md.
+- **Readable combat:** one action line per turn with a tap-open Match Log, merged damage numbers, callouts saved for headline moments.
+
+## What's in 16.0
+- **Tactics:** stat edges, Hold, Shard Interest, four tempo abilities, and the Clockwork Spire location with Cogwheels and Reversal.
 
 ## What's in 15.0
 - **World Tour:** 8 locations with their own scenery, weather, music, hazards and events, chosen by a wheel.
