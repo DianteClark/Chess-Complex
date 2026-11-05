@@ -1,5 +1,12 @@
 # Changelog
 
+## 18.1: Warden Rating
+- Co-op (Siege, Gauntlet) gets its own rating: run score from waves held, win, mode (Gauntlet x1.2), party size and contribution (±15%); rating = mean of the best third of the last 30 runs; provisional below 5 runs.
+- Tiers Squire, Sentinel (450), Guardian (650), Bulwark (800), Paladin (920), Warden (1050); Co-op leaderboard; weekly co-op season top 50 titles and banners.
+- Online cloud runs count automatically; solo runs only when server-replay-verified.
+- Fix: co-op lobby Ally tag no longer overlaps names (now a badge on the card border).
+- Engine unchanged (PROTO stays 3).
+
 ## 18.0 "Rivals" (November 2026)
 - **Nemesis** (NE): deterministic per-match nemesis map from createMatch inputs (solo bots by name, phone-hosted via join, cloud from verified seats); Vendetta (+1 shard, +40 Marks), streaks, Thorn bonus; lobby card, HUD crown of thorns, callouts, results, profile Rivals panel. PROTO 3.
 - **Ranks** (NE): Pawn-King tiers from Crown Rating (1100/1250/1400/1550/1750), badges on online names; weekly top-50 season titles + banners delivered through a Player DO inbox.

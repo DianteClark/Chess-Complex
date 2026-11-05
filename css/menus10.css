@@ -646,3 +646,6 @@ button.chip { min-height: 40px; display: inline-flex; align-items: center; justi
 #m-settings .modal-box { padding-bottom: 24px; }
 #m-settings .modal-box > .btn.wide:last-child { margin-top: 18px; }
 #m-settings .modal-box > :nth-last-child(2) { margin-bottom: 72px; }
+/* 18.1 (A0): the team tag rides the card's top border as a badge, so it never sits over the name or Leader line */
+.lobby .pcard .team-tag { top: -8px; right: 10px; line-height: 1.2; background: var(--bg, #15111f); z-index: 1; }
+.lobby .pcard:has(.team-tag) { overflow: visible; }

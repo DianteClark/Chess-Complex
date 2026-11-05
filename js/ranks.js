@@ -3,6 +3,7 @@
 // Tiers and bands live in js/rivals.js (shared with the server). No emojis: the badge is an inline SVG shield with the
 // tier's chess piece.
 import { tierOf, cleanRk, TIERS, PROVISIONAL, rewardFor } from './rivals.js';
+import { applyReward as applyWReward } from './warden.js'; // 18.1 (L3)
 
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // piece glyphs in a 24 x 24 box
@@ -81,11 +82,12 @@ export function inbox(items) {
         p.seasonRewards = [...(Array.isArray(p.seasonRewards) ? p.seasonRewards : []).filter((x) => x && x.sid !== it.sid), { sid: String(it.sid || '').slice(0, 12), rank: +it.rank | 0, reward: rw.id, title: rw.title, banner: rw.banner }].slice(-12);
         got.push({ rank: +it.rank | 0, rw, sid: it.sid });
       }
+      if (it.k === 'wseason') { const w = applyWReward(p, it); if (w) got.push({ ...w, coop: true }); } // 18.1 (L3): weekly co-op season rewards
       p.inboxDone.push(it.id);
     }
     p.inboxDone = p.inboxDone.slice(-20);
     if (H.save) H.save();
-    for (const g of got) { try { H.toast && H.toast(`Season reward: you finished #${g.rank} last week. New title "${g.rw.title}" and the ${g.rw.title} banner are yours.`); H.sfx && H.sfx('levelup'); } catch {} }
+    for (const g of got) { try { H.toast && H.toast(`${g.coop ? 'Co-op season' : 'Season'} reward: you finished #${g.rank} last week. New title "${g.rw.title}" and the ${g.rw.title} banner are yours.`); H.sfx && H.sfx('levelup'); } catch {} }
   }, 60);
 }
 export function acks() { const p = P(); return p && Array.isArray(p.inboxDone) ? p.inboxDone.slice(-20) : []; }

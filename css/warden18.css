@@ -1,0 +1,54 @@
+/* =====================================================================
+   Chess Complex 18.1 - Warden Rating (L3): js/wardenui.js
+   Co-op tab on the Leaderboards screen, hex Warden badges (lobbies, results,
+   rows), profile panel, results + Play screen notes.
+   Rules: text >= 11px, tap targets >= 40px, reduced motion respected.
+   ===================================================================== */
+.lb-tabs { grid-template-columns: repeat(4, 1fr); }
+.lb-tabs button { letter-spacing: .02em; font-size: 11px; padding: 8px 2px; }
+@media (min-width: 480px) { .lb-tabs button { font-size: 12px; letter-spacing: .06em; } }
+
+.wd18 { display: inline-flex; vertical-align: -3px; margin-right: 5px; flex: none; line-height: 0; }
+.wd18-svg { display: block; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .55)); }
+.wd18-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 4px; border-radius: 6px; background: rgba(120, 220, 170, .07);
+  border: 1px solid color-mix(in srgb, var(--wd, #fff) 50%, transparent); vertical-align: middle; white-space: nowrap; align-self: flex-start; }
+.wd18-chip b { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--wd, #fff); }
+.wd18-chip em { font-style: normal; font-size: 11px; color: rgba(255, 255, 255, .7); }
+.wd18-chip.prov b { color: rgba(255, 255, 255, .8); }
+
+.wd18-ladder { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 8px 0; }
+@media (min-width: 560px) { .wd18-ladder { grid-template-columns: repeat(6, 1fr); } }
+.wd18-step { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border-radius: 6px; background: rgba(255, 255, 255, .04); border: 1px solid transparent; min-width: 0; }
+.wd18-step b { font-size: 11px; font-weight: 800; color: var(--wd); letter-spacing: .02em; }
+.wd18-step small { font-size: 11px; color: rgba(255, 255, 255, .6); }
+.wd18-step.on { border-color: var(--wd); background: color-mix(in srgb, var(--wd) 16%, transparent); }
+
+/* Co-op tab */
+.wd-seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+.wd-seg button { min-height: 40px; font-size: 11px; letter-spacing: .04em; white-space: nowrap; padding: 6px 2px; }
+.lb-big.wd-big { background: radial-gradient(circle at 50% 30%, rgba(140, 232, 180, .2), rgba(0, 0, 0, .25) 70%); box-shadow: inset 0 0 0 1px rgba(140, 232, 180, .42); }
+.lb-big.wd-big b { color: #e6ffef; text-shadow: 0 0 18px rgba(140, 232, 180, .35); }
+.wd-rule { color: var(--ink) !important; opacity: .85; }
+
+/* profile panel */
+.wd-prof .lbl .pts { margin-left: 6px; }
+.wd-pf { display: grid; grid-template-columns: minmax(110px, 36%) 1fr; gap: 10px; align-items: center; margin-top: 6px; }
+.wd-pf-big { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 6px; text-align: center;
+  background: radial-gradient(circle at 50% 30%, rgba(140, 232, 180, .18), rgba(0, 0, 0, .25) 70%); box-shadow: inset 0 0 0 1px rgba(140, 232, 180, .35); }
+.wd-pf-big .wd18-chip { align-self: center; }
+.wd-pf-big > b { font-family: var(--display); font-weight: 900; font-size: 26px; line-height: 1.1; color: #e6ffef; }
+.wd-pf-big > small { font-size: 11px; color: var(--mute); }
+.wd-pf-s { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.wd-pf-s span { display: flex; flex-direction: column; align-items: center; padding: 6px 2px; border-radius: 5px; background: rgba(255, 255, 255, .04); min-width: 0; }
+.wd-pf-s small, .wd-pf-s em { font-size: 11px; font-style: normal; color: var(--mute); white-space: nowrap; }
+.wd-pf-s b { font-size: 16px; color: var(--ink); }
+.wd-prof .btn.wide { min-height: 42px; }
+
+/* results line + Play note */
+.wd-res .wd18 { vertical-align: -4px; }
+.wd-note { margin: 10px 0 0; }
+.wd-note[data-tone="go"] { background: rgba(140, 232, 180, .1); box-shadow: inset 3px 0 0 #8fe0c8; color: #d8fbe8; }
+#s-lobby .pcard b .wd18, #r-board .wd18 { margin-right: 4px; }
+@media (prefers-reduced-motion: reduce) { .wd18-step, .wd18-chip { transition: none; } }
+/* co-op lobby cards: the badge pins to the avatar's corner, so it never takes room from the name */
+.lobby .pcard b .wd18 { position: absolute; left: 44px; top: 5px; margin: 0; z-index: 1; }

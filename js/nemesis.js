@@ -101,7 +101,7 @@ export const rkBadge = (pid) => RK.badge(RKMAP.get(pid), 14);
 let M = null; // this match: {myId, nemId, hunters:Set, rk: Map(pid -> rk), killer, events, said}
 export function start(g, sess, s, myId) {
   M = { myId, said: false, killer: null, vend: false, thorn: [], again: null, rk: (RKMAP = new Map()), sess };
-  for (const u of s.units) if (u.kind === 'player') { const seat = seatOf(sess, u.pid); const rk = seat && seat.rk ? seat.rk : u.pid === (sess && sess.myPid) && sess && sess.cloud ? RK.myRk() : null; if (rk) M.rk.set(u.pid, rk); }
+  for (const u of s.units) if (u.kind === 'player') { const seat = seatOf(sess, u.pid); const rk = seat && seat.rk ? seat.rk : u.pid === (sess && sess.myPid) && sess && sess.cloud ? RK.myRk() : null; if (rk && !s.siege) M.rk.set(u.pid, rk); } // 18.1 (L3): co-op shows Warden badges, not the Crown
   if (g && g.r) { g.r.tagHook = tagHook; }
 }
 function ids(s) {

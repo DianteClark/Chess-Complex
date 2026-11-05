@@ -678,6 +678,11 @@ export const BANNERS = {
   season_podium:    { name: 'Season Finalist',  colors: ['#e4ebf7', '#3a4660'], accent: '#ffffff', pattern: 'damask', price: null, weekly: 'Weekly Season: finish top 3' },
   season_elite:     { name: 'Season Elite',     colors: ['#c49bff', '#2a1458'], accent: '#ffd98a', pattern: 'stripes', price: null, weekly: 'Weekly Season: finish top 10' },
   season_contender: { name: 'Season Contender', colors: ['#7fb7ff', '#10264a'], accent: '#cfe4ff', pattern: 'stripes', price: null, weekly: 'Weekly Season: finish top 50' },
+  // 18.1 (L3): weekly co-op season rewards (js/warden.js WSEASON_REWARDS), same inbox delivery
+  warden_champion:  { name: 'Lord of the Keep', colors: ['#c6f27a', '#1d3a10'], accent: '#f4ffd8', pattern: 'runes', price: null, weekly: 'Weekly Co-op Season: finish 1st' },
+  warden_podium:    { name: 'Keepwarden',       colors: ['#8fe0c8', '#123a32'], accent: '#e2fff6', pattern: 'filigree', price: null, weekly: 'Weekly Co-op Season: finish top 3' },
+  warden_elite:     { name: 'Wavebreaker',      colors: ['#7ec8f2', '#0f2c44'], accent: '#d9f1ff', pattern: 'veins', price: null, weekly: 'Weekly Co-op Season: finish top 10' },
+  warden_contender: { name: 'Hollowbane',       colors: ['#b9c2b0', '#2a3028'], accent: '#eef3e8', pattern: 'cracks', price: null, weekly: 'Weekly Co-op Season: finish top 50' },
 };
 export const DEFAULT_BANNERS = ['gold', 'crimson', 'azure', 'emerald', 'violet', 'ember', 'frost', 'slate'];
 // World Tour collections: one per location. Items whose art is not in this build yet are skipped until they ship.

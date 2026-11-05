@@ -24,6 +24,7 @@ import { verifyPlayer } from './player.js';
 import { rkPub, rewardFor, SEASON_REWARDS } from '../../js/rivals.js'; // 18.0 (NE): rank tiers on rows, weekly season rewards
 import { dayNum, utcDayKey, DAY_RE } from '../../js/daily.js';
 import { RATING, rateMatch, ratedMode, seasonId, seasonEnds, seasonPoints, verifiedSeats, cleanName, cleanTitle, cleanTok, verifyStart, verifyStep, checkActions, VERIFY } from './lbcore.js';
+import { coopVerifyStart } from './lbcore.js'; import { install as wInstall, rateCoop, routes as wRoutes } from './warden.js'; import { wkPub } from '../../js/warden.js'; // 18.1 (L3): Warden Rating (co-op)
 
 const json = (o, status = 200, extra) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(extra || {}) } });
 const CID_RE = /^[0-9A-Z]{10}$/;
@@ -32,15 +33,16 @@ const main = (env) => env.BOARD.get(env.BOARD.idFromName(MAIN));
 const vq = (env) => env.BOARD.get(env.BOARD.idFromName(VQ));
 const testOn = (env) => !!(env && env.LB_TEST && env.LB_TEST !== '0');
 export const LB = { top: 50, topMax: 100, around: 5, keepArch: 100, dailyKeepDays: 8, maxBody: 256 * 1024, rule: 'Your first run of the day counts. Quit it and it is a DNF; runs after it are practice.', dnfAfter: 90 * 60e3 };
-const BOARDS = ['rating', 'season', 'daily'];
+const BOARDS = ['rating', 'season', 'daily', 'warden', 'wseason']; // 18.1 (L3): warden + wseason (co-op)
 const avatarOf = (a) => { const [pc, sk] = a && typeof a === 'object' ? [a.piece, a.skin] : String(a || '').split(':'); return cleanTok(pc) ? cleanTok(pc) + (cleanTok(sk) ? ':' + cleanTok(sk) : '') : ''; }; // 'piece:skin'
 const dayOk = (day, t = Date.now()) => DAY_RE.test(String(day || '')) && Math.abs(dayNum(day) - dayNum(utcDayKey(t))) <= 1;
 
 // ---------- the match-end hook (S2) ----------
 export async function rate(env, rec) {
   if (!env || !env.BOARD || !rec || rec.tampered) return null;
+  const wd = await rateCoop(env, rec, main(env)).catch(() => null); // 18.1 (L3): co-op runs -> Warden Rating (any verified seat)
   const seats = verifiedSeats(adaptRec(rec));
-  if (seats.length < 2) return null; // only matches with 2+ verified humans count (no bot farming)
+  if (seats.length < 2) return wd || null; // only matches with 2+ verified humans count (no bot farming)
   return main(env).rate(slimRec(rec, seats));
 }
 // rec.result.places is [{pid, place, team, bot}] (S2); older/dev shapes {pid: place} are accepted too
@@ -66,7 +68,7 @@ export async function scheduled(event, env, ctx) {
   if (!env || !env.BOARD) return;
   const t = (event && event.scheduledTime) || Date.now();
   try { await main(env).rollover(t); } catch (e) { console.log('[board] rollover failed', String(e && e.message || e)); }
-  try { await main(env).deliver(); } catch (e) { console.log('[board] rewards failed', String(e && e.message || e)); } // 18.0 (NE): season rewards -> Player inboxes (retries what is left)
+  try { await main(env).deliver(); await main(env).wDeliver(); /* 18.1 (L3) */ } catch (e) { console.log('[board] rewards failed', String(e && e.message || e)); } // 18.0 (NE): season rewards -> Player inboxes (retries what is left)
   if (!event || event.cron !== '10 0 * * 1') { try { await main(env).prune(t); await vq(env).kick(); } catch {} }
 }
 
@@ -75,6 +77,7 @@ export async function routes(req, env, url, ctx) {
   const p = url.pathname;
   if (!p.startsWith('/lb/') && p !== '/lb') return null;
   if (!env.BOARD) return json({ error: 'boards offline' }, 503);
+  { const w = await wRoutes(req, env, url, main(env), vq(env), testOn(env)); if (w) return w; } // 18.1 (L3): /lb/coop/*
   const q = url.searchParams, m = req.method;
   const cid = (q.get('cid') || '').toUpperCase();
   const board = q.get('board') || 'season';
@@ -103,7 +106,7 @@ export async function routes(req, env, url, ctx) {
     if (!testOn(env)) return json({ error: 'not found' }, 404);
     const b = m === 'POST' ? await req.json().catch(() => ({})) : {};
     if (p === '/lb/test/rate') return json({ r: await rate(env, b.rec) });
-    if (p === '/lb/test/rollover') { const r = await main(env).rollover(+b.now || Date.now()); if (b.deliver) r.rewards = await main(env).deliver(); return json(r); } // 18.0 (NE): deliver = run the reward queue like the cron
+    if (p === '/lb/test/rollover') { const r = await main(env).rollover(+b.now || Date.now()); if (b.deliver) { r.rewards = await main(env).deliver(); r.wrewards = await main(env).wDeliver(); /* 18.1 (L3) */ } return json(r); } // 18.0 (NE): deliver = run the reward queue like the cron
     if (p === '/lb/test/rewards') return json(await main(env).rewardQ()); // 18.0 (NE)
     if (p === '/lb/test/reset') { await main(env).reset(); await vq(env).reset(); return json({ ok: true }); }
     if (p === '/lb/test/cpu') return json(await vq(env).cpu(q.get('reset') === '1'));
@@ -173,6 +176,7 @@ export class Board extends DurableObject {
     x('CREATE INDEX IF NOT EXISTS daily_score ON daily (day, st, score DESC)');
     x('CREATE TABLE IF NOT EXISTS rated (mid TEXT PRIMARY KEY, at INTEGER NOT NULL)');
     x('CREATE TABLE IF NOT EXISTS vq (id INTEGER PRIMARY KEY AUTOINCREMENT, cid TEXT, day TEXT, job TEXT NOT NULL, at INTEGER NOT NULL)');
+    this.wSchema(); // 18.1 (L3)
     x('CREATE TABLE IF NOT EXISTS vck (id INTEGER PRIMARY KEY, chunks INTEGER, state TEXT)');
   }
   one(q, ...a) { return this.sql.exec(q, ...a).toArray()[0] || null; }
@@ -209,6 +213,7 @@ export class Board extends DurableObject {
   }
   // Archive every season older than the current one: keep the top LB.keepArch of the most recent ended season only.
   async rollover(t = Date.now()) {
+    this.wRollover(t); // 18.1 (L3): the co-op season rolls over with it
     const cur = seasonId(t);
     const known = this.getMeta('season', null);
     const old = this.all('SELECT DISTINCT sid FROM season WHERE sid < ? ORDER BY sid DESC', cur).map((r) => r.sid);
@@ -238,9 +243,11 @@ export class Board extends DurableObject {
   }
 
   // ----- main: reading -----
-  sidFor(o) { return o.sid === 'last' ? this.getMeta('last', null) : seasonId(); }
+  sidFor(o) { return o.sid === 'last' ? this.getMeta(o.board === 'wseason' ? 'wlast' : 'last', null) : seasonId(); }
   // value, filter and ordering for each board
   spec(o) {
+    if (o.board === 'warden') return { from: 'warden', where: 'games >= ?', args: [5], val: 'wr', order: 'wr DESC, games DESC, at ASC' }; // 18.1 (L3): provisional (< WARDEN.prov = 5 runs) hidden
+    if (o.board === 'wseason') return o.sid === 'last' ? { from: 'warch', where: 'sid = ?', args: [this.sidFor(o)], val: 'wpts', order: 'rank ASC', arch: true } : { from: 'wseason', where: 'sid = ?', args: [seasonId()], val: 'wpts', order: 'wpts DESC, wins DESC, at ASC' };
     if (o.board === 'rating') return { from: 'rating', where: 'games >= ?', args: [RATING.provisional], val: 'r', order: 'r DESC, games DESC, at ASC' };
     if (o.board === 'daily') return { from: 'daily', where: "day = ? AND st = 'ok'", args: [o.day], val: 'score', order: 'score DESC, at ASC' };
     if (o.sid === 'last') return { from: 'arch', where: 'sid = ?', args: [this.sidFor(o)], val: 'pts', order: 'rank ASC', arch: true };
@@ -252,12 +259,13 @@ export class Board extends DurableObject {
     if (cid && r.cid === cid) o.me = true;
     const k = r.r != null && r.games != null && r.cid && !('pts' in r) && !('score' in r) ? r : r.cid ? this.one('SELECT r, games FROM rating WHERE cid = ?', r.cid) : null; // 18.0 (NE): Crown Rating tier on every row
     if (k) o.rk = rkPub(k.r, k.games);
+    if (r.wr != null || 'wpts' in r) { const w = r.wr != null ? r : r.cid ? this.one('SELECT wr, games FROM warden WHERE cid = ?', r.cid) : null; if (w) o.wk = wkPub(w.wr, w.games); } // 18.1 (L3): Warden tier on co-op rows
     return o;
   }
   // ----- 18.0 (NE): ranks for the Room (lobby badges) + weekly season rewards -----
   async ranks(cids) {
     const out = {};
-    for (const c of (Array.isArray(cids) ? cids : []).slice(0, 16)) { if (!CID_RE.test(String(c))) continue; const r = this.one('SELECT r, games FROM rating WHERE cid = ?', c); out[c] = r ? rkPub(r.r, r.games) : rkPub(RATING.start, 0); }
+    for (const c of (Array.isArray(cids) ? cids : []).slice(0, 16)) { if (!CID_RE.test(String(c))) continue; const r = this.one('SELECT r, games FROM rating WHERE cid = ?', c); out[c] = { ...(r ? rkPub(r.r, r.games) : rkPub(RATING.start, 0)), ...this.wPub(c) }; } // 18.1 (L3): + {w, wp?} Warden Rating
     return out;
   }
   // The ended season's top finishers (rows of the archive) wait in meta 'rwq' until each Player DO has the item.
@@ -314,7 +322,7 @@ export class Board extends DurableObject {
   around(o, me) {
     if (!me) return [];
     const S = this.spec(o);
-    if (S.arch) return this.all(`SELECT *, pts AS v FROM arch WHERE sid = ? AND rank BETWEEN ? AND ? ORDER BY rank`, S.args[0], me.rank - o.k, me.rank + o.k).map((r) => this.pubRow(r, r.rank, o.cid));
+    if (S.arch) return this.all(`SELECT *, ${S.val} AS v FROM ${S.from} WHERE sid = ? AND rank BETWEEN ? AND ? ORDER BY rank`, S.args[0], me.rank - o.k, me.rank + o.k).map((r) => this.pubRow(r, r.rank, o.cid));
     const r = this.one(`SELECT *, ${S.val} AS v FROM ${S.from} WHERE ${S.where} AND cid = ?`, ...S.args, o.cid);
     const above = this.all(`SELECT *, ${S.val} AS v FROM ${S.from} WHERE ${S.where} AND cid != ? AND (${S.val} > ? OR (${S.val} = ? AND at < ?)) ORDER BY ${S.val} ASC, at DESC LIMIT ?`, ...S.args, o.cid, r.v, r.v, r.at, o.k).reverse();
     const below = this.all(`SELECT *, ${S.val} AS v FROM ${S.from} WHERE ${S.where} AND cid != ? AND (${S.val} < ? OR (${S.val} = ? AND at >= ?)) ORDER BY ${S.order} LIMIT ?`, ...S.args, o.cid, r.v, r.v, r.at, o.k);
@@ -324,8 +332,10 @@ export class Board extends DurableObject {
   async view(o, what) {
     if (o.board === 'season' && o.sid !== 'last') await this.rollover();
     const head = { board: o.board, day: o.board === 'daily' ? o.day : undefined, sid: o.board === 'season' ? this.sidFor(o) : undefined, ends: o.board === 'season' && o.sid !== 'last' ? seasonEnds(seasonId()) : undefined, last: o.board === 'season' ? this.getMeta('last', null) : undefined, of: this.count(o), dnf: o.board === 'daily' ? this.dnfCount(o) : undefined, at: Date.now() };
+    if (o.board === 'wseason') { if (o.sid !== 'last') await this.rollover(); Object.assign(head, { sid: this.sidFor(o), ends: o.sid !== 'last' ? seasonEnds(seasonId()) : undefined, last: this.getMeta('wlast', null), of: this.count(o) }); } // 18.1 (L3)
     if (what === 'top') return { ...head, top: this.top(o) };
     const me = o.cid ? this.mine(o) : null;
+    if (o.board === 'warden' || o.board === 'wseason') return { ...head, top: this.top(o), me, around: me && me.rank > o.n ? this.around(o, me) : [], card: o.cid ? this.wCard(o.cid) : null }; // 18.1 (L3)
     if (what === 'around') return { ...head, me, around: this.around(o, me) };
     const extra = o.board === 'rating' && o.cid ? this.ratingCard(o.cid) : o.board === 'daily' && o.cid ? this.dailyCard(o.cid, o.day) : null;
     return { ...head, top: this.top(o), me, around: me && me.rank > o.n ? this.around(o, me) : [], card: extra };
@@ -390,7 +400,7 @@ export class Board extends DurableObject {
     if (!this.mem || this.mem.id !== head.id) {
       const job = JSON.parse(head.job), ck = this.one('SELECT * FROM vck WHERE id = ?', head.id);
       let V = null;
-      try { V = ck ? JSON.parse(ck.state) : verifyStart(job); } catch (e) { V = { done: true, ok: false, why: 'setup' }; }
+      try { V = ck ? JSON.parse(ck.state) : job.kind === 'coop' ? coopVerifyStart(job) : verifyStart(job); /* 18.1 (L3): solo co-op runs share the queue */ } catch (e) { V = { done: true, ok: false, why: 'setup' }; }
       this.mem = { id: head.id, job, V, chunks: ck ? ck.chunks : 0 };
       if (head.at < Date.now() - 600e3) { V.done = true; V.ok = false; V.why = 'timeout'; }
     }
@@ -403,7 +413,7 @@ export class Board extends DurableObject {
       const v = { ok: M.V.ok, why: M.V.why, result: M.V.result };
       // retry the post; 17.3 (QS): at most 30 tries (~1 min), then drop the job (prune() marks the run 'rejected: lost'),
       // so a failing 'main' can no longer keep this object waking every 2 s forever
-      try { await main(this.env).dailyDone(M.job.cid, M.job.day, v); } catch (e) { M.posts = (M.posts || 0) + 1; if (M.posts < 30) { await this.ctx.storage.setAlarm(Date.now() + 2000); return; } }
+      try { if (M.job.kind === 'coop') await main(this.env).wDone(M.job, v); else await main(this.env).dailyDone(M.job.cid, M.job.day, v); /* 18.1 (L3) */ } catch (e) { M.posts = (M.posts || 0) + 1; if (M.posts < 30) { await this.ctx.storage.setAlarm(Date.now() + 2000); return; } }
       this.sql.exec('DELETE FROM vq WHERE id = ?', M.id); this.sql.exec('DELETE FROM vck WHERE id = ?', M.id);
       this.noteJob(M);
       this.mem = null;
@@ -423,7 +433,7 @@ export class Board extends DurableObject {
     while (!V.done && guard++ < 100000) { const t0 = performance.now(); verifyStep(V, job.actions, budget ? { ...VERIFY, ...budget } : VERIFY); times.push(performance.now() - t0); }
     return { ok: V.ok, why: V.why, result: V.result, chunks: times.length, max: Math.max(...times), plans: V.plans };
   }
-  async reset() { for (const t of ['meta', 'rating', 'season', 'arch', 'daily', 'rated', 'vq', 'vck']) this.sql.exec(`DELETE FROM ${t}`); this.mem = null; this.cpuMem = null; return true; }
+  async reset() { for (const t of ['meta', 'rating', 'season', 'arch', 'daily', 'rated', 'vq', 'vck']) this.sql.exec(`DELETE FROM ${t}`); this.wReset(); /* 18.1 (L3) */ this.mem = null; this.cpuMem = null; return true; }
   async testAge(cid, day, ms) { this.sql.exec('UPDATE daily SET at = at - ? WHERE day = ? AND cid = ?', ms, day, cid); return this.dailyCard(cid, day); }
   async testRows(b) {
     const t = Date.now(); let i = 0;
@@ -436,3 +446,4 @@ export class Board extends DurableObject {
     return { n: i };
   }
 }
+wInstall(Board); // 18.1 (L3): Warden Rating methods (server/src/warden.js), never overriding a Board method

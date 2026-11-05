@@ -9,11 +9,12 @@
 import * as CL from './cloud.js';
 import { pieceIcon } from './pieces.js';
 import * as RK from './ranks.js'; // 18.0 (NE): Crown Rating tier badges
+import * as WDU from './wardenui.js'; // 18.1 (L3): Co-op tab
 import { protoVer } from './statehash.js';
 import { dayKey } from './daily.js';
 
 const KEY = 'cc_lb_v1', CLOUD_KEY = 'cc_cloud_v1';
-const TABS = [['season', 'Season'], ['rating', 'Crown Rating'], ['daily', 'Daily']];
+const TABS = [['season', 'Season'], ['rating', 'Crown Rating'], ['daily', 'Daily'], ['coop', 'Co-op']]; // 18.1 (L3): Co-op = js/wardenui.js
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let H = { profile: () => ({}), toast: () => {}, sfx: null };
@@ -242,6 +243,7 @@ function paint(tab, d, state) {
 }
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 async function load(tab = S.tab) {
+  if (tab === 'coop') { S.tab = tab; ++S.gen; return WDU.load(); } // 18.1 (L3): Warden Rating + co-op season
   S.tab = tab; const k = viewKey(tab, S.last), gen = ++S.gen;
   const cached = st.views[k] ? { ...st.views[k].d, _at: st.views[k].at } : null;
   paint(tab, cached, 'loading');

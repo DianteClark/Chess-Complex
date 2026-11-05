@@ -6,6 +6,7 @@
 import { createMatch, applyAction, planBot, planHollow, unitById } from '../../js/engine.js';
 import { MODES } from '../../js/data.js';
 import { dailySetup, dailyResult } from '../../js/daily.js';
+import { runFacts } from '../../js/warden.js'; // 18.1 (L3)
 
 // ---------- Crown Rating ----------
 export const RATING = { start: 1200, provisional: 10, kProv: 48, kHigh: 32, kLow: 16, decayGames: 90, floor: 100 };
@@ -90,10 +91,16 @@ export function verifyStart(job) {
   const s = createMatch(players, seed, opts);
   return { s, i: 0, plan: null, steps: 0, plans: 0, done: false, ok: false, why: '' };
 }
+// 18.1 (L3): a solo Siege / Gauntlet run for the Warden Rating. job.start = the createMatch inputs the server rebuilt
+// from clean fields (server/src/warden.js cleanStart, seed from the server's ticket); the human is pid 'me'.
+export function coopVerifyStart(job) {
+  const s = createMatch(job.start.players, job.start.seed, job.start.opts);
+  return { s, i: 0, plan: null, steps: 0, plans: 0, done: false, ok: false, why: '', coop: 1 };
+}
 const fail = (V, why) => { V.done = true; V.ok = false; V.why = why; return V; };
 function finish(V, acts) {
   if (V.i < acts.length) return fail(V, 'extra actions after the end');
-  const r = dailyResult(V.s, 'me');
+  const r = V.coop ? runFacts(V.s, 'me') : dailyResult(V.s, 'me'); // 18.1 (L3): co-op runs -> Warden run facts
   if (!r || !r.final) return fail(V, 'run not finished');
   V.done = true; V.ok = true; V.result = r; return V;
 }

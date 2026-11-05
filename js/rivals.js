@@ -26,7 +26,9 @@ export function cleanRk(x) {
   if (!x || typeof x !== 'object') return null;
   const r = Math.round(Number(x.r));
   if (!Number.isFinite(r) || r < 0 || r > 5000) return null;
-  return x.p ? { r, p: 1 } : { r };
+  const o = x.p ? { r, p: 1 } : { r };
+  const w = Math.round(Number(x.w)); if (x.w != null && Number.isFinite(w) && w >= 0 && w <= 5000) { o.w = w; if (x.wp) o.wp = 1; } // 18.1 (L3): Warden Rating (co-op) rides along
+  return o;
 }
 
 // ---------- Weekly season rewards (board.js rollover -> Player DO inbox -> cloud save) ----------
